@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 fn main() -> notify::Result<()> {
-    let path = "./test";
+    let path = "./tests";
 
     let (tx, rx) = channel();
 
