@@ -42,3 +42,13 @@ jobs:
     - uses: actions/checkout@v6
     - uses: taiki-e/install-action@cargo-hack
     - run: cargo hack check --rust-version --workspace --all-targets --ignore-private
+
+  warnings:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable && rustup default stable
+      - run: rustup component add clippy
+      - run: cargo clippy --all-targets --all-features --keep-going
