@@ -10,6 +10,7 @@ regex = "0.1.41"
 
 [profile.dev]
 debug = "line-tables-only"
+codegen-backend = "cranelift"
 
 [profile.dev.package."*"]
 debug = false
