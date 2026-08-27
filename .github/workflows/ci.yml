@@ -35,3 +35,10 @@ jobs:
       - run: cargo update --verbose
       - run: cargo build --verbose
       - run: cargo test --verbose
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: taiki-e/install-action@cargo-hack
+    - run: cargo hack check --rust-version --workspace --all-targets --ignore-private
