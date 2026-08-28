@@ -1,3 +1,9 @@
-/target
+**/target
 Cargo.lock
 /models
+
+# frontend
+frontend/node_modules
+frontend/.nuxt
+frontend/.output
+frontend/.env

@@ -1,16 +1,30 @@
 use easy3d::{api, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
+use std::path::Path;
 use std::sync::mpsc::channel;
 use std::time::Duration;
+
+/// Chemin du dossier de modèles.
+///
+/// Priorité : variable d'env `MODELS_ROOT`, sinon les données à la racine
+/// du repo (les modèles vivent dans `../models` depuis le dossier `backend/`).
+fn resolve_models_root() -> String {
+    std::env::var("MODELS_ROOT").unwrap_or_else(|_| {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../models")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let path = "./models";
+    let path = resolve_models_root();
 
-    let state = api::AppState { root: path.to_string() };
+    let state = api::AppState { root: path.clone() };
 
     // API → tâche async sur le pool Tokio (multi-thread).
     let server = tokio::spawn(async move {
