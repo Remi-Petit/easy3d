@@ -4,22 +4,31 @@ use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Charge le fichier `.env` s'il existe (ex. PORT=6000).
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
     let path = "./models";
 
-    // Démarre l'API HTTP dans un thread séparé (le watcher reste bloquant ici).
     let state = api::AppState { root: path.to_string() };
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("runtime tokio");
-        if let Err(e) = rt.block_on(api::serve(state)) {
+
+    // API → tâche async sur le pool Tokio (multi-thread).
+    let server = tokio::spawn(async move {
+        if let Err(e) = api::serve(state).await {
             eprintln!("Erreur serveur : {e}");
         }
     });
 
-    watch_dir(path)?;
+    // Watcher (bloquant) → thread dédié, car notify bloque le thread OS.
+    let path_watcher = path.to_string();
+    std::thread::spawn(move || {
+        if let Err(e) = watch_dir(&path_watcher) {
+            eprintln!("Erreur watcher : {e}");
+        }
+    });
+
+    // Garde le runtime en vie tant que le serveur tourne.
+    server.await?;
 
     Ok(())
 }
