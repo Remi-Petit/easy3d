@@ -31,8 +31,5 @@ debug = false
 inherits = "dev"
 debug = true
 
-[build]
-rustflags = "-Zthreads=8"
-
 
 # cargo upgrade --incompatible
