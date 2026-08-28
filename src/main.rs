@@ -1,7 +1,4 @@
-mod api;
-mod scanner;
-mod watcher;
-
+use easy3d::{api, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::sync::mpsc::channel;
