@@ -1,50 +1,61 @@
-use notify::{Watcher, RecursiveMode, RecommendedWatcher, Event};
-use std::path::Path;
+use notify::event::ModifyKind;
+use notify::{EventKind, RecursiveMode};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::sync::mpsc::channel;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-fn main() -> notify::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = "./tests";
 
     let (tx, rx) = channel();
 
-    let mut watcher = RecommendedWatcher::new(
-        move |res: Result<Event, notify::Error>| {
-            if let Ok(event) = res {
-                let _ = tx.send(event);
-            }
-        },
-        notify::Config::default(),
-    )?;
+    // notify-debouncer-full regroupe la rafale d'événements et n'émet qu'un
+    // résultat stable après le timeout. 100ms = quasi instantané, sans couper
+    // une rafale en deux ni laisser passer les doublons.
+    let mut debouncer = new_debouncer(Duration::from_millis(50), None, move |result: DebounceEventResult| {
+        let _ = tx.send(result);
+    })?;
 
-    watcher.watch(Path::new(path), RecursiveMode::Recursive)?;
+    debouncer.watch(path, RecursiveMode::Recursive)?;
 
     println!("Je surveille {path}... (Ctrl+C pour arrêter)");
 
-    // Le state de dédoublonnage : ici, DANS la fonction
-    let mut last: Option<(notify::EventKind, std::path::PathBuf, Instant)> = None;
-
-    for event in rx {
-        if matches!(event.kind, notify::EventKind::Access(_)) {
-            continue;
-        }
-
-        let path_changed = event.paths.first().cloned().unwrap_or_default();
-
-        if let Some((kind, p, t)) = &last {
-            if *kind == event.kind
-                && *p == path_changed
-                && t.elapsed() < Duration::from_millis(100)
-            {
-                // doublon récent → on met juste à jour l'horodatage et on ignore
-                last = Some((event.kind.clone(), path_changed, Instant::now()));
-                continue;
+    for result in rx {
+        match result {
+            Ok(events) => {
+                for event in events {
+                    // On n'affiche que les vrais changements (ajout / modif / suppression).
+                    if let Some(msg) = describe_event(&event) {
+                        println!("{msg}");
+                    }
+                }
+            }
+            Err(errors) => {
+                for error in errors {
+                    eprintln!("Erreur : {error}");
+                }
             }
         }
-
-        last = Some((event.kind.clone(), path_changed, Instant::now()));
-        println!("Changement détecté : {:?}", event);
     }
 
     Ok(())
+}
+
+/// Traduit un événement en message lisible : ajout / modification / suppression.
+/// Retourne `None` pour les événements à ignorer (accès, autres).
+fn describe_event(event: &notify_debouncer_full::DebouncedEvent) -> Option<String> {
+    let path = event
+        .paths
+        .first()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+
+    match &event.kind {
+        EventKind::Create(_) => Some(format!("Ajout : {path}")),
+        EventKind::Remove(_) => Some(format!("Suppression : {path}")),
+        EventKind::Modify(ModifyKind::Name(_)) => Some(format!("Renommage : {path}")),
+        EventKind::Modify(_) => Some(format!("Modification : {path}")),
+        // On ignore les accès et les événements non pertinents.
+        _ => None,
+    }
 }
