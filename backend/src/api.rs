@@ -1,9 +1,13 @@
 use crate::scanner::{self, FileInfo, FolderInfo};
-use axum::{extract::State, routing::get, Json, Router};
-use serde::Serialize;
+use axum::extract::{Query, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// État partagé par les handlers HTTP.
 #[derive(Clone)]
@@ -15,6 +19,7 @@ pub struct AppState {
 pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/models", get(list_models))
+        .route("/file", get(get_file))
         .route("/health", get(health))
         .with_state(state);
 
@@ -51,6 +56,63 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
     })
 }
 
+/// Query param de `/file` : chemin relatif au dossier des modèles.
+#[derive(Deserialize)]
+struct FileQuery {
+    path: String,
+}
+
+/// Sert le contenu binaire d'un fichier du répertoire modèles.
+///
+/// `path` est relatif à `state.root` (ex : `DemaAuto/boitier.stl`).
+/// Sécurisé contre la traversée de dossier (`..`, absolu).
+async fn get_file(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Response {
+    let Some(relative) = safe_join(Path::new(&state.root), &q.path) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+
+    match tokio::fs::read(&relative).await {
+        Ok(bytes) => {
+            let ct = content_type(&relative);
+            ([(header::CONTENT_TYPE, ct)], bytes).into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Construit un chemin sous `root`, en rejetant toute traversée.
+fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
+    let rel = Path::new(rel);
+    if rel.is_absolute() {
+        return None;
+    }
+    // Rejette `.`, `..` et les préfixes d'emplacement (Windows).
+    if rel.components().any(|c| {
+        matches!(
+            c,
+            Component::CurDir | Component::ParentDir | Component::Prefix(_)
+        )
+    }) {
+        return None;
+    }
+    Some(root.join(rel))
+}
+
+/// Type MIME approximatif selon l'extension.
+fn content_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("stl") => "model/stl",
+        Some("obj") => "model/obj",
+        Some("gcode") | Some("gco") => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,6 +124,7 @@ mod tests {
     fn test_app(root: &str) -> Router {
         Router::new()
             .route("/models", get(list_models))
+            .route("/file", get(get_file))
             .route("/health", get(health))
             .with_state(AppState { root: root.to_string() })
     }
@@ -138,6 +201,53 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn file_sert_le_contenu() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/model.stl"), b"solid x").unwrap();
+
+        let app = test_app(dir.path().to_str().unwrap());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/file?path=sub%2Fmodel.stl")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let ct = res
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(ct, "model/stl");
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], b"solid x");
+    }
+
+    #[tokio::test]
+    async fn file_rejette_traversee() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "x").unwrap();
+
+        let app = test_app(dir.path().to_str().unwrap());
+        // `..` (encodé) est rejeté → 400, on ne lit pas hors de la racine.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/file?path=..%2Fsecret.txt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 }
 

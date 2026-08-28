@@ -39,7 +39,10 @@ cd backend
 cargo run
 ```
 
-- Sert `GET /models` et `GET /health` sur `http://127.0.0.1:8090` (ou `PORT`).
+- Sert `GET /models` (liste structurée avec `path` et `rel`), `GET /file?path=<rel>`
+  (contenu binaire d'un modèle) et `GET /health` sur `http://127.0.0.1:8090` (ou `PORT`).
+- Le champ `rel` est le chemin relatif à la racine, utilisé par le frontend pour `/file`.
+- Sécurité : `/file` rejette la traversée de dossier (`..`, chemins absolus).
 - Surveille `./models` (via `MODELS_ROOT`, relatif au repo par défaut).
 - `.env` : `PORT=60005`.
 
@@ -52,8 +55,12 @@ bun run dev
 ```
 
 - UI sur `http://localhost:3000`.
-- Les routes `/api/models` et `/api/health` proxyent vers le backend.
-- URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut `http://127.0.0.1:8090`).
+- Les routes `/api/models`, `/api/file` et `/api/health` proxyent vers le backend.
+- **Aperçu 3D** : chaque fichier STL affiche une vignette 3D (three.js), cliquable
+  pour ouvrir une vue plein écran (triangles + rotation/zoom). Les GCODE affichent
+  un badge (pas de maillage).
+- URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut dérivé de
+  `NUXT_HPCCAT_API_PORT`, sinon `http://127.0.0.1:8090`).
 
 ## Configuration
 
@@ -62,6 +69,7 @@ bun run dev
 | `PORT`              | backend            | `8090`                    |
 | `MODELS_ROOT`       | backend            | `../models` (relatif repo)|
 | `NUXT_HPCCAT_API_BASE` | frontend        | `http://127.0.0.1:8090`   |
+| `NUXT_HPCCAT_API_PORT` | frontend        | `8090`                    |
 
 ## Tests
 

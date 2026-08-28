@@ -7,6 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Serialize)]
 pub struct FileInfo {
     pub path: String,
+    /// Chemin relatif à la racine des modèles (séparateurs `/`).
+    pub rel: String,
     pub created: Option<u64>,
     pub modified: Option<u64>,
 }
@@ -36,7 +38,7 @@ impl ModelsScan {
 /// Liste récursive de **tous** les fichiers (racine + dossiers, à plat).
 pub fn scan_files(root: &Path) -> Vec<FileInfo> {
     let mut out = Vec::new();
-    scan_dir_recursive(root, &mut out);
+    scan_dir_recursive(root, root, &mut out);
     out
 }
 
@@ -56,7 +58,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
 
         if path.is_dir() {
             let mut files = Vec::new();
-            scan_dir_recursive(&path, &mut files);
+            scan_dir_recursive(&path, root, &mut files);
             scan.folders.insert(
                 path.file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -71,7 +73,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                 },
             );
         } else if path.is_file()
-            && let Some(info) = file_info(&path)
+            && let Some(info) = file_info(&path, root)
         {
             scan.files.push(info);
         }
@@ -80,7 +82,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
     scan
 }
 
-fn scan_dir_recursive(dir: &Path, out: &mut Vec<FileInfo>) {
+fn scan_dir_recursive(dir: &Path, root: &Path, out: &mut Vec<FileInfo>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -89,20 +91,31 @@ fn scan_dir_recursive(dir: &Path, out: &mut Vec<FileInfo>) {
         let path = entry.path();
 
         if path.is_dir() {
-            scan_dir_recursive(&path, out);
+            scan_dir_recursive(&path, root, out);
         } else if path.is_file()
-            && let Some(info) = file_info(&path)
+            && let Some(info) = file_info(&path, root)
         {
             out.push(info);
         }
     }
 }
 
+/// Chemin relatif à `root`, normalisé en séparateurs `/`.
+fn rel_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Lit les métadonnées d'un fichier en `FileInfo`.
-fn file_info(path: &Path) -> Option<FileInfo> {
+fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
     let meta = std::fs::metadata(path).ok()?;
     Some(FileInfo {
         path: path.display().to_string(),
+        rel: rel_path(root, path),
         created: meta.created().ok().and_then(to_unix_secs),
         modified: meta.modified().ok().and_then(to_unix_secs),
     })

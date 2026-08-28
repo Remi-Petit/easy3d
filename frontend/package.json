@@ -12,6 +12,8 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "nuxt": "^4.0.0"
+    "@types/three": "^0.185.4",
+    "nuxt": "^4.0.0",
+    "three": "^0.185.1"
   }
 }
