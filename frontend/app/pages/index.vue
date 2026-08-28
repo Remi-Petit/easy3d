@@ -66,9 +66,9 @@ const updatedLabel = computed(() => (lastUpdated.value ? `màj ${timeAgo(lastUpd
 
       <p class="section-label">Racine ({{ rootFiles.length }})</p>
       <article class="card" v-if="rootFiles.length">
-        <ul class="file-list">
+        <div class="file-grid">
           <FileItem v-for="f in rootFiles" :key="f.path" :file="f" />
-        </ul>
+        </div>
       </article>
       <div v-else class="empty">Aucun fichier à la racine.</div>
     </template>

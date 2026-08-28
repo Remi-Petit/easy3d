@@ -1,6 +1,8 @@
 // Types alignés sur le JSON du backend Rust (scanner.rs / api.rs).
 export interface FileInfo {
   path: string
+  /** Chemin relatif à la racine (séparateurs `/`), utilisable par /api/file. */
+  rel: string
   created: number | null
   modified: number | null
 }
