@@ -7,6 +7,11 @@ on:
 env: 
   CARGO_TERM_COLOR: always
 
+# Le crate Rust vit dans backend/ depuis la restructuration monorepo.
+defaults:
+  run:
+    working-directory: backend
+
 jobs:
   build_and_test:
     name: Rust project - latest
