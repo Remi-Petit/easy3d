@@ -1,6 +1,7 @@
-use crate::scanner::{self, FileInfo};
+use crate::scanner::{self, FileInfo, FolderInfo};
 use axum::{extract::State, routing::get, Json, Router};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -13,7 +14,7 @@ pub struct AppState {
 /// Démarre le serveur HTTP et bloque jusqu'à son arrêt.
 pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
-        .route("/files", get(list_files))
+        .route("/models", get(list_models))
         .route("/health", get(health))
         .with_state(state);
 
@@ -21,7 +22,7 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("127.0.0.1:{port}").parse::<SocketAddr>()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    println!("API HTTP : http://{addr}/files");
+    println!("API HTTP : http://{addr}/models");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -31,21 +32,23 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// Réponse de `/files` : nombre total + liste des fichiers.
-///
-/// Le total compte tous les fichiers, y compris ceux rangés dans des
-/// sous-dossiers (scan récursif).
+/// Réponse de `/models` : fichiers racine, sous-dossiers groupés, total.
 #[derive(Serialize)]
-pub struct FilesResponse {
-    pub total: usize,
+pub struct ModelsResponse {
+    pub folders: BTreeMap<String, FolderInfo>,
     pub files: Vec<FileInfo>,
+    pub count: usize,
 }
 
-/// Renvoie la liste JSON des fichiers du dossier surveillé, avec le total.
-async fn list_files(State(state): State<AppState>) -> Json<FilesResponse> {
-    let files = scanner::scan_files(Path::new(&state.root));
-    let total = files.len();
-    Json(FilesResponse { total, files })
+/// Renvoie le contenu structuré : fichiers racine + dossiers + total.
+async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
+    let scan = scanner::scan_models(Path::new(&state.root));
+    let count = scan.total();
+    Json(ModelsResponse {
+        folders: scan.folders,
+        files: scan.files,
+        count,
+    })
 }
 
 #[cfg(test)]
@@ -58,7 +61,7 @@ mod tests {
 
     fn test_app(root: &str) -> Router {
         Router::new()
-            .route("/files", get(list_files))
+            .route("/models", get(list_models))
             .route("/health", get(health))
             .with_state(AppState { root: root.to_string() })
     }
@@ -82,18 +85,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn files_renvoie_la_liste_json() {
+    async fn models_renvoie_racine_et_dossiers() {
         let dir = tempfile::tempdir().unwrap();
+        // Fichier à la racine.
         std::fs::write(dir.path().join("a.txt"), "x").unwrap();
-        // Un fichier rangé dans un sous-dossier doit être compté aussi.
+        // Fichiers rangés dans un sous-dossier.
         std::fs::create_dir_all(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
+        std::fs::write(dir.path().join("sub/c.txt"), "z").unwrap();
 
         let app = test_app(dir.path().to_str().unwrap());
         let res = app
             .oneshot(
                 Request::builder()
-                    .uri("/files")
+                    .uri("/models")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -104,13 +109,19 @@ mod tests {
         let body = res.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        // Le total inclut `a.txt` + `sub/b.txt` (sous-dossier pris en compte).
-        assert_eq!(v["total"], 2);
+        // Total global = 1 racine + 2 dans le dossier.
+        assert_eq!(v["count"], 3);
 
-        let files = v["files"].as_array().unwrap();
-        assert_eq!(files.len(), 2);
-        assert!(files.iter().any(|f| f["path"].as_str().unwrap().ends_with("a.txt")));
-        assert!(files.iter().any(|f| f["path"].as_str().unwrap().ends_with("b.txt")));
+        // Le fichier racine est bien séparé des dossiers.
+        let root_files = v["files"].as_array().unwrap();
+        assert_eq!(root_files.len(), 1);
+        assert!(root_files[0]["path"].as_str().unwrap().ends_with("a.txt"));
+
+        // Le dossier `sub` regroupe ses 2 fichiers + un compteur.
+        let folder = &v["folders"]["sub"];
+        assert_eq!(folder["count"], 2);
+        let folder_files = folder["files"].as_array().unwrap();
+        assert_eq!(folder_files.len(), 2);
     }
 
     #[tokio::test]
