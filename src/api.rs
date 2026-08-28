@@ -1,5 +1,6 @@
 use crate::scanner::{self, FileInfo};
 use axum::{extract::State, routing::get, Json, Router};
+use serde::Serialize;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -30,9 +31,21 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// Renvoie la liste JSON des fichiers du dossier surveillé.
-async fn list_files(State(state): State<AppState>) -> Json<Vec<FileInfo>> {
-    Json(scanner::scan_files(Path::new(&state.root)))
+/// Réponse de `/files` : nombre total + liste des fichiers.
+///
+/// Le total compte tous les fichiers, y compris ceux rangés dans des
+/// sous-dossiers (scan récursif).
+#[derive(Serialize)]
+pub struct FilesResponse {
+    pub total: usize,
+    pub files: Vec<FileInfo>,
+}
+
+/// Renvoie la liste JSON des fichiers du dossier surveillé, avec le total.
+async fn list_files(State(state): State<AppState>) -> Json<FilesResponse> {
+    let files = scanner::scan_files(Path::new(&state.root));
+    let total = files.len();
+    Json(FilesResponse { total, files })
 }
 
 #[cfg(test)]
@@ -72,6 +85,9 @@ mod tests {
     async fn files_renvoie_la_liste_json() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        // Un fichier rangé dans un sous-dossier doit être compté aussi.
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
 
         let app = test_app(dir.path().to_str().unwrap());
         let res = app
@@ -86,9 +102,15 @@ mod tests {
 
         assert_eq!(res.status(), StatusCode::OK);
         let body = res.into_body().collect().await.unwrap().to_bytes();
-        let v: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
-        assert_eq!(v.len(), 1);
-        assert!(v[0]["path"].as_str().unwrap().ends_with("a.txt"));
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Le total inclut `a.txt` + `sub/b.txt` (sous-dossier pris en compte).
+        assert_eq!(v["total"], 2);
+
+        let files = v["files"].as_array().unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|f| f["path"].as_str().unwrap().ends_with("a.txt")));
+        assert!(files.iter().any(|f| f["path"].as_str().unwrap().ends_with("b.txt")));
     }
 
     #[tokio::test]
