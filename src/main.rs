@@ -5,7 +5,7 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = "./tests";
+    let path = "./models";
 
     let (tx, rx) = channel();
 
