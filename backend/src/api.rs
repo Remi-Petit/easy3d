@@ -321,5 +321,46 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
+
+    /// Intégration WebSocket : connexion réelle → snapshot initial, puis
+    /// réception d'une MAJ diffusée sur le canal broadcast.
+    #[tokio::test]
+    async fn ws_pousse_snapshot_puis_diffusion() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState {
+            root: dir.path().to_string_lossy().into_owned(),
+            ws: ws_tx.clone(),
+        };
+        let app = Router::new().route("/ws", get(ws_models)).with_state(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
+
+        // Snapshot initial envoyé à la connexion : 1 fichier racine + 1 dossier.
+        let snap = socket.next().await.unwrap().unwrap();
+        let v: serde_json::Value = serde_json::from_str(snap.to_text().unwrap()).unwrap();
+        assert_eq!(v["count"], 2);
+
+        // Diffusion d'une mise à jour sur le canal broadcast.
+        let update = serde_json::json!({ "count": 3, "folders": {}, "files": [] }).to_string();
+        ws_tx.send(update).unwrap();
+
+        // Le client reçoit bien la MAJ diffusée.
+        let msg = socket.next().await.unwrap().unwrap();
+        let v2: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        assert_eq!(v2["count"], 3);
+    }
 }
 
