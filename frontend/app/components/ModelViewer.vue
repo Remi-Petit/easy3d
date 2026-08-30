@@ -17,7 +17,7 @@ const wrapRef = ref<HTMLElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
-const stats = ref({ triangles: 0 })
+const stats = ref<{ triangles: number; dims?: number[] }>({ triangles: 0 })
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -26,6 +26,11 @@ let controls: OrbitControls | null = null
 let raf = 0
 let model: THREE.Object3D | null = null
 let plateGroup: THREE.Group | null = null
+/**
+ * Plateau d'impression en mm (lit standard 300×300 mm).
+ * Le modèle STL est affiché à son échelle réelle (1 unité = 1 mm).
+ */
+const PLATE = 300
 
 function buildLighting() {
   const amb = new THREE.AmbientLight(0xffffff, 0.6)
@@ -35,22 +40,30 @@ function buildLighting() {
   return [amb, hemi, key]
 }
 
+/**
+ * Met le modèle à plat sur le plateau (centre + pose à y=0), sans le déformer.
+ */
+function fitToPlate(mesh: THREE.Object3D) {
+  mesh.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(mesh)
+  mesh.position.x -= box.getCenter(new THREE.Vector3()).x
+  mesh.position.z -= box.getCenter(new THREE.Vector3()).z
+  mesh.position.y -= box.min.y
+}
+
+/** Cadre la caméra sur le plateau (et la hauteur du modèle). */
 function frame(mesh: THREE.Object3D) {
   if (!camera) return
   const box = new THREE.Box3().setFromObject(mesh)
   const size = box.getSize(new THREE.Vector3())
-  const center = box.getCenter(new THREE.Vector3())
-  // Recentre l'objet à l'origine puis le pose sur la grille.
-  mesh.position.sub(center)
-  mesh.position.y += size.y / 2
-  const maxDim = Math.max(size.x, size.y, size.z) || 1
+  const viewBase = Math.max(size.y, PLATE) || PLATE
   const fovRad = (camera.fov * Math.PI) / 180
-  const dist = (maxDim / (2 * Math.tan(fovRad / 2))) * 1.55
+  const dist = (viewBase / (2 * Math.tan(fovRad / 2))) * 1.45
   camera.position.set(dist * 0.72, dist * 0.55, dist * 0.72)
   camera.near = dist / 100
   camera.far = dist * 20
   camera.updateProjectionMatrix()
-  const target = new THREE.Vector3(0, size.y * 0.42, 0)
+  const target = new THREE.Vector3(0, size.y * 0.5, 0)
   camera.lookAt(target)
   if (controls) {
     controls.target.copy(target)
@@ -59,7 +72,7 @@ function frame(mesh: THREE.Object3D) {
 }
 
 /** Sprite-billboard : affiche un texte (FRONT, X, Y) qui suit la caméra. */
-function labelSprite(text: string, color: string): THREE.Sprite {
+function labelSprite(text: string, color: string, width = PLATE * 0.05): THREE.Sprite {
   const canvas = document.createElement('canvas')
   canvas.width = 256
   canvas.height = 128
@@ -74,7 +87,7 @@ function labelSprite(text: string, color: string): THREE.Sprite {
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   )
-  sprite.scale.set(1.4, 0.7, 1)
+  sprite.scale.set(width, width / 2, 1)
   return sprite
 }
 
@@ -83,7 +96,7 @@ function labelSprite(text: string, color: string): THREE.Sprite {
  * flèche « FRONT » (sens d'impression) et axes X / Y.
  * Dimensionné d'après l'empreinte du modèle pour qu'il reste dessus.
  */
-function buildPlate(mesh: THREE.Object3D) {
+function buildPlate() {
   if (!scene) return
   if (plateGroup) {
     scene.remove(plateGroup)
@@ -97,12 +110,9 @@ function buildPlate(mesh: THREE.Object3D) {
   }
 
   const group = new THREE.Group()
-  const box = new THREE.Box3().setFromObject(mesh)
-  const size = box.getSize(new THREE.Vector3())
-  const pad = 1.35
-  const w = Math.max(size.x * pad, 0.6)
-  const d = Math.max(size.z * pad, 0.6)
-  const thickness = Math.max(0.05, size.y * 0.02)
+  const w = PLATE
+  const d = PLATE
+  const thickness = PLATE * 0.02
 
   // Plateau (boîte semi-transparente, face supérieure à y=0).
   const plateGeo = new THREE.BoxGeometry(w, thickness, d)
@@ -118,7 +128,7 @@ function buildPlate(mesh: THREE.Object3D) {
   group.add(plate)
 
   // Grille alignée au plateau.
-  const grid = new THREE.GridHelper(Math.max(w, d), 12, 0x475569, 0x334155)
+  const grid = new THREE.GridHelper(w, w / 10, 0x475569, 0x334155)
   grid.position.y = 0.001
   group.add(grid)
 
@@ -131,7 +141,7 @@ function buildPlate(mesh: THREE.Object3D) {
   group.add(edges)
 
   // Chevilles aux 4 coins (comme un vrai plateau d'imprimante).
-  const pegGeo = new THREE.CylinderGeometry(0.04, 0.04, thickness * 3, 16)
+  const pegGeo = new THREE.CylinderGeometry(PLATE * 0.004, PLATE * 0.004, thickness * 3, 16)
   const pegMat = new THREE.MeshStandardMaterial({
     color: 0x475569,
     metalness: 0.4,
@@ -151,29 +161,29 @@ function buildPlate(mesh: THREE.Object3D) {
 
   // Flèche + libellé « FRONT » (sens d'impression) sur le bord avant (-Z).
   const arrowMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-  const frontArrow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.42, 4), arrowMat)
+  const frontArrow = new THREE.Mesh(new THREE.ConeGeometry(PLATE * 0.006, PLATE * 0.02, 4), arrowMat)
   // Pointe vers l'avant (-Z) : rotation autour de l'axe X de -90°.
   frontArrow.rotation.x = -Math.PI / 2
-  frontArrow.position.set(0, 0.16, -d / 2 - 0.18)
+  frontArrow.position.set(0, thickness, -d / 2 - PLATE * 0.01)
   group.add(frontArrow)
-  const frontLabel = labelSprite('FRONT', '#22d3ee')
-  frontLabel.position.set(0, 0.55, -d / 2 - 0.5)
+  const frontLabel = labelSprite('FRONT', '#22d3ee', PLATE * 0.06)
+  frontLabel.position.set(0, thickness + PLATE * 0.05, -d / 2 - PLATE * 0.02)
   group.add(frontLabel)
 
   // Axes X (rouge) / Y (vert) au coin avant-gauche.
-  const axLen = Math.max(w, d) * 0.28
-  const origin = new THREE.Vector3(-w / 2, 0.03, d / 2)
+  const axLen = w * 0.25
+  const origin = new THREE.Vector3(-w / 2, PLATE * 0.002, d / 2)
   group.add(
     new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, axLen, 0xef4444, axLen * 0.2, axLen * 0.1),
   )
   group.add(
     new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, axLen, 0x22c55e, axLen * 0.2, axLen * 0.1),
   )
-  const xLabel = labelSprite('X', '#ef4444')
-  xLabel.position.set(origin.x + axLen + 0.15, 0.35, origin.z)
+  const xLabel = labelSprite('X', '#ef4444', PLATE * 0.04)
+  xLabel.position.set(origin.x + axLen + PLATE * 0.01, PLATE * 0.05, origin.z)
   group.add(xLabel)
-  const yLabel = labelSprite('Y', '#22c55e')
-  yLabel.position.set(origin.x, 0.35, origin.z + axLen + 0.15)
+  const yLabel = labelSprite('Y', '#22c55e', PLATE * 0.04)
+  yLabel.position.set(origin.x, PLATE * 0.05, origin.z + axLen + PLATE * 0.01)
   group.add(yLabel)
 
   scene.add(group)
@@ -223,8 +233,16 @@ async function loadModel() {
     mesh.updateMatrixWorld(true)
     scene.add(mesh)
     model = mesh
+    fitToPlate(mesh)
+
+    // Cotes réelles (mm) après conversion Z-up → Y-up.
+    const bb = new THREE.Box3().setFromObject(mesh)
+    const s = bb.getSize(new THREE.Vector3())
+    const r = (v: number) => Math.round(v * 100) / 100
+    stats.value = { triangles: Math.floor(triCount), dims: [r(s.x), r(s.y), r(s.z)] }
+
     frame(mesh)
-    buildPlate(mesh)
+    buildPlate()
     loading.value = false
     animate()
   } catch (e: any) {
@@ -308,6 +326,7 @@ onBeforeUnmount(() => {
     <div v-if="loadError" class="model-viewer__overlay model-viewer__overlay--err">⚠ {{ loadError }}</div>
     <div v-if="showInfo && !loading && !loadError" class="model-viewer__info">
       {{ stats.triangles.toLocaleString('fr-FR') }} triangles
+      <template v-if="stats.dims">&nbsp;· {{ stats.dims.join(' × ') }}</template>
     </div>
   </div>
 </template>
