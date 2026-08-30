@@ -58,7 +58,7 @@ const liveLabel = computed(() =>
 
     <template v-if="data">
       <p class="section-label">Dossiers</p>
-      <div v-if="folders.length" class="grid">
+      <div v-if="folders.length" class="file-grid">
         <FolderCard v-for="f in folders" :key="f.name" :folder="f" />
       </div>
       <div v-else class="empty">Aucun dossier trouvé.</div>
