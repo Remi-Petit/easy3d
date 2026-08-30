@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FolderInfo } from '~/composables/useModels'
 
-const { data, error, loading, lastUpdated, live, refresh } = useModels()
+const { data, error, live } = useModels()
 
 const query = ref('')
 
@@ -30,7 +30,6 @@ const connected = computed(() => live.value || !error.value)
 const liveLabel = computed(() =>
   live.value ? 'temps réel' : error.value ? 'hors ligne' : 'repli polling',
 )
-const updatedLabel = computed(() => (lastUpdated.value ? `màj ${timeAgo(lastUpdated.value)}` : ''))
 </script>
 
 <template>
@@ -47,10 +46,6 @@ const updatedLabel = computed(() => (lastUpdated.value ? `màj ${timeAgo(lastUpd
       <div class="stats">
         <span class="pill"><span class="dot" :class="connected ? 'live' : 'err'" /> {{ liveLabel }}</span>
         <span class="pill"><b>{{ totalCount }}</b> fichiers</span>
-        <span v-if="updatedLabel" class="pill">{{ updatedLabel }}</span>
-        <button class="pill" :disabled="loading" @click="refresh" style="cursor:pointer;border:1px solid var(--border)">
-          ⟳ {{ loading ? '…' : 'rafraîchir' }}
-        </button>
       </div>
     </header>
 

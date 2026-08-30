@@ -11,8 +11,9 @@ defineProps<{ folder: FolderInfo }>()
       <span class="badge">{{ folder.count }}</span>
     </div>
     <div class="file-grid">
-      <FileItem v-for="f in folder.files" :key="f.path" :file="f" />
+      <FileItem v-if="folder.files[0]" :key="folder.files[0].path" :file="folder.files[0]" />
       <p v-if="!folder.count" class="empty">dossier vide</p>
     </div>
+    <p v-if="folder.count > 1" class="card-more">+ {{ folder.count - 1 }} autres fichiers</p>
   </article>
 </template>

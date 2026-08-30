@@ -274,6 +274,14 @@ a {
   gap: 10px;
 }
 
+/* Indication "dossier : N fichiers au total" sous la vignette seule. */
+.card-more {
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 6px 0 2px;
+}
+
 .model-card {
   display: flex;
   flex-direction: column;
