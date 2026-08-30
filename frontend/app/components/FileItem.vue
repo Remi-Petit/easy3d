@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { FileInfo } from '~/composables/useModels'
+import { useNow } from '~/composables/useNow'
 
 const props = defineProps<{ file: FileInfo }>()
 
+const now = useNow()
 const name = computed(() => basename(props.file.path))
 const type = computed(() => ext(props.file.path) || '?')
-const when = computed(() => timeAgo(toDate(props.file.modified)))
+const when = computed(() => timeAgo(toDate(props.file.modified), now.value))
 const isModel = computed(() => ['stl', 'obj'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 /** Chemin relatif encodé -> URL `/fichier/[rel]`. */

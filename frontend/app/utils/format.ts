@@ -16,9 +16,9 @@ export function toDate(ts: number | null): Date | null {
   return ts ? new Date(ts * 1000) : null
 }
 
-export function timeAgo(date: Date | null): string {
+export function timeAgo(date: Date | null, now: Date = new Date()): string {
   if (!date) return '—'
-  const diff = Date.now() - date.getTime()
+  const diff = now.getTime() - date.getTime()
   const s = Math.floor(diff / 1000)
   if (s < 5) return 'à l’instant'
   if (s < 60) return `il y a ${s}s`

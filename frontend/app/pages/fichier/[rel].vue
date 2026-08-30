@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FileInfo } from '~/composables/useModels'
+import { useNow } from '~/composables/useNow'
 
 const route = useRoute()
 const { data, error, live } = useModels()
@@ -19,10 +20,11 @@ const file = computed<FileInfo | null>(() => {
   )
 })
 
+const now = useNow()
 const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
 const isModel = computed(() => ['stl', 'obj'].includes(type.value))
-const when = computed(() => timeAgo(toDate(file.value?.modified ?? null)))
+const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
 </script>
 
 <template>
