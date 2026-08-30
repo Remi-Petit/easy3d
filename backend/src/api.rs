@@ -1,18 +1,23 @@
 use crate::scanner::{self, FileInfo, FolderInfo};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
+use tokio::sync::broadcast;
 
-/// État partagé par les handlers HTTP.
+/// État partagé par les handlers HTTP et WebSocket.
 #[derive(Clone)]
 pub struct AppState {
     pub root: String,
+    /// Canal broadcast : diffuse la liste des modèles (JSON) à tous les WS.
+    pub ws: broadcast::Sender<String>,
 }
 
 /// Démarre le serveur HTTP et bloque jusqu'à son arrêt.
@@ -21,6 +26,7 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
         .route("/models", get(list_models))
         .route("/file", get(get_file))
         .route("/health", get(health))
+        .route("/ws", get(ws_models))
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8090".to_string());
@@ -38,6 +44,8 @@ async fn health() -> &'static str {
 }
 
 /// Réponse de `/models` : fichiers racine, sous-dossiers groupés, total.
+///
+/// C'est aussi le payload diffusé sur le WebSocket `/ws`.
 #[derive(Serialize)]
 pub struct ModelsResponse {
     pub folders: BTreeMap<String, FolderInfo>,
@@ -45,15 +53,74 @@ pub struct ModelsResponse {
     pub count: usize,
 }
 
+impl ModelsResponse {
+    /// Construit une réponse à partir d'un scan.
+    pub fn from_scan(scan: scanner::ModelsScan) -> Self {
+        let count = scan.total();
+        ModelsResponse {
+            folders: scan.folders,
+            files: scan.files,
+            count,
+        }
+    }
+}
+
 /// Renvoie le contenu structuré : fichiers racine + dossiers + total.
 async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
-    let scan = scanner::scan_models(Path::new(&state.root));
-    let count = scan.total();
-    Json(ModelsResponse {
-        folders: scan.folders,
-        files: scan.files,
-        count,
-    })
+    Json(ModelsResponse::from_scan(scanner::scan_models(Path::new(
+        &state.root,
+    ))))
+}
+
+/// WebSocket : connexion persistante qui pousse la liste des modèles à chaque
+/// changement détecté par le watcher (via le canal broadcast).
+async fn ws_models(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| handle_ws(socket, state))
+}
+
+/// Snapshot complet de la liste des modèles, sérialisé en JSON.
+fn snapshot(root: &Path) -> String {
+    serde_json::to_string(&ModelsResponse::from_scan(scanner::scan_models(root)))
+        .unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Boucle d'une connexion WS : snapshot initial, puis diffusion en continu.
+///
+/// Si le client est en retard (`Lagged`), on renvoie un snapshot complet plutôt
+/// que des MAJ partielles perdues. Fermeture / erreur → on sort de la boucle.
+async fn handle_ws(socket: WebSocket, state: AppState) {
+    let root = PathBuf::from(&state.root);
+    let (mut sink, mut stream) = socket.split();
+
+    if sink.send(Message::text(snapshot(&root))).await.is_err() {
+        return;
+    }
+
+    let mut rx = state.ws.subscribe();
+
+    loop {
+        tokio::select! {
+            // Coté client : on ne traite que la fermeture ; pings/pongs ignorés.
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            // MAJ diffusée par le watcher sur le canal broadcast.
+            res = rx.recv() => {
+                let json = match res {
+                    Ok(json) => json,
+                    Err(broadcast::error::RecvError::Lagged(_)) => snapshot(&root),
+                    Err(_) => break,
+                };
+                if sink.send(Message::text(json)).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// Query param de `/file` : chemin relatif au dossier des modèles.
@@ -122,11 +189,16 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_app(root: &str) -> Router {
+        let (ws, _) = broadcast::channel::<String>(16);
         Router::new()
             .route("/models", get(list_models))
             .route("/file", get(get_file))
             .route("/health", get(health))
-            .with_state(AppState { root: root.to_string() })
+            .route("/ws", get(ws_models))
+            .with_state(AppState {
+                root: root.to_string(),
+                ws,
+            })
     }
 
     #[tokio::test]

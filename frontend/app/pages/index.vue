@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FolderInfo } from '~/composables/useModels'
 
-const { data, error, loading, lastUpdated, refresh } = useModels()
+const { data, error, loading, lastUpdated, live, refresh } = useModels()
 
 const query = ref('')
 
@@ -25,7 +25,11 @@ const rootFiles = computed(() => {
 })
 
 const totalCount = computed(() => data.value?.count ?? 0)
-const connected = computed(() => !error.value)
+// "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
+const connected = computed(() => live.value || !error.value)
+const liveLabel = computed(() =>
+  live.value ? 'temps réel' : error.value ? 'hors ligne' : 'repli polling',
+)
 const updatedLabel = computed(() => (lastUpdated.value ? `màj ${timeAgo(lastUpdated.value)}` : ''))
 </script>
 
@@ -41,7 +45,7 @@ const updatedLabel = computed(() => (lastUpdated.value ? `màj ${timeAgo(lastUpd
       </div>
 
       <div class="stats">
-        <span class="pill"><span class="dot" :class="connected ? 'live' : 'err'" /> {{ connected ? 'connecté' : 'hors ligne' }}</span>
+        <span class="pill"><span class="dot" :class="connected ? 'live' : 'err'" /> {{ liveLabel }}</span>
         <span class="pill"><b>{{ totalCount }}</b> fichiers</span>
         <span v-if="updatedLabel" class="pill">{{ updatedLabel }}</span>
         <button class="pill" :disabled="loading" @click="refresh" style="cursor:pointer;border:1px solid var(--border)">
