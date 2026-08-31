@@ -25,6 +25,8 @@ const rootFiles = computed(() => {
 })
 
 const totalCount = computed(() => data.value?.count ?? 0)
+// Mode d'affichage issu de la config backend ("image" | "3d").
+const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
 // "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
 const connected = computed(() => live.value || !error.value)
 const liveLabel = computed(() =>
@@ -66,7 +68,7 @@ const liveLabel = computed(() =>
       <p class="section-label">Racine ({{ rootFiles.length }})</p>
       <article class="card" v-if="rootFiles.length">
         <div class="file-grid">
-          <FileItem v-for="f in rootFiles" :key="f.path" :file="f" />
+          <FileItem v-for="f in rootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
         </div>
       </article>
       <div v-else class="empty">Aucun fichier à la racine.</div>

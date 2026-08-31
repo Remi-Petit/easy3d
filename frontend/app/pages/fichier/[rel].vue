@@ -25,6 +25,10 @@ const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
 const isModel = computed(() => ['stl', 'obj'].includes(type.value))
 const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
+// Mode d'affichage issu de la config backend ("image" | "3d").
+const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
+/** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
+const showDetailImage = computed(() => displayMode.value === 'image' && !!file.value?.image)
 </script>
 
 <template>
@@ -47,7 +51,13 @@ const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.va
     <div v-if="error" class="error">{{ error }}</div>
 
     <div class="viewer-card">
-      <ModelViewer v-if="isModel" :rel="rel" show-info :auto-rotate="false" />
+      <img
+        v-if="showDetailImage"
+        :src="fileUrl(file.image!)"
+        :alt="name"
+        class="model-card__img"
+      />
+      <ModelViewer v-else-if="isModel" :rel="rel" show-info :auto-rotate="false" />
       <div v-else class="file-detail-placeholder">
         <span class="ph-badge">{{ type.toUpperCase() }}</span>
         <p>Aperçu 3D non disponible pour ce type de fichier.</p>

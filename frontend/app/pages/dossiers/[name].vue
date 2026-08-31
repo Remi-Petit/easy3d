@@ -11,6 +11,8 @@ const folder = computed<FolderInfo | null>(() => {
   return data.value.folders[name.value] ?? null
 })
 const total = computed(() => folder.value?.count ?? 0)
+// Mode d'affichage issu de la config backend ("image" | "3d").
+const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
 </script>
 
 <template>
@@ -33,7 +35,7 @@ const total = computed(() => folder.value?.count ?? 0)
     <div v-if="error" class="error">{{ error }}</div>
 
     <div v-if="folder" class="file-grid">
-      <FileItem v-for="f in folder.files" :key="f.path" :file="f" />
+      <FileItem v-for="f in folder.files" :key="f.path" :file="f" :display-mode="displayMode" />
       <p v-if="!folder.files.length" class="empty">Dossier vide</p>
     </div>
     <div v-else class="empty">Chargement…</div>
