@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import type { FileInfo } from '~/composables/useModels'
+import type { DisplayMode, FileInfo } from '~/composables/useModels'
 import { useNow } from '~/composables/useNow'
 
-const props = defineProps<{ file: FileInfo }>()
+const props = withDefaults(
+  defineProps<{ file: FileInfo; displayMode?: DisplayMode }>(),
+  { displayMode: '3d' },
+)
 
 const now = useNow()
 const name = computed(() => basename(props.file.path))
@@ -12,13 +15,23 @@ const isModel = computed(() => ['stl', 'obj'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 /** Chemin relatif encodé -> URL `/fichier/[rel]`. */
 const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)
+
+/** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
+const showImage = computed(() => props.displayMode === 'image' && !!props.file.image)
 </script>
 
 <template>
   <article class="model-card" :class="{ 'model-card--file': !isModel && !isGcode }">
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
-        <ModelThumbnail v-if="isModel" :rel="file.rel" />
+        <img
+          v-if="showImage"
+          :src="fileUrl(file.image!)"
+          :alt="name"
+          class="model-card__img"
+          loading="lazy"
+        />
+        <ModelThumbnail v-else-if="isModel" :rel="file.rel" />
         <div v-else :class="['model-card__ph', isGcode ? 'ph--gcode' : 'ph--other']">
           <span class="ph-badge">{{ isGcode ? '🖨 GCODE' : type }}</span>
         </div>

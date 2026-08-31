@@ -11,6 +11,11 @@ export function ext(p: string): string {
   return i >= 0 ? b.slice(i + 1).toLowerCase() : ''
 }
 
+/** URL d'un fichier du répertoire modèles (proxifiée par Nitro vers le backend). */
+export function fileUrl(rel: string): string {
+  return `/api/file?path=${encodeURIComponent(rel)}`
+}
+
 /** Le backend renvoie des timestamps en secondes (unix). */
 export function toDate(ts: number | null): Date | null {
   return ts ? new Date(ts * 1000) : null

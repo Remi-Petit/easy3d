@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::scanner::{self, FileInfo, FolderInfo};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -18,6 +19,7 @@ pub struct AppState {
     pub root: String,
     /// Canal broadcast : diffuse la liste des modèles (JSON) à tous les WS.
     pub ws: broadcast::Sender<String>,
+    pub config: Config,
 }
 
 /// Démarre le serveur HTTP et bloque jusqu'à son arrêt.
@@ -51,25 +53,29 @@ pub struct ModelsResponse {
     pub folders: BTreeMap<String, FolderInfo>,
     pub files: Vec<FileInfo>,
     pub count: usize,
+    /// Configuration applicative, exposée au frontend.
+    pub config: Config,
 }
 
 impl ModelsResponse {
     /// Construit une réponse à partir d'un scan.
-    pub fn from_scan(scan: scanner::ModelsScan) -> Self {
+    pub fn from_scan(scan: scanner::ModelsScan, config: &Config) -> Self {
         let count = scan.total();
         ModelsResponse {
             folders: scan.folders,
             files: scan.files,
             count,
+            config: config.clone(),
         }
     }
 }
 
 /// Renvoie le contenu structuré : fichiers racine + dossiers + total.
 async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
-    Json(ModelsResponse::from_scan(scanner::scan_models(Path::new(
-        &state.root,
-    ))))
+    Json(ModelsResponse::from_scan(
+        scanner::scan_models(Path::new(&state.root)),
+        &state.config,
+    ))
 }
 
 /// WebSocket : connexion persistante qui pousse la liste des modèles à chaque
@@ -79,9 +85,12 @@ async fn ws_models(ws: WebSocketUpgrade, State(state): State<AppState>) -> Respo
 }
 
 /// Snapshot complet de la liste des modèles, sérialisé en JSON.
-fn snapshot(root: &Path) -> String {
-    serde_json::to_string(&ModelsResponse::from_scan(scanner::scan_models(root)))
-        .unwrap_or_else(|_| "{}".to_string())
+fn snapshot(root: &Path, config: &Config) -> String {
+    serde_json::to_string(&ModelsResponse::from_scan(
+        scanner::scan_models(root),
+        config,
+    ))
+    .unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Boucle d'une connexion WS : snapshot initial, puis diffusion en continu.
@@ -92,7 +101,11 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     let root = PathBuf::from(&state.root);
     let (mut sink, mut stream) = socket.split();
 
-    if sink.send(Message::text(snapshot(&root))).await.is_err() {
+    if sink
+        .send(Message::text(snapshot(&root, &state.config)))
+        .await
+        .is_err()
+    {
         return;
     }
 
@@ -112,7 +125,9 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
             res = rx.recv() => {
                 let json = match res {
                     Ok(json) => json,
-                    Err(broadcast::error::RecvError::Lagged(_)) => snapshot(&root),
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        snapshot(&root, &state.config)
+                    }
                     Err(_) => break,
                 };
                 if sink.send(Message::text(json)).await.is_err() {
@@ -176,6 +191,10 @@ fn content_type(path: &Path) -> &'static str {
         Some("stl") => "model/stl",
         Some("obj") => "model/obj",
         Some("gcode") | Some("gco") => "text/plain",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
         _ => "application/octet-stream",
     }
 }
@@ -198,6 +217,7 @@ mod tests {
             .with_state(AppState {
                 root: root.to_string(),
                 ws,
+                config: crate::config::Config::default(),
             })
     }
 
@@ -335,6 +355,7 @@ mod tests {
         let state = AppState {
             root: dir.path().to_string_lossy().into_owned(),
             ws: ws_tx.clone(),
+            config: crate::config::Config::default(),
         };
         let app = Router::new().route("/ws", get(ws_models)).with_state(state);
 

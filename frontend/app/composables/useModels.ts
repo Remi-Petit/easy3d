@@ -5,6 +5,8 @@ export interface FileInfo {
   rel: string
   created: number | null
   modified: number | null
+  /** Image d'aperçu associée (même nom, même dossier), si présente. */
+  image?: string | null
 }
 
 export interface FolderInfo {
@@ -13,10 +15,21 @@ export interface FolderInfo {
   files: FileInfo[]
 }
 
+export type DisplayMode = 'image' | '3d'
+
+export interface AppConfig {
+  models_root?: string | null
+  display?: {
+    mode?: DisplayMode
+  }
+}
+
 export interface ModelsResponse {
   folders: Record<string, FolderInfo>
   files: FileInfo[]
   count: number
+  /** Configuration applicative, exposée par le backend. */
+  config?: AppConfig
 }
 
 /**

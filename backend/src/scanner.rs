@@ -11,6 +11,9 @@ pub struct FileInfo {
     pub rel: String,
     pub created: Option<u64>,
     pub modified: Option<u64>,
+    /// Image d'aperçu associée (même nom, même dossier) si présente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 /// Contenu d'un sous-dossier du répertoire surveillé.
@@ -39,6 +42,7 @@ impl ModelsScan {
 pub fn scan_files(root: &Path) -> Vec<FileInfo> {
     let mut out = Vec::new();
     scan_dir_recursive(root, root, &mut out);
+    attach_sibling_images(&mut out);
     out
 }
 
@@ -59,6 +63,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
         if path.is_dir() {
             let mut files = Vec::new();
             scan_dir_recursive(&path, root, &mut files);
+            attach_sibling_images(&mut files);
             scan.folders.insert(
                 path.file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -79,6 +84,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
         }
     }
 
+    attach_sibling_images(&mut scan.files);
     scan
 }
 
@@ -118,7 +124,75 @@ fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
         rel: rel_path(root, path),
         created: meta.created().ok().and_then(to_unix_secs),
         modified: meta.modified().ok().and_then(to_unix_secs),
+        image: None,
     })
+}
+
+/// Extension (minuscule) d'un chemin relatif.
+fn ext_of(rel: &str) -> String {
+    Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// Nom de base sans extension d'un chemin relatif.
+fn file_stem(rel: &str) -> String {
+    Path::new(rel)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// `true` si le fichier est un modèle 3D affichable (STL / OBJ).
+fn is_model(rel: &str) -> bool {
+    matches!(ext_of(rel).as_str(), "stl" | "obj")
+}
+
+/// `true` si le fichier est une image d'aperçu.
+fn is_image(rel: &str) -> bool {
+    matches!(ext_of(rel).as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif")
+}
+
+/// Priorité d'extension image (0 = préférée), pour choisir l'aperçu.
+fn img_priority(ext: &str) -> u32 {
+    match ext {
+        "png" => 0,
+        "jpg" => 1,
+        "jpeg" => 2,
+        "webp" => 3,
+        "gif" => 4,
+        _ => 9,
+    }
+}
+
+/// Associe à chaque modèle (STL / OBJ) une image de même nom dans le même
+/// dossier, si elle existe (ex : `boitier.stl` + `boitier.png`).
+fn attach_sibling_images(files: &mut [FileInfo]) {
+    use std::collections::HashMap;
+    let mut best: HashMap<String, String> = HashMap::new();
+    for f in files.iter() {
+        if is_image(&f.rel) {
+            let stem = file_stem(&f.rel);
+            let prio = img_priority(&ext_of(&f.rel));
+            let better = match best.get(&stem) {
+                None => true,
+                Some(cur) => prio < img_priority(&ext_of(cur)),
+            };
+            if better {
+                best.insert(stem, f.rel.clone());
+            }
+        }
+    }
+    for f in files.iter_mut() {
+        if is_model(&f.rel) {
+            if let Some(img) = best.get(&file_stem(&f.rel)) {
+                f.image = Some(img.clone());
+            }
+        }
+    }
 }
 
 /// Convertit un `SystemTime` en secondes écoulées depuis `UNIX_EPOCH`.
