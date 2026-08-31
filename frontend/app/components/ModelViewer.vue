@@ -71,29 +71,8 @@ function frame(mesh: THREE.Object3D) {
   }
 }
 
-/** Sprite-billboard : affiche un texte (FRONT, X, Y) qui suit la caméra. */
-function labelSprite(text: string, color: string, width = PLATE * 0.05): THREE.Sprite {
-  const canvas = document.createElement('canvas')
-  canvas.width = 256
-  canvas.height = 128
-  const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, 256, 128)
-  ctx.fillStyle = color
-  ctx.font = 'bold 72px Inter, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(text, 128, 64)
-  const tex = new THREE.CanvasTexture(canvas)
-  const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
-  )
-  sprite.scale.set(width, width / 2, 1)
-  return sprite
-}
-
 /**
- * Plateau d'impression 3D : lit semi-transparent + grille + bordures + chevilles,
- * flèche « FRONT » (sens d'impression) et axes X / Y.
+ * Plateau d'impression 3D : lit semi-transparent + grille + bordures.
  * Dimensionné d'après l'empreinte du modèle pour qu'il reste dessus.
  */
 function buildPlate() {
@@ -139,52 +118,6 @@ function buildPlate() {
   )
   edges.position.copy(plate.position)
   group.add(edges)
-
-  // Chevilles aux 4 coins (comme un vrai plateau d'imprimante).
-  const pegGeo = new THREE.CylinderGeometry(PLATE * 0.004, PLATE * 0.004, thickness * 3, 16)
-  const pegMat = new THREE.MeshStandardMaterial({
-    color: 0x475569,
-    metalness: 0.4,
-    roughness: 0.5,
-  })
-  const corners: [number, number][] = [
-    [w / 2, d / 2],
-    [-w / 2, d / 2],
-    [w / 2, -d / 2],
-    [-w / 2, -d / 2],
-  ]
-  for (const [cx, cz] of corners) {
-    const peg = new THREE.Mesh(pegGeo, pegMat)
-    peg.position.set(cx, thickness, cz)
-    group.add(peg)
-  }
-
-  // Flèche + libellé « FRONT » (sens d'impression) sur le bord avant (-Z).
-  const arrowMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-  const frontArrow = new THREE.Mesh(new THREE.ConeGeometry(PLATE * 0.006, PLATE * 0.02, 4), arrowMat)
-  // Pointe vers l'avant (-Z) : rotation autour de l'axe X de -90°.
-  frontArrow.rotation.x = -Math.PI / 2
-  frontArrow.position.set(0, thickness, -d / 2 - PLATE * 0.01)
-  group.add(frontArrow)
-  const frontLabel = labelSprite('FRONT', '#22d3ee', PLATE * 0.06)
-  frontLabel.position.set(0, thickness + PLATE * 0.05, -d / 2 - PLATE * 0.02)
-  group.add(frontLabel)
-
-  // Axes X (rouge) / Y (vert) au coin avant-gauche.
-  const axLen = w * 0.25
-  const origin = new THREE.Vector3(-w / 2, PLATE * 0.002, d / 2)
-  group.add(
-    new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, axLen, 0xef4444, axLen * 0.2, axLen * 0.1),
-  )
-  group.add(
-    new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, axLen, 0x22c55e, axLen * 0.2, axLen * 0.1),
-  )
-  const xLabel = labelSprite('X', '#ef4444', PLATE * 0.04)
-  xLabel.position.set(origin.x + axLen + PLATE * 0.01, PLATE * 0.05, origin.z)
-  group.add(xLabel)
-  const yLabel = labelSprite('Y', '#22c55e', PLATE * 0.04)
-  yLabel.position.set(origin.x, PLATE * 0.05, origin.z + axLen + PLATE * 0.01)
-  group.add(yLabel)
 
   scene.add(group)
   plateGroup = group
