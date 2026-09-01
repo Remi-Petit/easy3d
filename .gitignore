@@ -1,6 +1,9 @@
 **/target
 Cargo.lock
-/models
+
+# garder le dossier models dans le repo, mais pas son contenu
+models/*
+!models/.gitkeep
 
 # frontend
 frontend/node_modules
