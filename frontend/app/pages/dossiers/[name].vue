@@ -24,7 +24,7 @@ const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
         <div class="logo">📁</div>
         <div>
           <h1>{{ name }}</h1>
-          <small>{{ total }} fichier{{ total > 1 ? 's' : '' }} · STL / GCODE</small>
+          <small>{{ total }} fichier{{ total > 1 ? 's' : '' }} · STL / 3MF / GCODE</small>
         </div>
       </div>
       <div v-if="live" class="stats">

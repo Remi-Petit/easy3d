@@ -11,7 +11,7 @@ const now = useNow()
 const name = computed(() => basename(props.file.path))
 const type = computed(() => ext(props.file.path) || '?')
 const when = computed(() => timeAgo(toDate(props.file.modified), now.value))
-const isModel = computed(() => ['stl', 'obj'].includes(type.value))
+const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 /** Chemin relatif encodé -> URL `/fichier/[rel]`. */
 const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)

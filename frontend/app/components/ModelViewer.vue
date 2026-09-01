@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import * as THREE from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 const props = withDefaults(
@@ -69,6 +70,24 @@ function frame(mesh: THREE.Object3D) {
     controls.target.copy(target)
     controls.update()
   }
+}
+
+/**
+ * Compte les triangles d'un objet 3D (sommets non indexés = /3, indexés = /3).
+ * S'applique à un `Mesh` comme à un `Group` (3MF contient plusieurs mailles).
+ */
+function countTriangles(root: THREE.Object3D): number {
+  let n = 0
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if ((mesh as any).isMesh && mesh.geometry) {
+      const g = mesh.geometry as THREE.BufferGeometry
+      const pos = g.getAttribute('position')
+      if (!pos) return
+      n += g.index ? g.index.count / 3 : pos.count / 3
+    }
+  })
+  return Math.floor(n)
 }
 
 /**
@@ -146,35 +165,45 @@ async function loadModel() {
     const res = await fetch(`/api/file?path=${encodeURIComponent(props.rel)}`)
     if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`)
     const buffer = await res.arrayBuffer()
-    const geometry = new STLLoader().parse(buffer)
-    geometry.computeVertexNormals()
 
-    const posAttr = geometry.getAttribute('position')
-    const triCount = geometry.index ? geometry.index.count / 3 : (posAttr?.count ?? 0) / 3
-    stats.value = { triangles: Math.floor(triCount) }
+    // `.3mf` est un zip chargé via le 3MFLoader (peut contenir plusieurs
+    // mailles) ; STL (et OBJ sans loader dédié) passe par le STLLoader.
+    const is3mf = ext(props.rel) === '3mf'
+    let object: THREE.Object3D
 
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x818cf8,
-      metalness: 0.2,
-      roughness: 0.55,
-      flatShading: true,
-    })
-    const mesh = new THREE.Mesh(geometry, mat)
-    // Convention STL : axe Z = « vers le haut » (Z-up). On le convertit en
-    // Y-up (repère three.js) pour qu'il repose à plat sur le plateau (plan XZ).
-    mesh.rotation.x = -Math.PI / 2
-    mesh.updateMatrixWorld(true)
-    scene.add(mesh)
-    model = mesh
-    fitToPlate(mesh)
+    if (is3mf) {
+      object = new ThreeMFLoader().parse(buffer) as unknown as THREE.Group
+      // Conforme au spec 3MF (Z-up, comme STL) : conversion en Y-up three.js.
+      object.rotation.x = -Math.PI / 2
+    } else {
+      const geometry = new STLLoader().parse(buffer)
+      geometry.computeVertexNormals()
+      const mesh = new THREE.Mesh(
+        geometry,
+        new THREE.MeshStandardMaterial({
+          color: 0x818cf8,
+          metalness: 0.2,
+          roughness: 0.55,
+          flatShading: true,
+        }),
+      )
+      mesh.rotation.x = -Math.PI / 2
+      object = mesh
+    }
 
+    object.updateMatrixWorld(true)
+    scene.add(object)
+    model = object
+    fitToPlate(object)
+
+    const triCount = countTriangles(object)
     // Cotes réelles (mm) après conversion Z-up → Y-up.
-    const bb = new THREE.Box3().setFromObject(mesh)
+    const bb = new THREE.Box3().setFromObject(object)
     const s = bb.getSize(new THREE.Vector3())
     const r = (v: number) => Math.round(v * 100) / 100
-    stats.value = { triangles: Math.floor(triCount), dims: [r(s.x), r(s.y), r(s.z)] }
+    stats.value = { triangles: triCount, dims: [r(s.x), r(s.y), r(s.z)] }
 
-    frame(mesh)
+    frame(object)
     buildPlate()
     loading.value = false
     animate()
