@@ -146,9 +146,9 @@ fn file_stem(rel: &str) -> String {
         .to_string()
 }
 
-/// `true` si le fichier est un modèle 3D affichable (STL / OBJ).
+/// `true` si le fichier est un modèle 3D affichable (STL / OBJ / 3MF).
 fn is_model(rel: &str) -> bool {
-    matches!(ext_of(rel).as_str(), "stl" | "obj")
+    matches!(ext_of(rel).as_str(), "stl" | "obj" | "3mf")
 }
 
 /// `true` si le fichier est une image d'aperçu.

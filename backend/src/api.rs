@@ -190,6 +190,7 @@ fn content_type(path: &Path) -> &'static str {
     {
         Some("stl") => "model/stl",
         Some("obj") => "model/obj",
+        Some("3mf") => "model/3mf",
         Some("gcode") | Some("gco") => "text/plain",
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",

@@ -1,5 +1,5 @@
 // Proxy vers le backend Rust : GET /file?path=<rel>
-// Relaie le contenu binaire d'un modèle (STL / GCODE) au navigateur.
+// Relaie le contenu binaire d'un modèle (STL / OBJ / 3MF / GCODE) au navigateur.
 export default defineEventHandler(async (event) => {
   const q = getQuery(event)
   const rel = q.path

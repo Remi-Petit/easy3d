@@ -1,6 +1,6 @@
 # easy3d
 
-Catalogue de modèles 3D (STL / GCODE) avec backend Rust et frontend Nuxt.
+Catalogue de modèles 3D (STL / 3MF / GCODE) avec backend Rust et frontend Nuxt.
 
 ## Structure
 
@@ -22,7 +22,7 @@ easy3d/
 │   │   └── assets/css/
 │   ├── server/api/       ← proxy vers le backend Rust
 │   └── nuxt.config.ts
-├── models/        ← données 3D (STL / GCODE), partagées
+├── models/        ← données 3D (STL / 3MF / GCODE), partagées
 ├── .gitignore
 └── README.md
 ```
@@ -56,9 +56,9 @@ bun run dev
 
 - UI sur `http://localhost:3000`.
 - Les routes `/api/models`, `/api/file` et `/api/health` proxyent vers le backend.
-- **Aperçu 3D** : chaque fichier STL affiche une vignette 3D (three.js), cliquable
-  pour ouvrir une vue plein écran (triangles + rotation/zoom). Les GCODE affichent
-  un badge (pas de maillage).
+- **Aperçu 3D** : chaque fichier STL / 3MF affiche une vignette 3D (three.js),
+  cliquable pour ouvrir une vue plein écran (triangles + rotation/zoom).
+  Les GCODE affichent un badge (pas de maillage).
 - URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut dérivé de
   `NUXT_HPCCAT_API_PORT`, sinon `http://127.0.0.1:8090`).
 

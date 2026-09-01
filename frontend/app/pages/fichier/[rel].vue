@@ -23,7 +23,7 @@ const file = computed<FileInfo | null>(() => {
 const now = useNow()
 const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
-const isModel = computed(() => ['stl', 'obj'].includes(type.value))
+const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
 // Mode d'affichage issu de la config backend ("image" | "3d").
 const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')

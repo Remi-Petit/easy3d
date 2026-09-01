@@ -41,7 +41,7 @@ const liveLabel = computed(() =>
         <div class="logo">3D</div>
         <div>
           <h1>easy3d</h1>
-          <small>catalogue de modèles · STL / GCODE</small>
+          <small>catalogue de modèles · STL / 3MF / GCODE</small>
         </div>
       </div>
 
