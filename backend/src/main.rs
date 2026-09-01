@@ -1,4 +1,4 @@
-use easy3d::{api, config, scanner, watcher};
+use easy3d::{api, config, render, scanner, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::path::Path;
@@ -37,6 +37,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = resolve_models_root(&config);
 
+    // Dossier des aperçus générés par le backend (`<models_root>/.easy3d-thumbs`).
+    let thumbs_root = std::path::Path::new(&path).join(render::THUMB_DIR);
+
+    // Génère un aperçu PNG pour chaque modèle déjà présent, avant de démarrer.
+    // (Garde un aperçu à jour ; coût une fois au lancement.)
+    render::generate_all(std::path::Path::new(&path), &thumbs_root);
+
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
 
@@ -58,8 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path_watcher = path.to_string();
     let ws_watcher = ws_tx.clone();
     let cfg_watcher = config.clone();
+    let thumbs_watcher = thumbs_root.clone();
     std::thread::spawn(move || {
-        if let Err(e) = watch_dir(&path_watcher, cfg_watcher, ws_watcher) {
+        if let Err(e) = watch_dir(&path_watcher, cfg_watcher, ws_watcher, thumbs_watcher) {
             eprintln!("Erreur watcher : {e}");
         }
     });
@@ -76,6 +84,7 @@ fn watch_dir(
     path: &str,
     config: config::Config,
     ws: broadcast::Sender<String>,
+    thumbs_root: std::path::PathBuf,
 ) -> notify::Result<()> {
     let (tx, rx) = channel();
 
@@ -97,6 +106,14 @@ fn watch_dir(
             Ok(events) => {
                 let mut changed = false;
                 for event in events {
+                    // Met à jour l'aperçu généré pour chaque chemin concerné.
+                    for p in &event.paths {
+                        if p.exists() {
+                            render::ensure_for_changed(Path::new(path), &thumbs_root, p);
+                        } else {
+                            render::remove_for_path(Path::new(path), &thumbs_root, p);
+                        }
+                    }
                     // On n'affiche que les vrais changements (ajout / modif / suppression).
                     if let Some(msg) = watcher::describe_event(&event) {
                         println!("{msg}");

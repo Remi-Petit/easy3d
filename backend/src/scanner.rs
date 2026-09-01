@@ -43,6 +43,7 @@ pub fn scan_files(root: &Path) -> Vec<FileInfo> {
     let mut out = Vec::new();
     scan_dir_recursive(root, root, &mut out);
     attach_sibling_images(&mut out);
+    attach_generated_thumbs(&mut out);
     out
 }
 
@@ -60,10 +61,15 @@ pub fn scan_models(root: &Path) -> ModelsScan {
     for entry in entries.flatten() {
         let path = entry.path();
 
+        if is_hidden(entry.file_name().to_str().unwrap_or("")) {
+            continue;
+        }
+
         if path.is_dir() {
             let mut files = Vec::new();
             scan_dir_recursive(&path, root, &mut files);
             attach_sibling_images(&mut files);
+            attach_generated_thumbs(&mut files);
             scan.folders.insert(
                 path.file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -85,6 +91,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
     }
 
     attach_sibling_images(&mut scan.files);
+    attach_generated_thumbs(&mut scan.files);
     scan
 }
 
@@ -96,6 +103,10 @@ fn scan_dir_recursive(dir: &Path, root: &Path, out: &mut Vec<FileInfo>) {
     for entry in entries.flatten() {
         let path = entry.path();
 
+        if is_hidden(entry.file_name().to_str().unwrap_or("")) {
+            continue;
+        }
+
         if path.is_dir() {
             scan_dir_recursive(&path, root, out);
         } else if path.is_file()
@@ -104,6 +115,12 @@ fn scan_dir_recursive(dir: &Path, root: &Path, out: &mut Vec<FileInfo>) {
             out.push(info);
         }
     }
+}
+
+/// `true` si le nom de fichier/dossier commence par `.` (fichier caché, ex
+/// `.easy3d-thumbs/`, `.gitkeep`).
+fn is_hidden(name: &str) -> bool {
+    name.starts_with('.')
 }
 
 /// Chemin relatif à `root`, normalisé en séparateurs `/`.
@@ -191,6 +208,34 @@ fn attach_sibling_images(files: &mut [FileInfo]) {
             if let Some(img) = best.get(&file_stem(&f.rel)) {
                 f.image = Some(img.clone());
             }
+        }
+    }
+}
+
+/// Chemin (relatif à la racine) de l'aperçu généré pour un modèle donné.
+/// Ex : `chainsaw-man/Chainsaw_Man.stl` → `.easy3d-thumbs/chainsaw-man/Chainsaw_Man.png`.
+fn gen_thumb_rel(rel: &str) -> String {
+    let stem = Path::new(rel).with_extension("png");
+    format!(".easy3d-thumbs/{}", stem.display())
+}
+
+/// Associe à chaque modèle **sans image sœur** l'aperçu PNG généré par le
+/// backend (dans `<root>/.easy3d-thumbs/`), si celui-ci existe sur le disque.
+/// L'image explicite (même nom, même dossier) reste prioritaire.
+fn attach_generated_thumbs(files: &mut [FileInfo]) {
+    use std::path::PathBuf;
+    for f in files.iter_mut() {
+        if f.image.is_some() || !is_model(&f.rel) {
+            continue;
+        }
+        // Racine des modèles = chemin absolu du modèle moins ses composantes rel.
+        let mut root = PathBuf::from(&f.path);
+        for _ in f.rel.split('/') {
+            root.pop();
+        }
+        let thumb_rel = gen_thumb_rel(&f.rel);
+        if root.join(&thumb_rel).is_file() {
+            f.image = Some(thumb_rel);
         }
     }
 }
