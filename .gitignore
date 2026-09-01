@@ -1,6 +1,9 @@
 **/target
 Cargo.lock
 
+# backend — fichiers d'environnement locaux (secrets / ports)
+backend/.env
+
 # garder le dossier models dans le repo, mais pas son contenu
 models/*
 !models/.gitkeep
