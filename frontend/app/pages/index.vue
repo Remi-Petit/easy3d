@@ -4,7 +4,7 @@ import type { FileInfo, FolderInfo } from '~/composables/useModels'
 const { data, error, live } = useModels()
 
 // Filtre global : barre rendue par le layout `default`, état partagé.
-const { query, searching, matches, sortFiles } = useFilter()
+const { query, types, searching, hasTypeFilter, filtering, matches, sortFiles } = useFilter()
 
 /** Fichier enrichi du nom du dossier d'origine (absent si le fichier est à la racine). */
 type SearchFile = FileInfo & { folder?: string }
@@ -17,19 +17,37 @@ const allFolders = computed<FolderInfo[]>(() =>
 /** Vue par défaut (aucune recherche) : fichiers à la racine. */
 const rootFiles = computed<FileInfo[]>(() => data.value?.files ?? [])
 
+/**
+ * Tous les fichiers du catalogue : sert à proposer les formats à filtrer.
+ * (La liste reste complète même pendant une recherche, sinon les puces
+ * disparaîtraient au fur et à mesure de la frappe.)
+ */
+const allFiles = computed<FileInfo[]>(() => [
+  ...rootFiles.value,
+  ...allFolders.value.flatMap((folder) => folder.files),
+])
+
+useFilterTypes(() => allFiles.value)
+
 /** Fichiers racine triés selon le mode de tri partagé. */
 const sortedRootFiles = computed<FileInfo[]>(() => sortFiles(rootFiles.value))
 
-/** Recherche : dossiers dont le nom correspond. */
+/**
+ * Vue filtrée : dossiers dont le nom correspond **et** qui contiennent au moins
+ * un fichier du type sélectionné.
+ */
 const matchedFolders = computed<FolderInfo[]>(() => {
   const q = query.value.trim().toLowerCase()
-  if (!data.value || !q) return []
-  return allFolders.value.filter((f) => f.name.toLowerCase().includes(q))
+  if (!data.value || !filtering.value) return []
+  return allFolders.value.filter((folder) => {
+    if (q && !folder.name.toLowerCase().includes(q)) return false
+    return folder.files.some((file) => matches(file))
+  })
 })
 
-/** Recherche : fichiers dont le nom correspond, à la racine ET dans les dossiers. */
+/** Vue filtrée : fichiers correspondants, à la racine ET dans les dossiers. */
 const matchedFiles = computed<SearchFile[]>(() => {
-  if (!data.value || !searching.value) return []
+  if (!data.value || !filtering.value) return []
   const nested: SearchFile[] = Object.entries(data.value.folders).flatMap(
     ([name, folder]) => folder.files.filter(matches).map((f) => ({ ...f, folder: name })),
   )
@@ -37,6 +55,14 @@ const matchedFiles = computed<SearchFile[]>(() => {
 })
 
 const resultCount = computed(() => matchedFolders.value.length + matchedFiles.value.length)
+
+/** Message d'état vide, qui rappelle ce qui a été filtré. */
+const emptyLabel = computed(() => {
+  const parts: string[] = []
+  if (searching.value) parts.push(`« ${query.value.trim()} »`)
+  if (hasTypeFilter.value) parts.push(types.value.map((t) => t.toUpperCase()).join(', '))
+  return parts.length ? `Aucun résultat pour ${parts.join(' + ')}.` : 'Aucun résultat.'
+})
 
 /** Résultats de recherche (fichiers) triés. */
 const sortedMatchedFiles = computed<SearchFile[]>(() => sortFiles(matchedFiles.value))
@@ -58,8 +84,8 @@ usePageHeader(() => ({
   <div v-if="error" class="error">{{ error }}</div>
 
   <template v-if="data">
-    <!-- Recherche active : une seule section « All » regroupant dossiers + fichiers. -->
-    <template v-if="searching">
+    <!-- Filtre actif : une seule section « All » regroupant dossiers + fichiers. -->
+    <template v-if="filtering">
       <p class="section-label">All ({{ resultCount }})</p>
       <div v-if="resultCount" class="file-grid">
         <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
@@ -71,7 +97,7 @@ usePageHeader(() => ({
           :display-mode="displayMode"
         />
       </div>
-      <div v-else class="empty">Aucun résultat pour « {{ query.trim() }} ».</div>
+      <div v-else class="empty">{{ emptyLabel }}</div>
     </template>
 
     <!-- Vue par défaut : Dossiers + Racine. -->

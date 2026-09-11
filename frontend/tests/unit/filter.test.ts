@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   SORT_ICONS,
   SORT_LABELS,
+  collectTypes,
   matchesQuery,
+  matchesTypes,
   nextSortMode,
+  pruneTypes,
   sortFilesByDate,
+  toggleType,
   type SortMode,
 } from '~/utils/filter'
 
@@ -114,5 +118,97 @@ describe('sortFilesByDate', () => {
 
   it('accepte une liste vide', () => {
     expect(sortFilesByDate([], 'date-desc')).toEqual([])
+  })
+})
+
+describe('collectTypes', () => {
+  it('recense les formats avec leur nombre, triés par nom', () => {
+    const files = [
+      file('a.stl'),
+      file('b.stl'),
+      file('DemaAuto/c.gcode'),
+      file('d.3mf'),
+    ]
+    expect(collectTypes(files)).toEqual([
+      { type: '3mf', count: 1 },
+      { type: 'gcode', count: 1 },
+      { type: 'stl', count: 2 },
+    ])
+  })
+
+  it('ignore les fichiers sans extension', () => {
+    expect(collectTypes([file('LISEZMOI'), file('a.stl')])).toEqual([
+      { type: 'stl', count: 1 },
+    ])
+  })
+
+  it('normalise la casse de l’extension', () => {
+    // `a.STL` et `b.stl` sont le même format.
+    expect(collectTypes([file('a.STL'), file('b.stl')])).toEqual([
+      { type: 'stl', count: 2 },
+    ])
+  })
+
+  it('renvoie une liste vide sans fichier', () => {
+    expect(collectTypes([])).toEqual([])
+  })
+})
+
+describe('matchesTypes', () => {
+  const stl = file('DemaAuto/x.stl')
+  const gcode = file('y.gcode')
+
+  it('accepte tout quand aucun type n’est sélectionné', () => {
+    expect(matchesTypes(stl, [])).toBe(true)
+    expect(matchesTypes(gcode, [])).toBe(true)
+  })
+
+  it('accepte un fichier dont le type est sélectionné', () => {
+    expect(matchesTypes(stl, ['stl'])).toBe(true)
+    expect(matchesTypes(stl, ['stl', '3mf'])).toBe(true)
+  })
+
+  it('refuse un fichier dont le type ne l’est pas', () => {
+    expect(matchesTypes(stl, ['gcode'])).toBe(false)
+    expect(matchesTypes(gcode, ['stl', '3mf'])).toBe(false)
+  })
+})
+
+describe('toggleType', () => {
+  it('ajoute un type absent', () => {
+    expect(toggleType([], 'stl')).toEqual(['stl'])
+    expect(toggleType(['stl'], 'gcode')).toEqual(['stl', 'gcode'])
+  })
+
+  it('retire un type déjà sélectionné', () => {
+    expect(toggleType(['stl', 'gcode'], 'stl')).toEqual(['gcode'])
+    expect(toggleType(['stl'], 'stl')).toEqual([])
+  })
+
+  it('ne modifie pas la liste d’entrée', () => {
+    const selection = ['stl']
+    toggleType(selection, 'gcode')
+    expect(selection).toEqual(['stl'])
+  })
+})
+
+describe('pruneTypes', () => {
+  it('retire les types devenus indisponibles', () => {
+    // Ex. : on quitte l'accueil (3MF présent) pour un dossier qui n'en a pas.
+    expect(pruneTypes(['stl', '3mf'], ['stl', 'gcode'])).toEqual(['stl'])
+  })
+
+  it('conserve l’ordre et tout ce qui reste disponible', () => {
+    expect(pruneTypes(['gcode', 'stl'], ['stl', 'gcode', '3mf'])).toEqual(['gcode', 'stl'])
+  })
+
+  it('renvoie la même référence si rien ne change', () => {
+    // Évite de relancer la réactivité inutilement.
+    const selection = ['stl']
+    expect(pruneTypes(selection, ['stl', 'gcode'])).toBe(selection)
+  })
+
+  it('vide la sélection si plus rien n’est disponible', () => {
+    expect(pruneTypes(['stl'], [])).toEqual([])
   })
 })

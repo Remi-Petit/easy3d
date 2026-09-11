@@ -7,6 +7,8 @@
   --muted: #94a3b8;
   --accent: #6366f1;
   --accent-2: #22d3ee;
+  /* Accent très dilué : fond des éléments « actifs » (puces de filtre). */
+  --accent-soft: rgba(99, 102, 241, 0.16);
   --ok: #34d399;
   --err: #f87171;
   --radius: 14px;
@@ -206,6 +208,85 @@ a {
   color: var(--accent-2);
 }
 
+/* Puces de filtre par type : même vocabulaire que les `.pill` de l'en-tête. */
+.types {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+/* La barre et ses puces forment un seul bloc : on resserre l'espace entre les deux.
+   (`:has()` non supporté → simple espace un peu plus large, dégradation bénigne.) */
+.toolbar:has(+ .types) {
+  margin-bottom: 10px;
+}
+
+.types__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 13px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.types__item:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.types__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Nombre de fichiers du format. */
+.types__item b {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Sélectionné : teinte d'accent + bordure accentuée. */
+.types__item--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.types__item--on b,
+.types__item--on:hover b {
+  color: var(--accent-2);
+}
+
+.types__clear {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  margin-left: 2px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.types__clear:hover {
+  color: var(--accent-2);
+}
+
 /* ---------- Grid ---------- */
 .grid {
   display: grid;
@@ -328,8 +409,7 @@ a {
 }
 
 /* Indication "dossier : N fichiers au total" sous la vignette seule. */
-.card-more {
-  color: var(--muted);
+.card-more {  color: var(--muted);
   font-size: 12.5px;
   text-align: center;
   padding: 6px 0 2px;

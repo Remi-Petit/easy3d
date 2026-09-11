@@ -8,8 +8,9 @@
 const route = useRoute()
 const header = usePageHeaderState()
 
-// Barre de filtre globale (recherche + tri), partagée avec les pages.
-const { query, sortMode, sortLabel, sortIcon, cycleSort } = useFilter()
+// Barre de filtre globale (recherche, types, tri), partagée avec les pages.
+const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
+  useFilter()
 
 const page = computed(() => {
   // /dossiers/[name]
@@ -90,6 +91,25 @@ const statusLabel = computed(() =>
       >
         <span class="sort__icon">{{ sortIcon }}</span>
         <span class="sort__label">Date</span>
+      </button>
+    </div>
+
+    <!-- Filtre par type : formats détectés dans la vue courante. -->
+    <div v-if="page.filter && availableTypes.length > 1" class="types">
+      <button
+        v-for="entry in availableTypes"
+        :key="entry.type"
+        type="button"
+        class="types__item"
+        :class="{ 'types__item--on': types.includes(entry.type) }"
+        :aria-pressed="types.includes(entry.type)"
+        :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
+        @click="toggle(entry.type)"
+      >
+        {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
+      </button>
+      <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
+        ✕ Effacer
       </button>
     </div>
 
