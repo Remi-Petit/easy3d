@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import type { ParsedGcode } from '../workers/gcode.worker'
+import type { ParsedGcode } from '../utils/gcode'
 
 const props = withDefaults(
   defineProps<{
