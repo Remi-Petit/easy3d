@@ -103,8 +103,15 @@ const TOOLBARS = [
 ] as const
 
 const content = ref(props.note ?? '')
+/** Dernière valeur **connue du serveur** (chargée, ou enregistrée par nous). */
+const saved = ref(props.note ?? '')
 const editing = ref(false)
 const status = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+/** Un changement distant est arrivé pendant qu'on avait des modifications locales. */
+const remoteChanged = ref(false)
+
+/** Des modifications locales ne sont pas encore enregistrées. */
+const dirty = computed(() => content.value !== saved.value)
 
 const statusLabel = computed(
   () =>
@@ -128,19 +135,58 @@ async function save(value: string) {
       query: { path: props.rel },
       body: { content: value },
     })
+    // Le serveur porte désormais cette valeur : c'est notre nouvelle référence.
+    saved.value = value
     status.value = 'saved'
+    remoteChanged.value = false
   } catch {
     status.value = 'error'
   }
 }
 
 watch(content, (value) => {
-  // Rien à enregistrer si le contenu est identique à ce qui est déjà stocké.
-  if (value === (props.note ?? '')) return
+  // Rien à enregistrer si le serveur a déjà cette valeur.
+  if (value === saved.value) return
   if (timer) clearTimeout(timer)
   status.value = 'saving'
   timer = setTimeout(() => void save(value), 700)
 })
+
+/**
+ * Suit les modifications venues **d'une autre session** (l'API diffuse la liste
+ * mise à jour aux WebSockets après chaque écriture).
+ *
+ * On rattrape toujours la valeur du serveur, sauf si des modifications locales
+ * non enregistrées seraient écrasées : on le signale alors au lieu de perdre la
+ * saisie en cours.
+ */
+watch(
+  () => props.note,
+  (incoming) => {
+    const result = reconcileRemote(content.value, saved.value, incoming ?? '')
+    if (result.conflict) {
+      remoteChanged.value = true
+      return
+    }
+    if (result.content === content.value && result.saved === saved.value) return
+    content.value = result.content
+    saved.value = result.saved
+    status.value = 'idle'
+  },
+)
+
+/** Abandonne les modifications locales au profit de la version du serveur. */
+function acceptRemote() {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+  }
+  const next = props.note ?? ''
+  content.value = next
+  saved.value = next
+  remoteChanged.value = false
+  status.value = 'idle'
+}
 
 // Quitte la page juste après une frappe : on force l'enregistrement en attente.
 onBeforeUnmount(() => {
@@ -169,6 +215,15 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <!-- Conflit : la note a changé ailleurs alors que des modifications locales
+         attendent. On le dit plutôt que d'écraser silencieusement l'un ou l'autre. -->
+    <p v-if="remoteChanged" class="note__remote">
+      ⚠️ Modifiée dans une autre session —
+      <button type="button" class="note__remote-btn" @click="acceptRemote">
+        charger la version du serveur
+      </button>
+    </p>
 
     <MdEditor
       v-if="editing"
