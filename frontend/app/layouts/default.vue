@@ -18,7 +18,6 @@ const page = computed(() => {
     return {
       logo: '📁',
       title: decodeURIComponent(String(route.params.name)),
-      back: { to: '/', label: '← Retour' },
       home: false,
       filter: true,
       placeholder: 'Filtrer par nom de fichier…',
@@ -30,7 +29,6 @@ const page = computed(() => {
     return {
       logo: fileIcon(rel),
       title: basename(rel),
-      back: { to: '/', label: '← Retour' },
       home: false,
       filter: false,
       placeholder: '',
@@ -40,7 +38,6 @@ const page = computed(() => {
   return {
     logo: '3D',
     title: 'easy3d',
-    back: null,
     home: true,
     filter: true,
     placeholder: 'Filtrer par nom de fichier ou de dossier…',
@@ -56,8 +53,6 @@ const statusLabel = computed(() =>
 
 <template>
   <div class="container">
-    <NuxtLink v-if="page.back" :to="page.back.to" class="back">{{ page.back.label }}</NuxtLink>
-
     <header class="header">
       <div class="brand">
         <div class="logo">{{ page.logo }}</div>
