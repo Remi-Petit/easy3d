@@ -14,21 +14,34 @@ const total = computed(() => folder.value?.count ?? 0)
 // Mode d'affichage issu de la config backend ("image" | "3d").
 const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
 
+// Filtre global : barre rendue par le layout `default`, état partagé.
+const { searching, matches, sortFiles } = useFilter()
+
+/** Fichiers du dossier, filtrés par la recherche puis triés. */
+const files = computed(() => sortFiles((folder.value?.files ?? []).filter(matches)))
+
 // En-tête global (rendu par le layout `default`).
-usePageHeader(() => ({
-  subtitle: `${total.value} fichier${total.value > 1 ? 's' : ''} · STL / 3MF / GCODE`,
-  count: 0,
-  live: live.value,
-  offline: !!error.value,
-}))
+usePageHeader(() => {
+  const suffix = total.value > 1 ? 's' : ''
+  return {
+    subtitle: searching.value
+      ? `${files.value.length} / ${total.value} fichier${suffix} · STL / 3MF / GCODE`
+      : `${total.value} fichier${suffix} · STL / 3MF / GCODE`,
+    count: 0,
+    live: live.value,
+    offline: !!error.value,
+  }
+})
 </script>
 
 <template>
   <div v-if="error" class="error">{{ error }}</div>
 
   <div v-if="folder" class="file-grid">
-    <FileItem v-for="f in folder.files" :key="f.path" :file="f" :display-mode="displayMode" />
-    <p v-if="!folder.files.length" class="empty">Dossier vide</p>
+    <FileItem v-for="f in files" :key="f.path" :file="f" :display-mode="displayMode" />
+    <p v-if="!files.length" class="empty">
+      {{ searching ? 'Aucun fichier ne correspond au filtre.' : 'Dossier vide' }}
+    </p>
   </div>
   <div v-else class="empty">Chargement…</div>
 </template>
