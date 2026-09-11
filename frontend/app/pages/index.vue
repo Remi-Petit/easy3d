@@ -1,28 +1,43 @@
 <script setup lang="ts">
-import type { FolderInfo } from '~/composables/useModels'
+import type { FileInfo, FolderInfo } from '~/composables/useModels'
 
 const { data, error, live } = useModels()
 
 const query = ref('')
 
-const folders = computed<FolderInfo[]>(() => {
-  if (!data.value) return []
+/** Une recherche est active dès que le champ contient du texte. */
+const searching = computed(() => query.value.trim().length > 0)
+
+/** Fichier enrichi du nom du dossier d'origine (absent si le fichier est à la racine). */
+type SearchFile = FileInfo & { folder?: string }
+
+/** Vue par défaut (aucune recherche) : tous les dossiers. */
+const allFolders = computed<FolderInfo[]>(() =>
+  data.value ? Object.values(data.value.folders) : [],
+)
+
+/** Vue par défaut (aucune recherche) : fichiers à la racine. */
+const rootFiles = computed<FileInfo[]>(() => data.value?.files ?? [])
+
+/** Recherche : dossiers dont le nom correspond. */
+const matchedFolders = computed<FolderInfo[]>(() => {
   const q = query.value.trim().toLowerCase()
-  const all = Object.values(data.value.folders)
-  if (!q) return all
-  return all.filter(
-    (f) =>
-      f.name.toLowerCase().includes(q) ||
-      f.files.some((file) => basename(file.path).toLowerCase().includes(q)),
-  )
+  if (!data.value || !q) return []
+  return allFolders.value.filter((f) => f.name.toLowerCase().includes(q))
 })
 
-const rootFiles = computed(() => {
-  if (!data.value) return []
+/** Recherche : fichiers dont le nom correspond, à la racine ET dans les dossiers. */
+const matchedFiles = computed<SearchFile[]>(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return data.value.files
-  return data.value.files.filter((f) => basename(f.path).toLowerCase().includes(q))
+  if (!data.value || !q) return []
+  const match = (f: FileInfo) => basename(f.path).toLowerCase().includes(q)
+  const nested: SearchFile[] = Object.entries(data.value.folders).flatMap(
+    ([name, folder]) => folder.files.filter(match).map((f) => ({ ...f, folder: name })),
+  )
+  return [...data.value.files.filter(match), ...nested]
 })
+
+const resultCount = computed(() => matchedFolders.value.length + matchedFiles.value.length)
 
 const totalCount = computed(() => data.value?.count ?? 0)
 // Mode d'affichage issu de la config backend ("image" | "3d").
@@ -59,19 +74,38 @@ const liveLabel = computed(() =>
     <div v-if="error" class="error">{{ error }}</div>
 
     <template v-if="data">
-      <p class="section-label">Dossiers</p>
-      <div v-if="folders.length" class="file-grid">
-        <FolderCard v-for="f in folders" :key="f.name" :folder="f" />
-      </div>
-      <div v-else class="empty">Aucun dossier trouvé.</div>
-
-      <p class="section-label">Racine ({{ rootFiles.length }})</p>
-      <article class="card" v-if="rootFiles.length">
-        <div class="file-grid">
-          <FileItem v-for="f in rootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
+      <!-- Recherche active : une seule section « All » regroupant dossiers + fichiers. -->
+      <template v-if="searching">
+        <p class="section-label">All ({{ resultCount }})</p>
+        <div v-if="resultCount" class="file-grid">
+          <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
+          <FileItem
+            v-for="f in matchedFiles"
+            :key="f.path"
+            :file="f"
+            :folder="f.folder"
+            :display-mode="displayMode"
+          />
         </div>
-      </article>
-      <div v-else class="empty">Aucun fichier à la racine.</div>
+        <div v-else class="empty">Aucun résultat pour « {{ query.trim() }} ».</div>
+      </template>
+
+      <!-- Vue par défaut : Dossiers + Racine. -->
+      <template v-else>
+        <p class="section-label">Dossiers</p>
+        <div v-if="allFolders.length" class="file-grid">
+          <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" />
+        </div>
+        <div v-else class="empty">Aucun dossier trouvé.</div>
+
+        <p class="section-label">Racine ({{ rootFiles.length }})</p>
+        <article class="card" v-if="rootFiles.length">
+          <div class="file-grid">
+            <FileItem v-for="f in rootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
+          </div>
+        </article>
+        <div v-else class="empty">Aucun fichier à la racine.</div>
+      </template>
     </template>
 
     <div v-else class="empty">Chargement…</div>
