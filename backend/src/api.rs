@@ -578,5 +578,124 @@ mod tests {
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
         assert!(!dir.path().parent().unwrap().join("evil.md").exists());
     }
+
+    #[tokio::test]
+    async fn note_trop_volumineuse_est_refusee() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        // 1 Mio + 1 octet : au-delà du garde-fou.
+        let big = "a".repeat(MAX_NOTE_LEN + 1);
+        let body = serde_json::json!({ "content": big }).to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=a.stl")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(!dir.path().join(".easy3d-notes/a.stl.md").exists());
+    }
+
+    #[tokio::test]
+    async fn note_de_dossier_est_stockee_a_cote_des_fichiers() {
+        let dir = tempfile::tempdir().unwrap();
+        // Le dossier doit exister pour apparaître dans le scan.
+        std::fs::create_dir_all(dir.path().join("DemaAuto")).unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=DemaAuto")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{\"content\":\"## Dossier\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".easy3d-notes/DemaAuto.md")).unwrap(),
+            "## Dossier"
+        );
+
+        // La note est aussi exposée par le scan (dossier sans fichier).
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/models")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["folders"]["DemaAuto"]["note"], "## Dossier");
+    }
+
+    /// Une note enregistrée est diffusée aux clients WebSocket connectés : les
+    /// autres onglets voient la modification sans recharger la page.
+    #[tokio::test]
+    async fn enregistrer_une_note_diffuse_la_liste() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let app = Router::new()
+            .route("/models", get(list_models))
+            .route("/note", get(get_note).put(put_note))
+            .route("/ws", get(ws_models))
+            .with_state(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_app = app.clone();
+        tokio::spawn(async move {
+            axum::serve(listener, server_app).await.unwrap();
+        });
+
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
+        // Snapshot initial (aucune note).
+        let snap = socket.next().await.unwrap().unwrap();
+        let v: serde_json::Value = serde_json::from_str(snap.to_text().unwrap()).unwrap();
+        assert!(v["files"][0]["note"].is_null());
+
+        // Écriture via l'API (même état partagé que le serveur WS).
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=a.txt")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"content":"la note"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        // Le client WS reçoit la liste mise à jour, note comprise.
+        let msg = socket.next().await.unwrap().unwrap();
+        let v: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        assert_eq!(v["files"][0]["note"], "la note");
+    }
 }
 

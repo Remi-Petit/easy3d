@@ -316,5 +316,96 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(scan_files(dir.path()).is_empty());
     }
+
+    #[test]
+    fn total_compte_racine_et_sous_dossiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.txt"), "x").unwrap();
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("sub/b.txt"), "y").unwrap();
+        fs::write(root.join("sub/c.txt"), "z").unwrap();
+
+        assert_eq!(scan_models(root).total(), 3);
+    }
+
+    #[test]
+    fn le_dossier_des_notes_est_ignore_par_le_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("sub/a.stl"), "x").unwrap();
+        fs::create_dir_all(root.join(".easy3d-notes/sub")).unwrap();
+        fs::write(root.join(".easy3d-notes/sub/a.stl.md"), "# Note").unwrap();
+
+        let scan = scan_models(root);
+
+        // Les notes ne sont ni des dossiers ni des fichiers du catalogue.
+        assert!(!scan.folders.contains_key(".easy3d-notes"));
+        assert_eq!(scan.total(), 1);
+    }
+
+    #[test]
+    fn scan_attache_les_notes_aux_fichiers_et_dossiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("DemaAuto")).unwrap();
+        fs::write(root.join("DemaAuto/a.stl"), "x").unwrap();
+        fs::create_dir_all(root.join(".easy3d-notes/DemaAuto")).unwrap();
+        fs::write(root.join(".easy3d-notes/DemaAuto/a.stl.md"), "# Note fichier").unwrap();
+        fs::write(root.join(".easy3d-notes/DemaAuto.md"), "# Note dossier").unwrap();
+
+        let scan = scan_models(root);
+        let folder = &scan.folders["DemaAuto"];
+
+        assert_eq!(folder.note.as_deref(), Some("# Note dossier"));
+        assert_eq!(folder.files[0].note.as_deref(), Some("# Note fichier"));
+    }
+
+    #[test]
+    fn notes_absentes_restent_nulles() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.stl"), "x").unwrap();
+
+        let scan = scan_models(root);
+        assert!(scan.files[0].note.is_none());
+    }
+
+    #[test]
+    fn eligibility_a_un_apercu() {
+        // Modèles 3D et G-code : oui. Autre chose : non.
+        for rel in ["a.stl", "a.obj", "a.3mf", "a.gcode", "a.gco", "sub/a.GCODE"] {
+            assert!(can_have_preview(rel), "devrait accepter {rel}");
+        }
+        for rel in ["notes.md", "photo.png", "readme.txt", ""] {
+            assert!(!can_have_preview(rel), "devrait refuser {rel}");
+        }
+    }
+
+    #[test]
+    fn image_soeur_associee_a_un_gcode() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("piece.gcode"), "G1 X0").unwrap();
+        fs::write(root.join("piece.png"), "faux png").unwrap();
+
+        let files = scan_files(root);
+        let gcode = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
+        assert_eq!(gcode.image.as_deref(), Some("piece.png"));
+    }
+
+    #[test]
+    fn apercu_genere_associe_a_un_gcode() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("piece.gcode"), "G1 X0").unwrap();
+        fs::create_dir_all(root.join(".easy3d-thumbs")).unwrap();
+        fs::write(root.join(".easy3d-thumbs/piece.png"), "faux png").unwrap();
+
+        let files = scan_files(root);
+        let gcode = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
+        assert_eq!(gcode.image.as_deref(), Some(".easy3d-thumbs/piece.png"));
+    }
 }
 

@@ -53,21 +53,79 @@ impl Config {
 
     /// Charge la configuration depuis le YAML, avec repli sur les défauts.
     pub fn load() -> Self {
-        let path = Self::config_path();
-        match std::fs::read_to_string(&path) {
+        Self::load_from(&Self::config_path())
+    }
+
+    /// Charge la configuration depuis un fichier donné.
+    ///
+    /// Fichier absent **ou** YAML invalide → valeurs par défaut (mode 3D).
+    pub fn load_from(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
             Ok(text) => serde_yaml::from_str(&text).unwrap_or_else(|e| {
                 eprintln!("⚠️  Configuration invalide dans {}: {e}. Défauts utilisés.", path.display());
                 Self::default()
             }),
-            Err(_) => {
-                // Pas de fichier → défauts (mode 3D).
-                Self::default()
-            }
+            Err(_) => Self::default(),
         }
     }
 
     /// `true` si l'on doit afficher les modèles en image statique.
     pub fn is_image_mode(&self) -> bool {
         self.display.mode == DisplayMode::Image
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lit_le_fichier_de_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yml");
+        std::fs::write(&file, "models_root: ../models\ndisplay:\n  mode: \"image\"\n").unwrap();
+
+        let cfg = Config::load_from(&file);
+        assert_eq!(cfg.models_root.as_deref(), Some("../models"));
+        assert_eq!(cfg.display.mode, DisplayMode::Image);
+        assert!(cfg.is_image_mode());
+    }
+
+    #[test]
+    fn mode_par_defaut_quand_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yml");
+        // `display` absent, `models_root` présent.
+        std::fs::write(&file, "models_root: /tmp/models\n").unwrap();
+
+        let cfg = Config::load_from(&file);
+        assert_eq!(cfg.display.mode, DisplayMode::ThreeD);
+        assert!(!cfg.is_image_mode());
+    }
+
+    #[test]
+    fn fichier_absent_utilise_les_defauts() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::load_from(&dir.path().join("inexistant.yml"));
+
+        assert_eq!(cfg, Config::default());
+        assert_eq!(cfg.display.mode, DisplayMode::ThreeD);
+    }
+
+    #[test]
+    fn yaml_invalide_retombe_sur_les_defauts() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yml");
+        // `display` attendu comme table, pas comme séquence.
+        std::fs::write(&file, "display: [1, 2]\n").unwrap();
+
+        assert_eq!(Config::load_from(&file), Config::default());
+    }
+
+    #[test]
+    fn le_mode_se_serialise_en_minuscules() {
+        // Le frontend lit `config.display.mode` tel quel ("3d" | "image").
+        assert_eq!(serde_json::to_string(&DisplayMode::ThreeD).unwrap(), "\"3d\"");
+        assert_eq!(serde_json::to_string(&DisplayMode::Image).unwrap(), "\"image\"");
     }
 }
