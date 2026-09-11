@@ -1,4 +1,4 @@
-use easy3d::{api, config, render, scanner, watcher};
+use easy3d::{api, config, notes, render, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::path::{Path, PathBuf};
@@ -162,9 +162,16 @@ fn watch_dir(
             }
 
             let thumbs_root = current_root.join(render::THUMB_DIR);
-            // Événements provoqués par nos propres aperçus générés : ce dossier
-            // caché n'apparaît pas dans le scan, il n'y a donc rien à diffuser.
-            if event.paths.iter().all(|p| p.starts_with(&thumbs_root)) {
+            let notes_root = current_root.join(notes::NOTES_DIR);
+            // Événements provoqués par nos propres artefacts : les aperçus
+            // générés et les notes écrites via l'API. Ces dossiers cachés
+            // n'apparaissent pas dans le scan ; les rediffuser boucherait à
+            // chaque enregistrement de note (écriture → watcher → diffusion).
+            if event
+                .paths
+                .iter()
+                .all(|p| p.starts_with(&thumbs_root) || p.starts_with(&notes_root))
+            {
                 continue;
             }
 
@@ -223,20 +230,11 @@ fn watch_dir(
             }
 
             // Même si la config est identique, on rafraîchit le front.
-            broadcast_snapshot(&state);
+            api::broadcast_snapshot(&state);
         } else if models_changed {
-            broadcast_snapshot(&state);
+            api::broadcast_snapshot(&state);
         }
     }
 
     Ok(())
-}
-
-/// Rescanne l'état courant et diffuse la liste des modèles (+ config) aux WS.
-fn broadcast_snapshot(state: &api::AppState) {
-    let payload =
-        api::ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
-    if let Ok(json) = serde_json::to_string(&payload) {
-        let _ = state.ws.send(json);
-    }
 }

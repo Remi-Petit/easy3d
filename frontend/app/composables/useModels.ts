@@ -7,12 +7,16 @@ export interface FileInfo {
   modified: number | null
   /** Image d'aperçu associée (même nom, même dossier), si présente. */
   image?: string | null
+  /** Note explicative (Markdown) associée, si présente. */
+  note?: string | null
 }
 
 export interface FolderInfo {
   name: string
   count: number
   files: FileInfo[]
+  /** Note explicative (Markdown) du dossier, si présente. */
+  note?: string | null
 }
 
 export type DisplayMode = 'image' | '3d'

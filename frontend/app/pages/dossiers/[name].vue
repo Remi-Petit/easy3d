@@ -37,6 +37,9 @@ usePageHeader(() => {
 <template>
   <div v-if="error" class="error">{{ error }}</div>
 
+  <!-- Note du dossier (Markdown) : affichage + édition assistée. -->
+  <NotePanel v-if="folder" :key="name" :rel="name" :note="folder.note" />
+
   <div v-if="folder" class="file-grid">
     <FileItem v-for="f in files" :key="f.path" :file="f" :display-mode="displayMode" />
     <p v-if="!files.length" class="empty">

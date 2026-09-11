@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -55,6 +56,7 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/models", get(list_models))
         .route("/file", get(get_file))
+        .route("/note", get(get_note).put(put_note))
         .route("/health", get(health))
         .route("/ws", get(ws_models))
         .with_state(state);
@@ -228,6 +230,66 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Notes Markdown
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Réponse de `GET /note` : contenu de la note (vide si aucune).
+#[derive(Serialize)]
+struct NoteResponse {
+    content: String,
+}
+
+/// Corps de `PUT /note`.
+#[derive(Deserialize)]
+struct NoteBody {
+    content: String,
+}
+
+/// Lit la note d'un dossier ou d'un fichier (`?path=<rel>`).
+///
+/// Renvoie `{ content: "" }` quand aucune note n'existe : le frontend n'a ainsi
+/// pas à distinguer « pas de note » d'une erreur.
+async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Json<NoteResponse> {
+    Json(NoteResponse {
+        content: notes::read(&state.root(), &q.path).unwrap_or_default(),
+    })
+}
+
+/// Enregistre la note d'un dossier ou d'un fichier (`?path=<rel>`).
+///
+/// Un contenu vide supprime la note. Après écriture, un snapshot est diffusé
+/// aux clients WS pour que les autres onglets voient la modification.
+async fn put_note(
+    State(state): State<AppState>,
+    Query(q): Query<FileQuery>,
+    Json(body): Json<NoteBody>,
+) -> Response {
+    if body.content.len() > MAX_NOTE_LEN {
+        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    }
+
+    match notes::write(&state.root(), &q.path, &body.content) {
+        Ok(()) => {
+            broadcast_snapshot(&state);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+/// Taille maximale acceptée pour une note (garde-fou : 1 Mio).
+const MAX_NOTE_LEN: usize = 1024 * 1024;
+
+/// Rescanne l'état courant et diffuse la liste des modèles aux clients WS.
+pub fn broadcast_snapshot(state: &AppState) {
+    let payload =
+        ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
+    if let Ok(json) = serde_json::to_string(&payload) {
+        let _ = state.ws.send(json);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +303,7 @@ mod tests {
         Router::new()
             .route("/models", get(list_models))
             .route("/file", get(get_file))
+            .route("/note", get(get_note).put(put_note))
             .route("/health", get(health))
             .route("/ws", get(ws_models))
             .with_state(AppState::new(root, ws, crate::config::Config::default()))
@@ -407,6 +470,113 @@ mod tests {
         let msg = socket.next().await.unwrap().unwrap();
         let v2: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         assert_eq!(v2["count"], 3);
+    }
+
+    #[tokio::test]
+    async fn note_absente_renvoie_un_contenu_vide() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/note?path=sub%2Fmodel.stl")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["content"], "");
+    }
+
+    #[tokio::test]
+    async fn note_est_enregistree_dans_le_dossier_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=sub%2Fmodel.stl")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r##"{"content":"# Titre\n**gras**"}"##))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        // Le fichier est bien rangé dans `.easy3d-notes/`, en miroir du modèle.
+        let written = dir.path().join(".easy3d-notes/sub/model.stl.md");
+        assert!(written.is_file());
+        assert_eq!(
+            std::fs::read_to_string(&written).unwrap(),
+            "# Titre\n**gras**"
+        );
+
+        // Relecture via l'API.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/note?path=sub%2Fmodel.stl")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["content"], "# Titre\n**gras**");
+    }
+
+    #[tokio::test]
+    async fn note_videe_supprime_le_fichier() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".easy3d-notes")).unwrap();
+        std::fs::write(dir.path().join(".easy3d-notes/DemaAuto.md"), "texte").unwrap();
+
+        let app = test_app(dir.path().to_str().unwrap());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=DemaAuto")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"content":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert!(!dir.path().join(".easy3d-notes/DemaAuto.md").exists());
+    }
+
+    #[tokio::test]
+    async fn note_rejette_la_traversee_de_dossier() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/note?path=..%2F..%2Fevil")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"content":"x"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(!dir.path().parent().unwrap().join("evil.md").exists());
     }
 }
 

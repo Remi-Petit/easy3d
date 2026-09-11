@@ -14,6 +14,7 @@ const href = computed(() => `/dossiers/${encodeURIComponent(props.folder.name)}`
           <span class="folder-icon">📁</span>
         </div>
         <span class="folder-count">{{ folder.count }}</span>
+        <span v-if="folder.note" class="note-badge" title="Ce dossier a une note">📝</span>
       </div>
       <div class="model-card__body">
         <span class="model-card__name" :title="folder.name">{{ folder.name }}</span>

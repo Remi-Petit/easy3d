@@ -1,3 +1,4 @@
+use crate::notes;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -14,6 +15,9 @@ pub struct FileInfo {
     /// Image d'aperçu associée (même nom, même dossier) si présente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Note explicative (Markdown) associée, si présente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// Contenu d'un sous-dossier du répertoire surveillé.
@@ -22,6 +26,9 @@ pub struct FolderInfo {
     pub name: String,
     pub count: usize,
     pub files: Vec<FileInfo>,
+    /// Note explicative (Markdown) du dossier, si présente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// Scan structuré : distingue les fichiers racine et les fichiers des dossiers.
@@ -44,6 +51,7 @@ pub fn scan_files(root: &Path) -> Vec<FileInfo> {
     scan_dir_recursive(root, root, &mut out);
     attach_sibling_images(&mut out);
     attach_generated_thumbs(&mut out);
+    attach_notes(&mut out, root);
     out
 }
 
@@ -70,15 +78,16 @@ pub fn scan_models(root: &Path) -> ModelsScan {
             scan_dir_recursive(&path, root, &mut files);
             attach_sibling_images(&mut files);
             attach_generated_thumbs(&mut files);
+            attach_notes(&mut files, root);
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             scan.folders.insert(
-                path.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
+                name.clone(),
                 FolderInfo {
-                    name: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
+                    note: notes::read(root, &name),
+                    name,
                     count: files.len(),
                     files,
                 },
@@ -92,6 +101,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
 
     attach_sibling_images(&mut scan.files);
     attach_generated_thumbs(&mut scan.files);
+    attach_notes(&mut scan.files, root);
     scan
 }
 
@@ -142,6 +152,7 @@ fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
         created: meta.created().ok().and_then(to_unix_secs),
         modified: meta.modified().ok().and_then(to_unix_secs),
         image: None,
+        note: None,
     })
 }
 
@@ -247,6 +258,13 @@ fn attach_generated_thumbs(files: &mut [FileInfo]) {
         if root.join(&thumb_rel).is_file() {
             f.image = Some(thumb_rel);
         }
+    }
+}
+
+/// Associe à chaque élément sa note Markdown (`.easy3d-notes/<rel>.md`).
+fn attach_notes(files: &mut [FileInfo], root: &Path) {
+    for f in files.iter_mut() {
+        f.note = notes::read(root, &f.rel);
     }
 }
 

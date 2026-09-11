@@ -76,4 +76,7 @@ usePageHeader(() => ({
     <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
     <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
   </dl>
+
+  <!-- Note du fichier (Markdown) : affichage + édition assistée. -->
+  <NotePanel v-if="file" :key="rel" :rel="rel" :note="file.note" />
 </template>
