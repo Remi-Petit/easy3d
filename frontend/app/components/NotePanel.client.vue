@@ -1,6 +1,11 @@
 <script setup lang="ts">
-// Note Markdown d'un dossier ou d'un fichier : affichage rendu + édition
-// assistée (barre d'outils) avec enregistrement automatique côté backend.
+// Note Markdown d'un dossier ou d'un fichier : affichage rendu + édition en
+// **temps réel** (document partagé Yjs).
+//
+// Le texte n'est plus enregistré par un `PUT` : il vit dans un document
+// collaboratif dont le backend Rust tient la version autoritaire. Plusieurs
+// sessions peuvent donc écrire en même temps, à des endroits différents, sans
+// qu'aucune saisie n'en écrase une autre — et le texte affiché suit en direct.
 //
 // Composant `.client.vue` : la bibliothèque d'édition manipule le DOM, elle ne
 // doit pas être rendue côté serveur.
@@ -10,7 +15,7 @@ import 'md-editor-v3/lib/style.css'
 const props = defineProps<{
   /** Chemin relatif du fichier, ou nom du dossier. */
   rel: string
-  /** Note initiale, telle que renvoyée par le scan. */
+  /** Note telle que vue par le scan : affichée tant que le document n'est pas synchronisé. */
   note?: string | null
 }>()
 
@@ -75,6 +80,11 @@ config({
       },
     },
   },
+  // Extensions CodeMirror : c'est par là qu'on branche la synchronisation Yjs
+  // et les curseurs des autres participants. Un seul appel à `config()`, donc
+  // les deux réglages ne peuvent pas s'écraser l'un l'autre.
+  codeMirrorExtensions: (extensions: unknown[], { editorId }: { editorId: string }) =>
+    collabExtensions(editorId, extensions),
 })
 
 /** Barre d'outils : de quoi mettre en forme sans écrire de Markdown. */
@@ -102,99 +112,35 @@ const TOOLBARS = [
   'preview',
 ] as const
 
-const content = ref(props.note ?? '')
-/** Dernière valeur **connue du serveur** (chargée, ou enregistrée par nous). */
-const saved = ref(props.note ?? '')
+/** Identifiant de l'éditeur, unique dans la page. */
+const editorId = editorIdFor(props.rel)
+
+const { text, connected, synced, peers, beginEdit } = useCollabNote(props.rel)
+
 const editing = ref(false)
-const status = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-/** Un changement distant est arrivé pendant qu'on avait des modifications locales. */
-const remoteChanged = ref(false)
-
-/** Des modifications locales ne sont pas encore enregistrées. */
-const dirty = computed(() => content.value !== saved.value)
-
-const statusLabel = computed(
-  () =>
-    ({
-      idle: '',
-      saving: 'Enregistrement…',
-      saved: 'Enregistré',
-      error: 'Échec de l’enregistrement',
-    })[status.value],
-)
-
-let timer: ReturnType<typeof setTimeout> | null = null
-
-/** Enregistre la note (différé, pour ne pas écrire à chaque frappe). */
-async function save(value: string) {
-  timer = null
-  status.value = 'saving'
-  try {
-    await $fetch('/api/note', {
-      method: 'PUT',
-      query: { path: props.rel },
-      body: { content: value },
-    })
-    // Le serveur porte désormais cette valeur : c'est notre nouvelle référence.
-    saved.value = value
-    status.value = 'saved'
-    remoteChanged.value = false
-  } catch {
-    status.value = 'error'
-  }
-}
-
-watch(content, (value) => {
-  // Rien à enregistrer si le serveur a déjà cette valeur.
-  if (value === saved.value) return
-  if (timer) clearTimeout(timer)
-  status.value = 'saving'
-  timer = setTimeout(() => void save(value), 700)
-})
+/**
+ * Contenu de l'éditeur. Il suit le document partagé — y compris les
+ * modifications venues des autres participants, que CodeMirror applique — ce
+ * qui garde l'aperçu de md-editor-v3 à jour.
+ */
+const content = ref('')
 
 /**
- * Suit les modifications venues **d'une autre session** (l'API diffuse la liste
- * mise à jour aux WebSockets après chaque écriture).
- *
- * On rattrape toujours la valeur du serveur, sauf si des modifications locales
- * non enregistrées seraient écrasées : on le signale alors au lieu de perdre la
- * saisie en cours.
+ * Texte affiché : le document partagé dès qu'il est synchronisé, sinon la
+ * valeur du scan, pour ne pas afficher « aucune note » le temps de la connexion.
  */
-watch(
-  () => props.note,
-  (incoming) => {
-    const result = reconcileRemote(content.value, saved.value, incoming ?? '')
-    if (result.conflict) {
-      remoteChanged.value = true
-      return
-    }
-    if (result.content === content.value && result.saved === saved.value) return
-    content.value = result.content
-    saved.value = result.saved
-    status.value = 'idle'
-  },
-)
+const displayed = computed(() => (synced.value ? text.value : props.note ?? ''))
 
-/** Abandonne les modifications locales au profit de la version du serveur. */
-function acceptRemote() {
-  if (timer) {
-    clearTimeout(timer)
-    timer = null
+function toggleEdit() {
+  if (editing.value) {
+    editing.value = false
+    return
   }
-  const next = props.note ?? ''
-  content.value = next
-  saved.value = next
-  remoteChanged.value = false
-  status.value = 'idle'
+  // Le contenu initial doit correspondre à l'état du document partagé, sinon
+  // l'éditeur impose le sien et le CRDT se désynchronise.
+  content.value = beginEdit(editorId)
+  editing.value = true
 }
-
-// Quitte la page juste après une frappe : on force l'enregistrement en attente.
-onBeforeUnmount(() => {
-  if (timer) {
-    clearTimeout(timer)
-    void save(content.value)
-  }
-})
 </script>
 
 <template>
@@ -202,31 +148,27 @@ onBeforeUnmount(() => {
     <div class="note__head">
       <h2 class="note__title">📝 Note</h2>
       <div class="note__actions">
-        <span v-if="editing && statusLabel" class="note__status" :class="`note__status--${status}`">
-          {{ statusLabel }}
+        <span
+          v-if="editing"
+          class="note__status"
+          :class="connected ? 'note__status--saved' : 'note__status--error'"
+        >
+          {{ connected ? (peers > 0 ? `👥 ${peers + 1} personnes` : 'Connecté') : 'Hors ligne' }}
         </span>
         <button
           type="button"
           class="note__btn"
           :class="{ 'note__btn--primary': editing }"
-          @click="editing = !editing"
+          @click="toggleEdit"
         >
-          {{ editing ? 'Terminer' : content ? 'Modifier' : 'Ajouter une note' }}
+          {{ editing ? 'Terminer' : displayed ? 'Modifier' : 'Ajouter une note' }}
         </button>
       </div>
     </div>
 
-    <!-- Conflit : la note a changé ailleurs alors que des modifications locales
-         attendent. On le dit plutôt que d'écraser silencieusement l'un ou l'autre. -->
-    <p v-if="remoteChanged" class="note__remote">
-      ⚠️ Modifiée dans une autre session —
-      <button type="button" class="note__remote-btn" @click="acceptRemote">
-        charger la version du serveur
-      </button>
-    </p>
-
     <MdEditor
       v-if="editing"
+      :id="editorId"
       v-model="content"
       language="fr"
       theme="dark"
@@ -243,9 +185,9 @@ onBeforeUnmount(() => {
     />
     <template v-else>
       <MdPreview
-        v-if="content"
+        v-if="displayed"
         class="note__preview"
-        :model-value="content"
+        :model-value="displayed"
         language="fr"
         theme="dark"
         preview-theme="github"

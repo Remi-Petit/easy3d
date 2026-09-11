@@ -10,7 +10,9 @@ easy3d/
 │   ├── src/
 │   │   ├── main.rs
 │   │   ├── lib.rs
-│   │   ├── api.rs        ← routes HTTP (/models, /health)
+│   │   ├── api.rs        ← routes HTTP (/models, /file, /note, /health)
+│   │   ├── collab.rs     ← édition collaborative des notes (CRDT Yjs)
+│   │   ├── notes.rs      ← notes Markdown (.easy3d-notes/)
 │   │   ├── scanner.rs    ← scan récursif + métadonnées
 │   │   └── watcher.rs    ← description des événements FS
 │   └── tests/
@@ -40,7 +42,14 @@ cargo run
 ```
 
 - Sert `GET /models` (liste structurée avec `path` et `rel`), `GET /file?path=<rel>`
-  (contenu binaire d'un modèle) et `GET /health` sur `http://127.0.0.1:8090` (ou `PORT`).
+  (contenu binaire d'un modèle), `GET /note?path=<rel>` (note Markdown) et
+  `GET /health` sur `http://127.0.0.1:8090` (ou `PORT`).
+- `GET /collab/{rel}` est un WebSocket d'**édition collaborative** : chaque note est
+  un document CRDT Yjs (`yrs`), le serveur en tient la version autoritaire et relaie
+  les modifications entre participants. Les notes sont persistées en Markdown dans
+  `models/.easy3d-notes/`, en miroir de l'arborescence (`DemaAuto/x.stl` →
+  `.easy3d-notes/DemaAuto/x.stl.md`). Le dossier est ignoré par le scan et par la
+  surveillance, qui l'écrit lui-même.
 - Le champ `rel` est le chemin relatif à la racine, utilisé par le frontend pour `/file`.
 - Sécurité : `/file` rejette la traversée de dossier (`..`, chemins absolus).
 - Surveille `./models` (via `MODELS_ROOT`, relatif au repo par défaut).
@@ -56,6 +65,10 @@ bun run dev
 
 - UI sur `http://localhost:3000`.
 - Les routes `/api/models`, `/api/file` et `/api/health` proxyent vers le backend.
+- **Notes** : chaque dossier et chaque fichier peut porter une note Markdown, éditable
+  sans écrire de Markdown (barre d'outils) et **en temps réel** : plusieurs sessions
+  peuvent écrire en même temps, à des endroits différents, sans s'écraser. Le texte
+  affiché suit les modifications des autres participants en direct.
 - **Aperçu 3D** : chaque fichier STL / 3MF affiche une vignette 3D (three.js),
   cliquable pour ouvrir une vue plein écran (triangles + rotation/zoom).
   Les GCODE affichent un badge (pas de maillage).
@@ -70,6 +83,7 @@ bun run dev
 | `MODELS_ROOT`       | backend            | `../models` (relatif repo)|
 | `NUXT_HPCCAT_API_BASE` | frontend        | `http://127.0.0.1:8090`   |
 | `NUXT_HPCCAT_API_PORT` | frontend        | `8090`                    |
+| `NUXT_HPCCAT_WS_BASE`  | frontend        | `ws://127.0.0.1:8090`     |
 
 ## Tests
 
