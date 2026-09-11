@@ -3,8 +3,8 @@ import type { DisplayMode, FileInfo } from '~/composables/useModels'
 import { useNow } from '~/composables/useNow'
 
 const props = withDefaults(
-  defineProps<{ file: FileInfo; displayMode?: DisplayMode }>(),
-  { displayMode: '3d' },
+  defineProps<{ file: FileInfo; displayMode?: DisplayMode; folder?: string | null }>(),
+  { displayMode: '3d', folder: null },
 )
 
 const now = useNow()
@@ -39,7 +39,9 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
 
       <div class="model-card__body">
         <span class="model-card__name" :title="file.path">{{ name }}</span>
-        <span class="model-card__meta">{{ type.toUpperCase() }} · {{ when }}</span>
+        <span class="model-card__meta">
+          {{ type.toUpperCase() }}<template v-if="folder"> · 📁 {{ folder }}</template> · {{ when }}
+        </span>
       </div>
     </NuxtLink>
   </article>
