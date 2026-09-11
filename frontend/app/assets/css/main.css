@@ -514,6 +514,95 @@ a {
   color: var(--accent-2);
 }
 
+/* ---------- Marqueur de note (sur les cartes) ---------- */
+.note-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* ---------- Note Markdown (pages de détail) ---------- */
+.note {
+  margin-top: 26px;
+}
+
+.note__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.note__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.note__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.note__status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note__status--saved {
+  color: var(--ok);
+}
+
+.note__status--error {
+  color: var(--err);
+}
+
+.note__btn {
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.note__btn:hover {
+  border-color: var(--accent);
+}
+
+.note__btn--primary {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.note__empty {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+/* Le rendu Markdown est posé dans une carte, comme le reste de l'interface. */
+.note__preview {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 16px;
+}
+
 /* ---------- Visionneuse 3D ---------- */
 .model-viewer {
   position: relative;

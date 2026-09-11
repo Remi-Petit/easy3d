@@ -42,6 +42,7 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
         <div v-else :class="['model-card__ph', isGcode ? 'ph--gcode' : 'ph--other']">
           <span class="ph-badge">{{ isGcode ? '🖨 GCODE' : type }}</span>
         </div>
+        <span v-if="file.note" class="note-badge" title="Ce fichier a une note">📝</span>
       </div>
 
       <div class="model-card__body">
