@@ -13,31 +13,22 @@ const folder = computed<FolderInfo | null>(() => {
 const total = computed(() => folder.value?.count ?? 0)
 // Mode d'affichage issu de la config backend ("image" | "3d").
 const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
+
+// En-tête global (rendu par le layout `default`).
+usePageHeader(() => ({
+  subtitle: `${total.value} fichier${total.value > 1 ? 's' : ''} · STL / 3MF / GCODE`,
+  count: 0,
+  live: live.value,
+  offline: !!error.value,
+}))
 </script>
 
 <template>
-  <div class="container detail">
-    <NuxtLink to="/" class="back">← Retour</NuxtLink>
+  <div v-if="error" class="error">{{ error }}</div>
 
-    <header class="header">
-      <div class="brand">
-        <div class="logo">📁</div>
-        <div>
-          <h1>{{ name }}</h1>
-          <small>{{ total }} fichier{{ total > 1 ? 's' : '' }} · STL / 3MF / GCODE</small>
-        </div>
-      </div>
-      <div v-if="live" class="stats">
-        <span class="pill"><span class="dot live" /> temps réel</span>
-      </div>
-    </header>
-
-    <div v-if="error" class="error">{{ error }}</div>
-
-    <div v-if="folder" class="file-grid">
-      <FileItem v-for="f in folder.files" :key="f.path" :file="f" :display-mode="displayMode" />
-      <p v-if="!folder.files.length" class="empty">Dossier vide</p>
-    </div>
-    <div v-else class="empty">Chargement…</div>
+  <div v-if="folder" class="file-grid">
+    <FileItem v-for="f in folder.files" :key="f.path" :file="f" :display-mode="displayMode" />
+    <p v-if="!folder.files.length" class="empty">Dossier vide</p>
   </div>
+  <div v-else class="empty">Chargement…</div>
 </template>

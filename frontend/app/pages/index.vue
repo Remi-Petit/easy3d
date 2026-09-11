@@ -88,85 +88,71 @@ const sortedMatchedFiles = computed<SearchFile[]>(() => sortFiles(matchedFiles.v
 const totalCount = computed(() => data.value?.count ?? 0)
 // Mode d'affichage issu de la config backend ("image" | "3d").
 const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
-// "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
-const connected = computed(() => live.value || !error.value)
-const liveLabel = computed(() =>
-  live.value ? 'temps réel' : error.value ? 'hors ligne' : 'repli polling',
-)
+
+// En-tête global (rendu par le layout `default`).
+usePageHeader(() => ({
+  subtitle: 'catalogue de modèles · STL / 3MF / GCODE',
+  count: totalCount.value,
+  live: live.value,
+  offline: !!error.value,
+}))
 </script>
 
 <template>
-  <div class="container">
-    <header class="header">
-      <div class="brand">
-        <div class="logo">3D</div>
-        <div>
-          <h1>easy3d</h1>
-          <small>catalogue de modèles · STL / 3MF / GCODE</small>
-        </div>
-      </div>
-
-      <div class="stats">
-        <span class="pill"><span class="dot" :class="connected ? 'live' : 'err'" /> {{ liveLabel }}</span>
-        <span class="pill"><b>{{ totalCount }}</b> fichiers</span>
-      </div>
-    </header>
-
-    <div class="toolbar">
-      <div class="search">
-        <span class="icon">🔍</span>
-        <input v-model="query" type="text" placeholder="Filtrer par nom de fichier ou de dossier…" />
-      </div>
-      <button
-        type="button"
-        class="sort"
-        :class="`sort--${sortMode}`"
-        :title="`Trier par ${sortLabel} (cliquer pour changer)`"
-        :aria-label="`Trier par ${sortLabel}`"
-        @click="cycleSort"
-      >
-        <span class="sort__icon">{{ sortIcon }}</span>
-        <span class="sort__label">Date</span>
-      </button>
+  <div class="toolbar">
+    <div class="search">
+      <span class="icon">🔍</span>
+      <input v-model="query" type="text" placeholder="Filtrer par nom de fichier ou de dossier…" />
     </div>
+    <button
+      type="button"
+      class="sort"
+      :class="`sort--${sortMode}`"
+      :title="`Trier par ${sortLabel} (cliquer pour changer)`"
+      :aria-label="`Trier par ${sortLabel}`"
+      @click="cycleSort"
+    >
+      <span class="sort__icon">{{ sortIcon }}</span>
+      <span class="sort__label">Date</span>
+    </button>
+  </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+  <div v-if="error" class="error">{{ error }}</div>
 
-    <template v-if="data">
-      <!-- Recherche active : une seule section « All » regroupant dossiers + fichiers. -->
-      <template v-if="searching">
-        <p class="section-label">All ({{ resultCount }})</p>
-        <div v-if="resultCount" class="file-grid">
-          <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
-          <FileItem
-            v-for="f in sortedMatchedFiles"
-            :key="f.path"
-            :file="f"
-            :folder="f.folder"
-            :display-mode="displayMode"
-          />
-        </div>
-        <div v-else class="empty">Aucun résultat pour « {{ query.trim() }} ».</div>
-      </template>
-
-      <!-- Vue par défaut : Dossiers + Racine. -->
-      <template v-else>
-        <p class="section-label">Dossiers</p>
-        <div v-if="allFolders.length" class="file-grid">
-          <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" />
-        </div>
-        <div v-else class="empty">Aucun dossier trouvé.</div>
-
-        <p class="section-label">Racine ({{ rootFiles.length }})</p>
-        <article class="card" v-if="rootFiles.length">
-          <div class="file-grid">
-            <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
-          </div>
-        </article>
-        <div v-else class="empty">Aucun fichier à la racine.</div>
-      </template>
+  <template v-if="data">
+    <!-- Recherche active : une seule section « All » regroupant dossiers + fichiers. -->
+    <template v-if="searching">
+      <p class="section-label">All ({{ resultCount }})</p>
+      <div v-if="resultCount" class="file-grid">
+        <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
+        <FileItem
+          v-for="f in sortedMatchedFiles"
+          :key="f.path"
+          :file="f"
+          :folder="f.folder"
+          :display-mode="displayMode"
+        />
+      </div>
+      <div v-else class="empty">Aucun résultat pour « {{ query.trim() }} ».</div>
     </template>
 
-    <div v-else class="empty">Chargement…</div>
-  </div>
+    <!-- Vue par défaut : Dossiers + Racine. -->
+    <template v-else>
+      <p class="section-label">Dossiers</p>
+      <div v-if="allFolders.length" class="file-grid">
+        <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" />
+      </div>
+      <div v-else class="empty">Aucun dossier trouvé.</div>
+
+      <p class="section-label">Racine ({{ rootFiles.length }})</p>
+      <article class="card" v-if="rootFiles.length">
+        <div class="file-grid">
+          <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
+        </div>
+      </article>
+      <div v-else class="empty">Aucun fichier à la racine.</div>
+    </template>
+  </template>
+
+  <div v-else class="empty">Chargement…</div>
 </template>
