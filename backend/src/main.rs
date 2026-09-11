@@ -1,4 +1,4 @@
-use easy3d::{api, config, notes, render, watcher};
+use easy3d::{api, config, render, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::path::{Path, PathBuf};
@@ -142,53 +142,14 @@ fn watch_dir(
         let mut models_changed = false;
         let mut config_changed = false;
 
-        for event in events {
-            // On ignore les événements d'accès (ouverture/lecture d'un fichier) :
-            // ils ne traduisent pas un changement et provoqueraient des boucles
-            // (chaque relecture du fichier de config en génère un).
-            if !watcher::is_content_change(&event) {
-                continue;
-            }
-
-            // Événement sur le fichier de configuration ?
-            if event.paths.iter().any(|p| p == &config_path) {
-                config_changed = true;
-                continue;
-            }
-            // Événement hors du dossier des modèles → ignoré (ex : autres
-            // fichiers du dossier `backend/`, artefacts de build…).
-            if !event.paths.iter().any(|p| p.starts_with(&current_root)) {
-                continue;
-            }
-
-            let thumbs_root = current_root.join(render::THUMB_DIR);
-            let notes_root = current_root.join(notes::NOTES_DIR);
-            // Événements provoqués par nos propres artefacts : les aperçus
-            // générés et les notes écrites via l'API. Ces dossiers cachés
-            // n'apparaissent pas dans le scan ; les rediffuser boucherait à
-            // chaque enregistrement de note (écriture → watcher → diffusion).
-            if event
-                .paths
-                .iter()
-                .all(|p| p.starts_with(&thumbs_root) || p.starts_with(&notes_root))
-            {
-                continue;
-            }
-
-            // Met à jour l'aperçu généré pour chaque chemin concerné.
-            for p in &event.paths {
-                if p.exists() {
-                    render::ensure_for_changed(&current_root, &thumbs_root, p);
-                } else {
-                    render::remove_for_path(&current_root, &thumbs_root, p);
-                }
-            }
-            // On n'affiche que les vrais changements (ajout / modif / suppression).
-            if let Some(msg) = watcher::describe_event(&event) {
-                println!("{msg}");
-                models_changed = true;
-            }
+        // L'interprétation des événements vit dans `watcher` (testable) : ici on
+        // ne fait que router le résultat du lot.
+        let effect = watcher::handle_batch(&current_root, &config_path, &events);
+        for msg in &effect.messages {
+            println!("{msg}");
         }
+        config_changed |= effect.config_changed;
+        models_changed |= effect.models_changed;
 
         // ── Rechargement à chaud de la configuration ──────────────────────
         if config_changed {

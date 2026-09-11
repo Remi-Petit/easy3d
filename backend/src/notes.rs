@@ -61,6 +61,69 @@ pub fn write(root: &Path, rel: &str, content: &str) -> std::io::Result<()> {
     fs::write(path, content)
 }
 
+/// Chemin relatif (séparateurs `/`) de `path` par rapport à `root`.
+fn rel_of(root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(root).ok()?;
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
+/// Fait suivre la note d'un élément qui vient d'être **déplacé ou renommé**.
+///
+/// `from` et `to` sont des chemins absolus. La note de l'élément est déplacée,
+/// ainsi que **tout le sous-arbre de notes** s'il s'agit d'un dossier.
+///
+/// Sans effet (et sans erreur) si l'un des deux chemins est hors de la racine
+/// des modèles : un fichier qui sort du catalogue laisse sa note en place, pour
+/// la retrouver s'il y revient.
+///
+/// Retourne `true` si au moins un fichier de note a été déplacé.
+pub fn move_for_path(root: &Path, from: &Path, to: &Path) -> std::io::Result<bool> {
+    let (Some(from_rel), Some(to_rel)) = (rel_of(root, from), rel_of(root, to)) else {
+        return Ok(false);
+    };
+    if from_rel == to_rel {
+        return Ok(false);
+    }
+
+    let notes_root = root.join(NOTES_DIR);
+    let mut moved = false;
+
+    // 1. La note de l'élément lui-même (`.easy3d-notes/<rel>.md`).
+    if let (Some(old), Some(new)) = (note_path(root, &from_rel), note_path(root, &to_rel))
+        && old.is_file()
+        // On n'écrase jamais une note déjà en place à la destination.
+        && !new.exists()
+    {
+        if let Some(parent) = new.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&old, &new)?;
+        moved = true;
+    }
+
+    // 2. Le sous-arbre de notes, si c'est un dossier qui a été déplacé.
+    let old_dir = notes_root.join(&from_rel);
+    if old_dir.is_dir() {
+        let new_dir = notes_root.join(&to_rel);
+        if let Some(parent) = new_dir.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if !new_dir.exists() {
+            fs::rename(&old_dir, &new_dir)?;
+            moved = true;
+        }
+    }
+
+    Ok(moved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +173,111 @@ mod tests {
         write(root, "DemaAuto/x.stl", "   \n").unwrap();
         assert!(read(root, "DemaAuto/x.stl").is_none());
         assert!(!root.join(".easy3d-notes/DemaAuto/x.stl.md").exists());
+    }
+
+    /// Prépare une arborescence `models/` minimale (dossiers A et B).
+    fn models_tree() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::create_dir_all(root.join("A")).unwrap();
+        fs::create_dir_all(root.join("B")).unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn la_note_suit_un_fichier_deplace_vers_un_autre_dossier() {
+        let (_dir, root) = models_tree();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        write(&root, "A/x.stl", "# note de x").unwrap();
+
+        let moved = move_for_path(&root, &root.join("A/x.stl"), &root.join("B/x.stl")).unwrap();
+
+        assert!(moved);
+        assert!(read(&root, "A/x.stl").is_none());
+        assert_eq!(read(&root, "B/x.stl").as_deref(), Some("# note de x"));
+    }
+
+    #[test]
+    fn la_note_suit_un_fichier_renomme() {
+        let (_dir, root) = models_tree();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        write(&root, "A/x.stl", "# note").unwrap();
+
+        move_for_path(&root, &root.join("A/x.stl"), &root.join("A/y.stl")).unwrap();
+
+        assert!(read(&root, "A/x.stl").is_none());
+        assert_eq!(read(&root, "A/y.stl").as_deref(), Some("# note"));
+    }
+
+    #[test]
+    fn un_dossier_deplace_emmene_toutes_ses_notes() {
+        let (_dir, root) = models_tree();
+        fs::create_dir_all(root.join("A/sous")).unwrap();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        fs::write(root.join("A/sous/y.stl"), "y").unwrap();
+        write(&root, "A", "# note du dossier").unwrap();
+        write(&root, "A/x.stl", "# note de x").unwrap();
+        write(&root, "A/sous/y.stl", "# note de y").unwrap();
+
+        // A → B (le dossier entier change de nom).
+        move_for_path(&root, &root.join("A"), &root.join("B")).unwrap();
+
+        assert_eq!(read(&root, "B").as_deref(), Some("# note du dossier"));
+        assert_eq!(read(&root, "B/x.stl").as_deref(), Some("# note de x"));
+        assert_eq!(read(&root, "B/sous/y.stl").as_deref(), Some("# note de y"));
+        // Plus rien à l'ancien emplacement.
+        assert!(read(&root, "A").is_none());
+        assert!(!root.join(".easy3d-notes/A").exists());
+    }
+
+    #[test]
+    fn deplacement_sans_note_ne_cree_rien() {
+        let (_dir, root) = models_tree();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+
+        assert!(!move_for_path(&root, &root.join("A/x.stl"), &root.join("B/x.stl")).unwrap());
+        assert!(!root.join(".easy3d-notes").exists());
+    }
+
+    #[test]
+    fn un_deplacement_hors_du_catalogue_laisse_la_note_en_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("models");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("x.stl"), "x").unwrap();
+        write(&root, "x.stl", "# note").unwrap();
+
+        // Sortie du catalogue : rien n'est déplacé, la note reste disponible.
+        let outside = dir.path().join("ailleur.stl");
+        assert!(!move_for_path(&root, &root.join("x.stl"), &outside).unwrap());
+        assert_eq!(read(&root, "x.stl").as_deref(), Some("# note"));
+
+        // Entrée dans le catalogue : la note existante n'est pas écrasée.
+        assert!(!move_for_path(&root, &outside, &root.join("y.stl")).unwrap());
+        assert!(read(&root, "y.stl").is_none());
+    }
+
+    #[test]
+    fn une_note_deja_presente_a_la_destination_n_est_pas_ecrasee() {
+        let (_dir, root) = models_tree();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        write(&root, "A/x.stl", "# note source").unwrap();
+        write(&root, "B/x.stl", "# note destination").unwrap();
+
+        move_for_path(&root, &root.join("A/x.stl"), &root.join("B/x.stl")).unwrap();
+
+        // La cible est conservée, la source reste où elle est : aucune perte.
+        assert_eq!(read(&root, "B/x.stl").as_deref(), Some("# note destination"));
+        assert_eq!(read(&root, "A/x.stl").as_deref(), Some("# note source"));
+    }
+
+    #[test]
+    fn un_chemin_identique_ne_fait_rien() {
+        let (_dir, root) = models_tree();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        write(&root, "A/x.stl", "# note").unwrap();
+
+        assert!(!move_for_path(&root, &root.join("A/x.stl"), &root.join("A/x.stl")).unwrap());
+        assert_eq!(read(&root, "A/x.stl").as_deref(), Some("# note"));
     }
 }
