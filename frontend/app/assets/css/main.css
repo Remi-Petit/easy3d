@@ -123,9 +123,18 @@ a {
   100% { opacity: 1; }
 }
 
-/* ---------- Search ---------- */
-.search {
+/* ---------- Search + tri ---------- */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+.search {
+  flex: 1;
+  min-width: 220px;
   position: relative;
 }
 
@@ -151,6 +160,50 @@ a {
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted);
+}
+
+/* Bouton de tri par date (cycle normal -> récent → ancien -> ancien → récent). */
+.sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: pointer;
+}
+
+.sort:hover {
+  border-color: var(--accent);
+}
+
+.sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sort__icon {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+/* Tri actif : on met le bouton en évidence. */
+.sort:not(.sort--none) {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.sort:not(.sort--none) .sort__icon {
+  color: var(--accent-2);
 }
 
 /* ---------- Grid ---------- */

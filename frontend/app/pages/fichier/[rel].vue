@@ -24,11 +24,19 @@ const now = useNow()
 const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
 const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
+const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
 // Mode d'affichage issu de la config backend ("image" | "3d").
 const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
 /** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
 const showDetailImage = computed(() => displayMode.value === 'image' && !!file.value?.image)
+/**
+ * Viewer 3D : toujours pour un modèle ; pour un G-code seulement en mode `3d`
+ * (en mode `image` on préfère l'aperçu statique extrait du fichier).
+ */
+const showViewer = computed(
+  () => isModel.value || (isGcode.value && displayMode.value === '3d'),
+)
 </script>
 
 <template>
@@ -37,7 +45,7 @@ const showDetailImage = computed(() => displayMode.value === 'image' && !!file.v
 
     <header class="header">
       <div class="brand">
-        <div class="logo">{{ isModel ? '🧊' : '📄' }}</div>
+        <div class="logo">{{ isModel ? '🧊' : isGcode ? '🖨' : '📄' }}</div>
         <div>
           <h1>{{ name }}</h1>
           <small>{{ type.toUpperCase() }} · {{ when }}</small>
@@ -57,10 +65,16 @@ const showDetailImage = computed(() => displayMode.value === 'image' && !!file.v
         :alt="name"
         class="model-card__img"
       />
-      <ModelViewer v-else-if="isModel" :rel="rel" show-info :auto-rotate="false" />
+      <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
       <div v-else class="file-detail-placeholder">
         <span class="ph-badge">{{ type.toUpperCase() }}</span>
-        <p>Aperçu 3D non disponible pour ce type de fichier.</p>
+        <p>
+          {{
+            isGcode
+              ? 'Aucun aperçu trouvé dans ce G-code.'
+              : 'Aperçu 3D non disponible pour ce type de fichier.'
+          }}
+        </p>
       </div>
     </div>
 

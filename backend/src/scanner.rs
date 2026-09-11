@@ -168,6 +168,16 @@ fn is_model(rel: &str) -> bool {
     matches!(ext_of(rel).as_str(), "stl" | "obj" | "3mf")
 }
 
+/// `true` si le fichier est un G-code (`.gcode` / `.gco`).
+fn is_gcode(rel: &str) -> bool {
+    matches!(ext_of(rel).as_str(), "gcode" | "gco")
+}
+
+/// `true` si le fichier peut recevoir un aperçu (modèle 3D ou G-code).
+fn can_have_preview(rel: &str) -> bool {
+    is_model(rel) || is_gcode(rel)
+}
+
 /// `true` si le fichier est une image d'aperçu.
 fn is_image(rel: &str) -> bool {
     matches!(ext_of(rel).as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif")
@@ -185,8 +195,8 @@ fn img_priority(ext: &str) -> u32 {
     }
 }
 
-/// Associe à chaque modèle (STL / OBJ) une image de même nom dans le même
-/// dossier, si elle existe (ex : `boitier.stl` + `boitier.png`).
+/// Associe à chaque modèle (STL / OBJ / G-code) une image de même nom dans le
+/// même dossier, si elle existe (ex : `boitier.stl` + `boitier.png`).
 fn attach_sibling_images(files: &mut [FileInfo]) {
     use std::collections::HashMap;
     let mut best: HashMap<String, String> = HashMap::new();
@@ -204,7 +214,7 @@ fn attach_sibling_images(files: &mut [FileInfo]) {
         }
     }
     for f in files.iter_mut() {
-        if is_model(&f.rel) {
+        if can_have_preview(&f.rel) {
             if let Some(img) = best.get(&file_stem(&f.rel)) {
                 f.image = Some(img.clone());
             }
@@ -225,7 +235,7 @@ fn gen_thumb_rel(rel: &str) -> String {
 fn attach_generated_thumbs(files: &mut [FileInfo]) {
     use std::path::PathBuf;
     for f in files.iter_mut() {
-        if f.image.is_some() || !is_model(&f.rel) {
+        if f.image.is_some() || !can_have_preview(&f.rel) {
             continue;
         }
         // Racine des modèles = chemin absolu du modèle moins ses composantes rel.

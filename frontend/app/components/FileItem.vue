@@ -13,6 +13,13 @@ const type = computed(() => ext(props.file.path) || '?')
 const when = computed(() => timeAgo(toDate(props.file.modified), now.value))
 const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
+/**
+ * Rendu 3D interactif : toujours pour un modèle ; pour un G-code seulement en
+ * mode `3d` (en mode `image` on préfère l'aperçu statique du slicer).
+ */
+const show3d = computed(
+  () => isModel.value || (isGcode.value && props.displayMode === '3d'),
+)
 /** Chemin relatif encodé -> URL `/fichier/[rel]`. */
 const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)
 
@@ -31,7 +38,7 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
           class="model-card__img"
           loading="lazy"
         />
-        <ModelThumbnail v-else-if="isModel" :rel="file.rel" />
+        <ModelThumbnail v-else-if="show3d" :rel="file.rel" />
         <div v-else :class="['model-card__ph', isGcode ? 'ph--gcode' : 'ph--other']">
           <span class="ph-badge">{{ isGcode ? '🖨 GCODE' : type }}</span>
         </div>
