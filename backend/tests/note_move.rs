@@ -52,9 +52,6 @@ fn un_fichier_deplace_emmene_sa_note() {
         let Ok(Ok(events)) = rx.recv_timeout(Duration::from_millis(500)) else {
             continue;
         };
-        for event in &events {
-            eprintln!("[diag] {:?} {:?}", event.kind, event.paths);
-        }
         // Exactement comme `main.rs` : le lot est traité d'un bloc.
         watcher::handle_batch(&root, &root.join("config.yml"), &events);
     }

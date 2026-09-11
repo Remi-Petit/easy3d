@@ -1,3 +1,4 @@
+use crate::collab;
 use crate::config::Config;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
@@ -28,6 +29,8 @@ pub struct AppState {
     pub config: Arc<RwLock<Config>>,
     /// Canal broadcast : diffuse la liste des modèles (JSON) à tous les WS.
     pub ws: broadcast::Sender<String>,
+    /// Documents collaboratifs ouverts (édition temps réel des notes).
+    pub collab: Arc<collab::Rooms>,
 }
 
 impl AppState {
@@ -37,6 +40,7 @@ impl AppState {
             root: Arc::new(RwLock::new(root.into())),
             config: Arc::new(RwLock::new(config)),
             ws,
+            collab: Arc::new(collab::Rooms::new()),
         }
     }
 
@@ -53,13 +57,7 @@ impl AppState {
 
 /// Démarre le serveur HTTP et bloque jusqu'à son arrêt.
 pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-    let app = Router::new()
-        .route("/models", get(list_models))
-        .route("/file", get(get_file))
-        .route("/note", get(get_note).put(put_note))
-        .route("/health", get(health))
-        .route("/ws", get(ws_models))
-        .with_state(state);
+    let app = routes(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8090".to_string());
     let addr = format!("127.0.0.1:{port}").parse::<SocketAddr>()?;
@@ -68,6 +66,21 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     println!("API HTTP : http://{addr}/models");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// Table des routes du serveur.
+///
+/// Extraite de [`serve`] pour que les tests montent exactement le même
+/// serveur que la production.
+pub fn routes(state: AppState) -> Router {
+    Router::new()
+        .route("/models", get(list_models))
+        .route("/file", get(get_file))
+        .route("/note", get(get_note))
+        .route("/health", get(health))
+        .route("/ws", get(ws_models))
+        .route("/collab/{*rel}", get(ws_collab))
+        .with_state(state)
 }
 
 /// Point de santé : renvoie `ok` (200).
@@ -106,6 +119,19 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
         scanner::scan_models(&state.root()),
         &state.config(),
     ))
+}
+
+/// WebSocket `/collab/{rel}` : édition collaborative de la note d'un élément.
+///
+/// `rel` est le chemin relatif de la note dans le catalogue (`DemaAuto`,
+/// `DemaAuto/boitier.stl`), transmis tel quel comme nom de « room » par le
+/// client `y-websocket`.
+async fn ws_collab(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    axum::extract::Path(rel): axum::extract::Path<String>,
+) -> Response {
+    ws.on_upgrade(move |socket| collab::handle_socket(socket, state, rel))
 }
 
 /// WebSocket : connexion persistante qui pousse la liste des modèles à chaque
@@ -240,46 +266,19 @@ struct NoteResponse {
     content: String,
 }
 
-/// Corps de `PUT /note`.
-#[derive(Deserialize)]
-struct NoteBody {
-    content: String,
-}
-
 /// Lit la note d'un dossier ou d'un fichier (`?path=<rel>`).
 ///
 /// Renvoie `{ content: "" }` quand aucune note n'existe : le frontend n'a ainsi
 /// pas à distinguer « pas de note » d'une erreur.
+///
+/// L'écriture, elle, ne passe plus par HTTP : elle est faite par le serveur de
+/// synchronisation (voir [`crate::collab`]), seul à même de fusionner des
+/// modifications concurrentes.
 async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Json<NoteResponse> {
     Json(NoteResponse {
         content: notes::read(&state.root(), &q.path).unwrap_or_default(),
     })
 }
-
-/// Enregistre la note d'un dossier ou d'un fichier (`?path=<rel>`).
-///
-/// Un contenu vide supprime la note. Après écriture, un snapshot est diffusé
-/// aux clients WS pour que les autres onglets voient la modification.
-async fn put_note(
-    State(state): State<AppState>,
-    Query(q): Query<FileQuery>,
-    Json(body): Json<NoteBody>,
-) -> Response {
-    if body.content.len() > MAX_NOTE_LEN {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-    }
-
-    match notes::write(&state.root(), &q.path, &body.content) {
-        Ok(()) => {
-            broadcast_snapshot(&state);
-            StatusCode::NO_CONTENT.into_response()
-        }
-        Err(_) => StatusCode::BAD_REQUEST.into_response(),
-    }
-}
-
-/// Taille maximale acceptée pour une note (garde-fou : 1 Mio).
-const MAX_NOTE_LEN: usize = 1024 * 1024;
 
 /// Rescanne l'état courant et diffuse la liste des modèles aux clients WS.
 pub fn broadcast_snapshot(state: &AppState) {
@@ -300,13 +299,7 @@ mod tests {
 
     fn test_app(root: &str) -> Router {
         let (ws, _) = broadcast::channel::<String>(16);
-        Router::new()
-            .route("/models", get(list_models))
-            .route("/file", get(get_file))
-            .route("/note", get(get_note).put(put_note))
-            .route("/health", get(health))
-            .route("/ws", get(ws_models))
-            .with_state(AppState::new(root, ws, crate::config::Config::default()))
+        routes(AppState::new(root, ws, crate::config::Config::default()))
     }
 
     #[tokio::test]
@@ -494,33 +487,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn note_est_enregistree_dans_le_dossier_cache() {
+    async fn note_lue_depuis_le_disque() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(notes::NOTES_DIR).join("sub")).unwrap();
+        std::fs::write(
+            dir.path().join(notes::NOTES_DIR).join("sub/model.stl.md"),
+            "# Titre\n**gras**",
+        )
+        .unwrap();
+
         let app = test_app(dir.path().to_str().unwrap());
-
-        let res = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=sub%2Fmodel.stl")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r##"{"content":"# Titre\n**gras**"}"##))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-
-        // Le fichier est bien rangé dans `.easy3d-notes/`, en miroir du modèle.
-        let written = dir.path().join(".easy3d-notes/sub/model.stl.md");
-        assert!(written.is_file());
-        assert_eq!(
-            std::fs::read_to_string(&written).unwrap(),
-            "# Titre\n**gras**"
-        );
-
-        // Relecture via l'API.
         let res = app
             .oneshot(
                 Request::builder()
@@ -530,106 +506,27 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
         let body = res.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["content"], "# Titre\n**gras**");
     }
 
     #[tokio::test]
-    async fn note_videe_supprime_le_fichier() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".easy3d-notes")).unwrap();
-        std::fs::write(dir.path().join(".easy3d-notes/DemaAuto.md"), "texte").unwrap();
-
-        let app = test_app(dir.path().to_str().unwrap());
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=DemaAuto")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"content":"   "}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-        assert!(!dir.path().join(".easy3d-notes/DemaAuto.md").exists());
-    }
-
-    #[tokio::test]
-    async fn note_rejette_la_traversee_de_dossier() {
-        let dir = tempfile::tempdir().unwrap();
-        let app = test_app(dir.path().to_str().unwrap());
-
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=..%2F..%2Fevil")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"content":"x"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-        assert!(!dir.path().parent().unwrap().join("evil.md").exists());
-    }
-
-    #[tokio::test]
-    async fn note_trop_volumineuse_est_refusee() {
-        let dir = tempfile::tempdir().unwrap();
-        let app = test_app(dir.path().to_str().unwrap());
-
-        // 1 Mio + 1 octet : au-delà du garde-fou.
-        let big = "a".repeat(MAX_NOTE_LEN + 1);
-        let body = serde_json::json!({ "content": big }).to_string();
-
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=a.stl")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(body))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert!(!dir.path().join(".easy3d-notes/a.stl.md").exists());
-    }
-
-    #[tokio::test]
-    async fn note_de_dossier_est_stockee_a_cote_des_fichiers() {
+    async fn note_de_dossier_est_exposee_par_le_scan() {
         let dir = tempfile::tempdir().unwrap();
         // Le dossier doit exister pour apparaître dans le scan.
         std::fs::create_dir_all(dir.path().join("DemaAuto")).unwrap();
+        std::fs::create_dir_all(dir.path().join(notes::NOTES_DIR)).unwrap();
+        std::fs::write(
+            dir.path().join(notes::NOTES_DIR).join("DemaAuto.md"),
+            "## Dossier",
+        )
+        .unwrap();
+
+        // La note du dossier est exposée par le scan (dossier sans fichier).
         let app = test_app(dir.path().to_str().unwrap());
-
-        let res = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=DemaAuto")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from("{\"content\":\"## Dossier\"}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join(".easy3d-notes/DemaAuto.md")).unwrap(),
-            "## Dossier"
-        );
-
-        // La note est aussi exposée par le scan (dossier sans fichier).
         let res = app
             .oneshot(
                 Request::builder()
@@ -644,10 +541,10 @@ mod tests {
         assert_eq!(v["folders"]["DemaAuto"]["note"], "## Dossier");
     }
 
-    /// Une note enregistrée est diffusée aux clients WebSocket connectés : les
-    /// autres onglets voient la modification sans recharger la page.
+    /// La liste diffusée aux clients WebSocket reflète les notes écrites sur
+    /// disque : c'est elle qui alimente la pastille 📝 des cartes.
     #[tokio::test]
-    async fn enregistrer_une_note_diffuse_la_liste() {
+    async fn une_note_apparait_dans_la_liste_diffusee() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "x").unwrap();
 
@@ -657,17 +554,12 @@ mod tests {
             ws_tx,
             crate::config::Config::default(),
         );
-        let app = Router::new()
-            .route("/models", get(list_models))
-            .route("/note", get(get_note).put(put_note))
-            .route("/ws", get(ws_models))
-            .with_state(state);
+        let app = routes(state.clone());
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_app = app.clone();
         tokio::spawn(async move {
-            axum::serve(listener, server_app).await.unwrap();
+            axum::serve(listener, app).await.unwrap();
         });
 
         let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
@@ -678,19 +570,15 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(snap.to_text().unwrap()).unwrap();
         assert!(v["files"][0]["note"].is_null());
 
-        // Écriture via l'API (même état partagé que le serveur WS).
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/note?path=a.txt")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"content":"la note"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        // La note est écrite sur disque — comme le fait le serveur collaboratif —
+        // puis la liste est rediffusée.
+        std::fs::create_dir_all(dir.path().join(notes::NOTES_DIR)).unwrap();
+        std::fs::write(
+            dir.path().join(notes::NOTES_DIR).join("a.txt.md"),
+            "la note",
+        )
+        .unwrap();
+        broadcast_snapshot(&state);
 
         // Le client WS reçoit la liste mise à jour, note comprise.
         let msg = socket.next().await.unwrap().unwrap();

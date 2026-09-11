@@ -1,0 +1,10 @@
+﻿cargo :    Compiling easy3d v0.1.0 
+(C:\Users\Remimi\Desktop\Rust\easy3d\backend)
+Au caractère Ligne:1 : 112
++ ... .rs').LastWriteTime = Get-Date; cargo build --bin easy3d 2>&1 | Out-F ...
++                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ea...easy3d\backend) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.33s
