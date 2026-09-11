@@ -8,6 +8,46 @@ const query = ref('')
 /** Une recherche est active dès que le champ contient du texte. */
 const searching = computed(() => query.value.trim().length > 0)
 
+/** Mode de tri par date : ordre d'origine, du plus ancien au plus récent, ou l'inverse. */
+type SortMode = 'none' | 'date-asc' | 'date-desc'
+const sortMode = ref<SortMode>('none')
+
+/** Ordre de rotation au clic : normal -> récent → ancien -> ancien → récent -> normal. */
+const SORT_CYCLE: SortMode[] = ['none', 'date-desc', 'date-asc']
+
+/** Passe au mode de tri suivant. */
+function cycleSort() {
+  const i = SORT_CYCLE.indexOf(sortMode.value)
+  sortMode.value = SORT_CYCLE[(i + 1) % SORT_CYCLE.length] ?? 'none'
+}
+
+/** Description du mode courant, utilisée pour l'infobulle et l'accessibilité. */
+const sortLabel = computed(
+  () =>
+    ({
+      none: 'date (ordre normal)',
+      'date-desc': 'date : récent → ancien',
+      'date-asc': 'date : ancien → récent',
+    })[sortMode.value],
+)
+
+/** Flèche : ↕ = normal, ↓ = récent → ancien, ↑ = ancien → récent. */
+const sortIcon = computed(
+  () => ({ none: '↕', 'date-desc': '↓', 'date-asc': '↑' })[sortMode.value],
+)
+
+/** Trie une liste de fichiers par date de modification (les dates absentes vont en fin). */
+function sortFiles<T extends FileInfo>(files: T[]): T[] {
+  if (sortMode.value === 'none') return files
+  const dir = sortMode.value === 'date-asc' ? 1 : -1
+  return [...files].sort((a, b) => {
+    if (a.modified == null && b.modified == null) return 0
+    if (a.modified == null) return 1
+    if (b.modified == null) return -1
+    return (a.modified - b.modified) * dir
+  })
+}
+
 /** Fichier enrichi du nom du dossier d'origine (absent si le fichier est à la racine). */
 type SearchFile = FileInfo & { folder?: string }
 
@@ -18,6 +58,9 @@ const allFolders = computed<FolderInfo[]>(() =>
 
 /** Vue par défaut (aucune recherche) : fichiers à la racine. */
 const rootFiles = computed<FileInfo[]>(() => data.value?.files ?? [])
+
+/** Fichiers racine triés selon `sortMode`. */
+const sortedRootFiles = computed<FileInfo[]>(() => sortFiles(rootFiles.value))
 
 /** Recherche : dossiers dont le nom correspond. */
 const matchedFolders = computed<FolderInfo[]>(() => {
@@ -38,6 +81,9 @@ const matchedFiles = computed<SearchFile[]>(() => {
 })
 
 const resultCount = computed(() => matchedFolders.value.length + matchedFiles.value.length)
+
+/** Résultats de recherche (fichiers) triés selon `sortMode`. */
+const sortedMatchedFiles = computed<SearchFile[]>(() => sortFiles(matchedFiles.value))
 
 const totalCount = computed(() => data.value?.count ?? 0)
 // Mode d'affichage issu de la config backend ("image" | "3d").
@@ -66,9 +112,22 @@ const liveLabel = computed(() =>
       </div>
     </header>
 
-    <div class="search">
-      <span class="icon">🔍</span>
-      <input v-model="query" type="text" placeholder="Filtrer par nom de fichier ou de dossier…" />
+    <div class="toolbar">
+      <div class="search">
+        <span class="icon">🔍</span>
+        <input v-model="query" type="text" placeholder="Filtrer par nom de fichier ou de dossier…" />
+      </div>
+      <button
+        type="button"
+        class="sort"
+        :class="`sort--${sortMode}`"
+        :title="`Trier par ${sortLabel} (cliquer pour changer)`"
+        :aria-label="`Trier par ${sortLabel}`"
+        @click="cycleSort"
+      >
+        <span class="sort__icon">{{ sortIcon }}</span>
+        <span class="sort__label">Date</span>
+      </button>
     </div>
 
     <div v-if="error" class="error">{{ error }}</div>
@@ -80,7 +139,7 @@ const liveLabel = computed(() =>
         <div v-if="resultCount" class="file-grid">
           <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
           <FileItem
-            v-for="f in matchedFiles"
+            v-for="f in sortedMatchedFiles"
             :key="f.path"
             :file="f"
             :folder="f.folder"
@@ -101,7 +160,7 @@ const liveLabel = computed(() =>
         <p class="section-label">Racine ({{ rootFiles.length }})</p>
         <article class="card" v-if="rootFiles.length">
           <div class="file-grid">
-            <FileItem v-for="f in rootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
+            <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
           </div>
         </article>
         <div v-else class="empty">Aucun fichier à la racine.</div>

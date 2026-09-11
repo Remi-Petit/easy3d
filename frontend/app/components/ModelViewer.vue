@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import type { ParsedGcode } from '../workers/gcode.worker'
 
 const props = withDefaults(
   defineProps<{
@@ -20,6 +21,9 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const stats = ref<{ triangles: number; dims?: number[] }>({ triangles: 0 })
 
+/** Un G-code se dessine en segments (`LineSegments`), pas en maillage triangulé. */
+const isGcode = computed(() => ['gcode', 'gco'].includes(ext(props.rel)))
+
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
@@ -27,6 +31,8 @@ let controls: OrbitControls | null = null
 let raf = 0
 let model: THREE.Object3D | null = null
 let plateGroup: THREE.Group | null = null
+/** Worker d'analyse G-code en cours (terminé dès qu'il a répondu). */
+let gcodeWorker: Worker | null = null
 /**
  * Plateau d'impression en mm (lit standard 300×300 mm).
  * Le modèle STL est affiché à son échelle réelle (1 unité = 1 mm).
@@ -161,6 +167,7 @@ function animate() {
 
 async function loadModel() {
   if (!scene || !camera) return
+  if (isGcode.value) return loadGcode()
   try {
     const res = await fetch(`/api/file?path=${encodeURIComponent(props.rel)}`)
     if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`)
@@ -213,6 +220,72 @@ async function loadModel() {
   }
 }
 
+/** Charge un G-code, l'analyse dans un worker et le dessine en segments colorés. */
+async function loadGcode() {
+  if (!scene || !camera) return
+  try {
+    const res = await fetch(`/api/file?path=${encodeURIComponent(props.rel)}`)
+    if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`)
+    // Analyse hors du thread principal : l'interface reste fluide.
+    const parsed = await parseGcode(await res.arrayBuffer())
+    if (!parsed.segments) throw new Error('Aucun trajet d’extrusion trouvé')
+
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(parsed.colors, 3))
+    const lines = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({ vertexColors: true }),
+    )
+    // G-code = Z-up (comme STL) : conversion en Y-up three.js.
+    lines.rotation.x = -Math.PI / 2
+    lines.updateMatrixWorld(true)
+    scene.add(lines)
+    model = lines
+    fitToPlate(lines)
+
+    const box = new THREE.Box3().setFromObject(lines)
+    const size = box.getSize(new THREE.Vector3())
+    const r = (v: number) => Math.round(v * 100) / 100
+    stats.value = {
+      triangles: parsed.segments,
+      dims: [r(size.x), r(size.y), r(size.z)],
+    }
+
+    frame(lines)
+    buildPlate()
+    loading.value = false
+    animate()
+  } catch (e: any) {
+    loadError.value = e?.message ?? String(e)
+    loading.value = false
+  }
+}
+
+/** Délègue l'analyse du G-code à un worker dédié (buffer transféré, pas copié). */
+function parseGcode(buffer: ArrayBuffer): Promise<ParsedGcode> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('../workers/gcode.worker.ts', import.meta.url), {
+      type: 'module',
+    })
+    gcodeWorker = worker
+    const done = () => {
+      worker.terminate()
+      if (gcodeWorker === worker) gcodeWorker = null
+    }
+    worker.onmessage = (ev: MessageEvent<ParsedGcode | { error: string }>) => {
+      done()
+      if ('error' in ev.data) reject(new Error(ev.data.error))
+      else resolve(ev.data)
+    }
+    worker.onerror = () => {
+      done()
+      reject(new Error('Échec de l’analyse du G-code'))
+    }
+    worker.postMessage(buffer, [buffer])
+  })
+}
+
 function init() {
   const canvas = canvasRef.value
   const wrap = wrapRef.value
@@ -241,6 +314,10 @@ function init() {
 
 function dispose() {
   cancelAnimationFrame(raf)
+  if (gcodeWorker) {
+    gcodeWorker.terminate()
+    gcodeWorker = null
+  }
   if (controls) {
     controls.dispose()
     controls = null
@@ -287,7 +364,7 @@ onBeforeUnmount(() => {
     <div v-if="loading" class="model-viewer__overlay">chargement…</div>
     <div v-if="loadError" class="model-viewer__overlay model-viewer__overlay--err">⚠ {{ loadError }}</div>
     <div v-if="showInfo && !loading && !loadError" class="model-viewer__info">
-      {{ stats.triangles.toLocaleString('fr-FR') }} triangles
+      {{ stats.triangles.toLocaleString('fr-FR') }} {{ isGcode ? 'segments' : 'triangles' }}
       <template v-if="stats.dims">&nbsp;· {{ stats.dims.join(' × ') }}</template>
     </div>
   </div>
