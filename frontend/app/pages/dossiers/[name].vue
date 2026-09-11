@@ -38,6 +38,8 @@ usePageHeader(() => {
 </script>
 
 <template>
+  <BackLink />
+
   <div v-if="error" class="error">{{ error }}</div>
 
   <!-- Note du dossier (Markdown) : affichage + édition assistée. -->

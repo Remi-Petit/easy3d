@@ -48,6 +48,8 @@ usePageHeader(() => ({
 </script>
 
 <template>
+  <BackLink />
+
   <div v-if="error" class="error">{{ error }}</div>
 
   <div class="viewer-card">
