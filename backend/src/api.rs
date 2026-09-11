@@ -11,15 +11,43 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 
 /// État partagé par les handlers HTTP et WebSocket.
+///
+/// `root` et `config` sont **mutables à chaud** : le watcher peut les mettre à
+/// jour lorsqu'on modifie `config.yml` (dossier des modèles, mode d'affichage),
+/// sans redémarrer le serveur ni recharger le frontend.
 #[derive(Clone)]
 pub struct AppState {
-    pub root: String,
+    /// Racine courante des modèles (peut changer via la config).
+    pub root: Arc<RwLock<PathBuf>>,
+    /// Configuration courante (rechargée à chaud).
+    pub config: Arc<RwLock<Config>>,
     /// Canal broadcast : diffuse la liste des modèles (JSON) à tous les WS.
     pub ws: broadcast::Sender<String>,
-    pub config: Config,
+}
+
+impl AppState {
+    /// Construit un état partagé à partir des valeurs initiales.
+    pub fn new(root: impl Into<PathBuf>, ws: broadcast::Sender<String>, config: Config) -> Self {
+        Self {
+            root: Arc::new(RwLock::new(root.into())),
+            config: Arc::new(RwLock::new(config)),
+            ws,
+        }
+    }
+
+    /// Copie la racine courante des modèles.
+    pub fn root(&self) -> PathBuf {
+        self.root.read().unwrap().clone()
+    }
+
+    /// Copie la configuration courante.
+    pub fn config(&self) -> Config {
+        self.config.read().unwrap().clone()
+    }
 }
 
 /// Démarre le serveur HTTP et bloque jusqu'à son arrêt.
@@ -73,22 +101,26 @@ impl ModelsResponse {
 /// Renvoie le contenu structuré : fichiers racine + dossiers + total.
 async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
     Json(ModelsResponse::from_scan(
-        scanner::scan_models(Path::new(&state.root)),
-        &state.config,
+        scanner::scan_models(&state.root()),
+        &state.config(),
     ))
 }
 
 /// WebSocket : connexion persistante qui pousse la liste des modèles à chaque
-/// changement détecté par le watcher (via le canal broadcast).
+/// changement détecté par le watcher (via le canal broadcast), y compris les
+/// rechargements de configuration.
 async fn ws_models(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_ws(socket, state))
 }
 
 /// Snapshot complet de la liste des modèles, sérialisé en JSON.
-fn snapshot(root: &Path, config: &Config) -> String {
+///
+/// Relit l'état partagé à chaque appel : la racine et la config peuvent avoir
+/// changé à chaud depuis la connexion.
+fn snapshot(state: &AppState) -> String {
     serde_json::to_string(&ModelsResponse::from_scan(
-        scanner::scan_models(root),
-        config,
+        scanner::scan_models(&state.root()),
+        &state.config(),
     ))
     .unwrap_or_else(|_| "{}".to_string())
 }
@@ -98,14 +130,9 @@ fn snapshot(root: &Path, config: &Config) -> String {
 /// Si le client est en retard (`Lagged`), on renvoie un snapshot complet plutôt
 /// que des MAJ partielles perdues. Fermeture / erreur → on sort de la boucle.
 async fn handle_ws(socket: WebSocket, state: AppState) {
-    let root = PathBuf::from(&state.root);
     let (mut sink, mut stream) = socket.split();
 
-    if sink
-        .send(Message::text(snapshot(&root, &state.config)))
-        .await
-        .is_err()
-    {
+    if sink.send(Message::text(snapshot(&state))).await.is_err() {
         return;
     }
 
@@ -126,7 +153,7 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                 let json = match res {
                     Ok(json) => json,
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        snapshot(&root, &state.config)
+                        snapshot(&state)
                     }
                     Err(_) => break,
                 };
@@ -149,7 +176,8 @@ struct FileQuery {
 /// `path` est relatif à `state.root` (ex : `DemaAuto/boitier.stl`).
 /// Sécurisé contre la traversée de dossier (`..`, absolu).
 async fn get_file(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Response {
-    let Some(relative) = safe_join(Path::new(&state.root), &q.path) else {
+    let root = state.root();
+    let Some(relative) = safe_join(&root, &q.path) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
 
@@ -215,11 +243,7 @@ mod tests {
             .route("/file", get(get_file))
             .route("/health", get(health))
             .route("/ws", get(ws_models))
-            .with_state(AppState {
-                root: root.to_string(),
-                ws,
-                config: crate::config::Config::default(),
-            })
+            .with_state(AppState::new(root, ws, crate::config::Config::default()))
     }
 
     #[tokio::test]
@@ -353,11 +377,11 @@ mod tests {
         std::fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
 
         let (ws_tx, _) = broadcast::channel::<String>(16);
-        let state = AppState {
-            root: dir.path().to_string_lossy().into_owned(),
-            ws: ws_tx.clone(),
-            config: crate::config::Config::default(),
-        };
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx.clone(),
+            crate::config::Config::default(),
+        );
         let app = Router::new().route("/ws", get(ws_models)).with_state(state);
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

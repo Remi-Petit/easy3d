@@ -1,7 +1,8 @@
 # easy3d — configuration de l'application
 #
-# Ce fichier est relu à chaque démarrage du serveur : après modification,
-# relance l'exécutable (`cargo run` dans backend/, ou le binaire déjà construit).
+# Ce fichier est **relu à chaud** : le serveur le surveille et applique toute
+# modification sans redémarrage. Le frontend est rafraîchi automatiquement
+# (WebSocket), sans rechargement de la page.
 #
 # Chemin par défaut : ce fichier (config.yml), à côté du Cargo.toml du backend.
 # Surcharge : variable d'env EASY3D_CONFIG=<chemin> pour pointer ailleurs.

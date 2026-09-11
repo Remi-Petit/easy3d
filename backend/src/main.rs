@@ -1,7 +1,7 @@
 use easy3d::{api, config, render, scanner, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -35,40 +35,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Charge la configuration YAML (mode d'affichage, dossier des modèles…).
     let config = config::Config::load();
 
-    let path = resolve_models_root(&config);
+    // Chemin du fichier de config, résolu une fois (surveillé ensuite à chaud).
+    // Canonicalisé quand possible : les chemins d'événements du watcher sont
+    // comparés à cette référence.
+    let config_path = std::fs::canonicalize(config::Config::config_path())
+        .unwrap_or_else(|_| config::Config::config_path());
+
+    let resolved = resolve_models_root(&config);
+    // Canonicalise la racine : évite les `..` (ex : `backend/../models`) et
+    // fiabilise les tests de préfixe (`starts_with`) du watcher.
+    let root = std::fs::canonicalize(&resolved).unwrap_or_else(|_| PathBuf::from(&resolved));
 
     // Dossier des aperçus générés par le backend (`<models_root>/.easy3d-thumbs`).
-    let thumbs_root = std::path::Path::new(&path).join(render::THUMB_DIR);
+    let thumbs_root = root.join(render::THUMB_DIR);
 
     // Génère un aperçu PNG pour chaque modèle déjà présent, avant de démarrer.
     // (Garde un aperçu à jour ; coût une fois au lancement.)
-    render::generate_all(std::path::Path::new(&path), &thumbs_root);
+    render::generate_all(&root, &thumbs_root);
 
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
 
-    let state = api::AppState {
-        root: path.clone(),
-        ws: ws_tx.clone(),
-        config: config.clone(),
-    };
+    let state = api::AppState::new(root.clone(), ws_tx, config);
 
     // API → tâche async sur le pool Tokio (multi-thread).
-    let server = tokio::spawn(async move {
-        if let Err(e) = api::serve(state).await {
-            eprintln!("Erreur serveur : {e}");
+    let server = tokio::spawn({
+        let state = state.clone();
+        async move {
+            if let Err(e) = api::serve(state).await {
+                eprintln!("Erreur serveur : {e}");
+            }
         }
     });
 
     // Watcher (bloquant) → thread dédié, car notify bloque le thread OS.
-    // À chaque changement détecté, il rescanne et diffuse via le canal broadcast.
-    let path_watcher = path.to_string();
-    let ws_watcher = ws_tx.clone();
-    let cfg_watcher = config.clone();
-    let thumbs_watcher = thumbs_root.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = watch_dir(&path_watcher, cfg_watcher, ws_watcher, thumbs_watcher) {
-            eprintln!("Erreur watcher : {e}");
+    // Il surveille les modèles **et** la config : à chaque changement détecté,
+    // il rescanne (et recharge la config le cas échéant) puis diffuse via le
+    // canal broadcast — le frontend se met à jour sans recharger la page.
+    std::thread::spawn({
+        let state = state.clone();
+        move || {
+            if let Err(e) = watch_dir(root, config_path, state) {
+                eprintln!("Erreur watcher : {e}");
+            }
         }
     });
 
@@ -78,13 +87,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Surveille le dossier. À chaque changement (ajout / modif / suppression),
-/// rescanne et diffuse la nouvelle liste des modèles sur le canal broadcast.
+/// Surveille le dossier des modèles **et** le fichier de configuration.
+///
+/// - Changement dans les modèles → aperçus mis à jour + nouvelle liste diffusée.
+/// - Changement de la config → rechargée à chaud (mode d'affichage, dossier des
+///   modèles). Si `models_root` change, la surveillance bascule sur le nouveau
+///   dossier. Dans tous les cas, un snapshot complet est diffusé aux clients WS
+///   pour rafraîchir le frontend sans recharger la page.
 fn watch_dir(
-    path: &str,
-    config: config::Config,
-    ws: broadcast::Sender<String>,
-    thumbs_root: std::path::PathBuf,
+    models_root: PathBuf,
+    config_path: PathBuf,
+    state: api::AppState,
 ) -> notify::Result<()> {
     let (tx, rx) = channel();
 
@@ -98,44 +111,132 @@ fn watch_dir(
         },
     )?;
 
-    debouncer.watch(path, RecursiveMode::Recursive)?;
-    println!("Je surveille {path}... (Ctrl+C pour arrêter)");
+    let mut current_root = models_root;
+    debouncer.watch(&current_root, RecursiveMode::Recursive)?;
+
+    // On surveille le **dossier** parent du fichier de config (mode non
+    // récursif) plutôt que le fichier lui-même : cela reste fiable lorsque
+    // l'éditeur remplace le fichier (`rename`), ce qui invaliderait une
+    // surveillance directe.
+    if let Some(dir) = config_path.parent() {
+        debouncer.watch(dir, RecursiveMode::NonRecursive)?;
+    }
+
+    println!(
+        "Je surveille {} et {}… (Ctrl+C pour arrêter)",
+        current_root.display(),
+        config_path.display()
+    );
 
     for result in rx {
-        match result {
-            Ok(events) => {
-                let mut changed = false;
-                for event in events {
-                    // Met à jour l'aperçu généré pour chaque chemin concerné.
-                    for p in &event.paths {
-                        if p.exists() {
-                            render::ensure_for_changed(Path::new(path), &thumbs_root, p);
-                        } else {
-                            render::remove_for_path(Path::new(path), &thumbs_root, p);
-                        }
-                    }
-                    // On n'affiche que les vrais changements (ajout / modif / suppression).
-                    if let Some(msg) = watcher::describe_event(&event) {
-                        println!("{msg}");
-                        changed = true;
-                    }
-                }
-                // Vrai changement → rescanne + broadcast aux clients WS.
-                if changed {
-                    let scan = scanner::scan_models(Path::new(path));
-                    let payload = api::ModelsResponse::from_scan(scan, &config);
-                    if let Ok(json) = serde_json::to_string(&payload) {
-                        let _ = ws.send(json);
-                    }
-                }
-            }
+        let events = match result {
+            Ok(events) => events,
             Err(errors) => {
                 for error in errors {
                     eprintln!("Erreur : {error}");
                 }
+                continue;
             }
+        };
+
+        let mut models_changed = false;
+        let mut config_changed = false;
+
+        for event in events {
+            // On ignore les événements d'accès (ouverture/lecture d'un fichier) :
+            // ils ne traduisent pas un changement et provoqueraient des boucles
+            // (chaque relecture du fichier de config en génère un).
+            if !watcher::is_content_change(&event) {
+                continue;
+            }
+
+            // Événement sur le fichier de configuration ?
+            if event.paths.iter().any(|p| p == &config_path) {
+                config_changed = true;
+                continue;
+            }
+            // Événement hors du dossier des modèles → ignoré (ex : autres
+            // fichiers du dossier `backend/`, artefacts de build…).
+            if !event.paths.iter().any(|p| p.starts_with(&current_root)) {
+                continue;
+            }
+
+            let thumbs_root = current_root.join(render::THUMB_DIR);
+            // Événements provoqués par nos propres aperçus générés : ce dossier
+            // caché n'apparaît pas dans le scan, il n'y a donc rien à diffuser.
+            if event.paths.iter().all(|p| p.starts_with(&thumbs_root)) {
+                continue;
+            }
+
+            // Met à jour l'aperçu généré pour chaque chemin concerné.
+            for p in &event.paths {
+                if p.exists() {
+                    render::ensure_for_changed(&current_root, &thumbs_root, p);
+                } else {
+                    render::remove_for_path(&current_root, &thumbs_root, p);
+                }
+            }
+            // On n'affiche que les vrais changements (ajout / modif / suppression).
+            if let Some(msg) = watcher::describe_event(&event) {
+                println!("{msg}");
+                models_changed = true;
+            }
+        }
+
+        // ── Rechargement à chaud de la configuration ──────────────────────
+        if config_changed {
+            let reloaded = config::Config::load();
+            let changed = reloaded != *state.config.read().unwrap();
+
+            if changed {
+                let new_root = PathBuf::from(resolve_models_root(&reloaded));
+                let new_root = std::fs::canonicalize(&new_root).unwrap_or(new_root);
+
+                if new_root != current_root {
+                    println!(
+                        "Dossier des modèles : {} → {}",
+                        current_root.display(),
+                        new_root.display()
+                    );
+                    let _ = debouncer.unwatch(&current_root);
+                    match debouncer.watch(&new_root, RecursiveMode::Recursive) {
+                        Ok(()) => {
+                            render::generate_all(&new_root, &new_root.join(render::THUMB_DIR));
+                            current_root = new_root;
+                        }
+                        Err(e) => {
+                            // Échec : on rétablit la surveillance de l'ancien dossier.
+                            eprintln!("Impossible de surveiller {} : {e}", new_root.display());
+                            let _ = debouncer.watch(&current_root, RecursiveMode::Recursive);
+                        }
+                    }
+                }
+
+                *state.config.write().unwrap() = reloaded.clone();
+                *state.root.write().unwrap() = current_root.clone();
+
+                let mode = match reloaded.display.mode {
+                    config::DisplayMode::Image => "image",
+                    config::DisplayMode::ThreeD => "3d",
+                };
+                println!("Configuration rechargée (mode d'affichage : {mode}).");
+            }
+
+            // Même si la config est identique, on rafraîchit le front.
+            broadcast_snapshot(&state);
+        } else if models_changed {
+            broadcast_snapshot(&state);
         }
     }
 
     Ok(())
+}
+
+/// Rescanne l'état courant et diffuse la liste des modèles (+ config) aux WS.
+fn broadcast_snapshot(state: &api::AppState) {
+    let payload =
+        api::ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
+    if let Ok(json) = serde_json::to_string(&payload) {
+        let _ = state.ws.send(json);
+    }
 }

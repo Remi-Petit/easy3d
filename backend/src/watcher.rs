@@ -2,6 +2,23 @@ use notify::event::ModifyKind;
 use notify::EventKind;
 use notify_debouncer_full::DebouncedEvent;
 
+/// `true` si l'événement traduit un **vrai changement** : création,
+/// modification, renommage ou suppression.
+///
+/// On exclut volontairement les événements d'**accès** (`Access`) : `notify`
+/// les émet à chaque ouverture de fichier (masque inotify `IN_OPEN`). Les
+/// traiter comme des changements créerait une boucle sans fin — relire un
+/// fichier (par ex. `config.yml` après l'avoir détecté modifié) en produirait
+/// un nouveau à chaque fois.
+pub fn is_content_change(event: &DebouncedEvent) -> bool {
+    match &event.kind {
+        EventKind::Access(_) | EventKind::Other => false,
+        // Métadonnées seules (droits, propriétaire…) : pas un changement de contenu.
+        EventKind::Modify(ModifyKind::Metadata(_)) => false,
+        _ => true,
+    }
+}
+
 /// Traduit un événement en message lisible : ajout / modification / suppression.
 ///
 /// Retourne `None` pour les événements à ignorer (accès, autres).
