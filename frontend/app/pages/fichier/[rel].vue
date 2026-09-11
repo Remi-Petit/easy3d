@@ -37,52 +37,43 @@ const showDetailImage = computed(() => displayMode.value === 'image' && !!file.v
 const showViewer = computed(
   () => isModel.value || (isGcode.value && displayMode.value === '3d'),
 )
+
+// En-tête global (rendu par le layout `default`).
+usePageHeader(() => ({
+  subtitle: `${type.value.toUpperCase()} · ${when.value}`,
+  count: 0,
+  live: live.value,
+  offline: !!error.value,
+}))
 </script>
 
 <template>
-  <div class="container detail">
-    <NuxtLink to="/" class="back">← Retour</NuxtLink>
+  <div v-if="error" class="error">{{ error }}</div>
 
-    <header class="header">
-      <div class="brand">
-        <div class="logo">{{ isModel ? '🧊' : isGcode ? '🖨' : '📄' }}</div>
-        <div>
-          <h1>{{ name }}</h1>
-          <small>{{ type.toUpperCase() }} · {{ when }}</small>
-        </div>
-      </div>
-      <div v-if="live" class="stats">
-        <span class="pill"><span class="dot live" /> temps réel</span>
-      </div>
-    </header>
-
-    <div v-if="error" class="error">{{ error }}</div>
-
-    <div class="viewer-card">
-      <img
-        v-if="showDetailImage"
-        :src="fileUrl(file.image!)"
-        :alt="name"
-        class="model-card__img"
-      />
-      <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
-      <div v-else class="file-detail-placeholder">
-        <span class="ph-badge">{{ type.toUpperCase() }}</span>
-        <p>
-          {{
-            isGcode
-              ? 'Aucun aperçu trouvé dans ce G-code.'
-              : 'Aperçu 3D non disponible pour ce type de fichier.'
-          }}
-        </p>
-      </div>
+  <div class="viewer-card">
+    <img
+      v-if="showDetailImage"
+      :src="fileUrl(file.image!)"
+      :alt="name"
+      class="model-card__img"
+    />
+    <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
+    <div v-else class="file-detail-placeholder">
+      <span class="ph-badge">{{ type.toUpperCase() }}</span>
+      <p>
+        {{
+          isGcode
+            ? 'Aucun aperçu trouvé dans ce G-code.'
+            : 'Aperçu 3D non disponible pour ce type de fichier.'
+        }}
+      </p>
     </div>
-
-    <dl class="meta-table">
-      <div class="meta-row"><dt>Fichier</dt><dd>{{ name }}</dd></div>
-      <div class="meta-row"><dt>Type</dt><dd>{{ type.toUpperCase() }}</dd></div>
-      <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
-      <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
-    </dl>
   </div>
+
+  <dl class="meta-table">
+    <div class="meta-row"><dt>Fichier</dt><dd>{{ name }}</dd></div>
+    <div class="meta-row"><dt>Type</dt><dd>{{ type.toUpperCase() }}</dd></div>
+    <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
+    <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
+  </dl>
 </template>
