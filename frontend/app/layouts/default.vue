@@ -8,6 +8,9 @@
 const route = useRoute()
 const header = usePageHeaderState()
 
+// Barre de filtre globale (recherche + tri), partagée avec les pages.
+const { query, sortMode, sortLabel, sortIcon, cycleSort } = useFilter()
+
 const page = computed(() => {
   // /dossiers/[name]
   if (route.params.name) {
@@ -16,6 +19,8 @@ const page = computed(() => {
       title: decodeURIComponent(String(route.params.name)),
       back: { to: '/', label: '← Retour' },
       home: false,
+      filter: true,
+      placeholder: 'Filtrer par nom de fichier…',
     }
   }
   // /fichier/[rel]
@@ -26,10 +31,19 @@ const page = computed(() => {
       title: basename(rel),
       back: { to: '/', label: '← Retour' },
       home: false,
+      filter: false,
+      placeholder: '',
     }
   }
   // Accueil
-  return { logo: '3D', title: 'easy3d', back: null, home: true }
+  return {
+    logo: '3D',
+    title: 'easy3d',
+    back: null,
+    home: true,
+    filter: true,
+    placeholder: 'Filtrer par nom de fichier ou de dossier…',
+  }
 })
 
 // "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
@@ -59,6 +73,25 @@ const statusLabel = computed(() =>
         <span v-if="page.home" class="pill"><b>{{ header.count }}</b> fichiers</span>
       </div>
     </header>
+
+    <!-- Barre de filtre globale : recherche + tri par date. -->
+    <div v-if="page.filter" class="toolbar">
+      <div class="search">
+        <span class="icon">🔍</span>
+        <input v-model="query" type="text" :placeholder="page.placeholder" />
+      </div>
+      <button
+        type="button"
+        class="sort"
+        :class="`sort--${sortMode}`"
+        :title="`Trier par ${sortLabel} (cliquer pour changer)`"
+        :aria-label="`Trier par ${sortLabel}`"
+        @click="cycleSort"
+      >
+        <span class="sort__icon">{{ sortIcon }}</span>
+        <span class="sort__label">Date</span>
+      </button>
+    </div>
 
     <slot />
   </div>
