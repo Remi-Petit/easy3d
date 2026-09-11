@@ -1,6 +1,6 @@
 import type { FileInfo } from '~/composables/useModels'
 // Import explicite : l'auto-import Nuxt n'existe pas sous Vitest.
-import { basename } from '~/utils/format'
+import { basename, ext } from '~/utils/format'
 
 /**
  * Logique **pure** du filtre global (recherche + tri par date).
@@ -60,4 +60,57 @@ export function sortFilesByDate<T extends FileInfo>(files: T[], mode: SortMode):
     if (b.modified == null) return -1
     return (a.modified - b.modified) * dir
   })
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Filtre par type de fichier
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Un format présent, avec le nombre de fichiers concernés. */
+export interface TypeCount {
+  /** Extension en minuscules, sans le point (`stl`, `gcode`…). */
+  type: string
+  count: number
+}
+
+/**
+ * Recense les formats présents, avec leur nombre, triés par nom.
+ *
+ * Les fichiers **sans extension** sont ignorés : il n'y aurait rien à proposer.
+ */
+export function collectTypes(files: FileInfo[]): TypeCount[] {
+  const counts = new Map<string, number>()
+  for (const file of files) {
+    const type = ext(file.path)
+    if (!type) continue
+    counts.set(type, (counts.get(type) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => a.type.localeCompare(b.type))
+}
+
+/**
+ * `true` si le fichier est d'un des types sélectionnés.
+ * Une sélection vide accepte tout (aucun filtre de type).
+ */
+export function matchesTypes(file: FileInfo, types: string[]): boolean {
+  return types.length === 0 || types.includes(ext(file.path))
+}
+
+/** Ajoute le type à la sélection, ou l'en retire s'il y était déjà. */
+export function toggleType(types: string[], type: string): string[] {
+  return types.includes(type) ? types.filter((t) => t !== type) : [...types, type]
+}
+
+/**
+ * Ne conserve que les types encore disponibles.
+ *
+ * Après un changement de page, un format sélectionné peut avoir disparu : le
+ * garder afficherait une liste vide sans qu'on puisse le désélectionner.
+ * Renvoie la **même référence** si rien ne change (évite du travail réactif).
+ */
+export function pruneTypes(selected: string[], available: string[]): string[] {
+  const kept = selected.filter((type) => available.includes(type))
+  return kept.length === selected.length ? selected : kept
 }
