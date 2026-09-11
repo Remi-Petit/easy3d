@@ -4,8 +4,11 @@
 //! 1. Variable d'env `EASY3D_CONFIG=<chemin>`.
 //! 2. `config.yml` dans le dossier `backend/` (à côté du `Cargo.toml`).
 //!
-//! En l'absence de fichier, on utilise les valeurs par défaut. Le fichier est
-//! relu à chaque démarrage : une modification demande un redémarrage du serveur.
+//! En l'absence de fichier, on utilise les valeurs par défaut.
+//!
+//! Le fichier est **relu à chaud** : il est surveillé par le watcher (voir
+//! `main.rs`). Toute modification est appliquée sans redémarrer le serveur, et
+//! la nouvelle configuration est diffusée au frontend via le WebSocket.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -23,14 +26,14 @@ pub enum DisplayMode {
 }
 
 /// Options d'affichage.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Display {
     #[serde(default)]
     pub mode: DisplayMode,
 }
 
 /// Configuration de l'application.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Répertoire des modèles. Sinon : env `MODELS_ROOT`, sinon `../models`.
     #[serde(default)]
