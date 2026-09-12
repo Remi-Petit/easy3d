@@ -1,0 +1,20 @@
+# Le contexte de build est la racine du dépôt : on n'y garde que les sources
+# réellement compilées. Tout ce qui est produit sur l'hôte est réexclu, sinon il
+# écraserait les artefacts construits dans les étapes du Dockerfile.
+.git
+.github
+**/target
+frontend/node_modules
+frontend/.nuxt
+frontend/.output
+frontend/test-results
+frontend/playwright-report
+frontend/.env
+backend/.env
+# Les modèles sont montés à l'exécution (`./models:/models`), jamais embarqués :
+# ils appartiennent à l'utilisateur et peuvent peser lourd.
+models
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
