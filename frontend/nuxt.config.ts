@@ -1,4 +1,10 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+
+// Liste des langues : `frontend/i18n/locales.json` est la **seule** source
+// (config Nuxt, test de couverture, ligne du README). Ajouter une langue =
+// un fichier dans `i18n/locales/` + une entrée ici.
+import i18nConfig from './i18n/locales.json'
+
 export default defineNuxtConfig({
   modules: ['@nuxt/ui', '@nuxtjs/i18n'],
   devtools: { enabled: true },
@@ -16,22 +22,17 @@ export default defineNuxtConfig({
   // `/fichier/<rel>` restent inchangés en changeant de langue.
   i18n: {
     strategy: 'no_prefix',
-    defaultLocale: 'fr',
+    defaultLocale: i18nConfig.defaultLocale,
     // Messages dans `frontend/i18n/locales/` (résolus depuis `restructureDir`,
     // qui vaut `<rootDir>/i18n`). `language` sert au SEO et aux formats
     // (`n()`, `d()`, temps relatif), `name` au sélecteur de langue.
-    locales: [
-      { code: 'fr', name: 'Français', language: 'fr-FR', file: 'fr.json' },
-      { code: 'en', name: 'English', language: 'en-US', file: 'en.json' },
-      { code: 'de', name: 'Deutsch', language: 'de-DE', file: 'de.json' },
-      { code: 'es', name: 'Español', language: 'es-ES', file: 'es.json' },
-    ],
+    locales: i18nConfig.locales,
     // Le cookie est lu par le serveur : la langue est donc déjà bonne dans le
     // HTML rendu par SSR, sans bascule visible à l'hydratation.
     detectBrowserLanguage: {
       useCookie: true,
       cookieKey: 'easy3d_lang',
-      fallbackLocale: 'fr',
+      fallbackLocale: i18nConfig.defaultLocale,
       redirectOn: 'root',
       alwaysRedirect: false,
     },

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { de, en, es, fr } from '@nuxt/ui/locale'
+// Tout le paquet plutôt que quatre locales nommées : la correspondance
+// code → locale n'a pas à être tenue à jour quand une langue s'ajoute.
+import * as uiLocales from '@nuxt/ui/locale'
 
 /**
  * Langue des composants Nuxt UI (libellés internes : pagination, menus, dates…).
@@ -7,8 +9,8 @@ import { de, en, es, fr } from '@nuxt/ui/locale'
  * changerait de langue mais pas les composants qui l'habitent.
  */
 const { locale } = useI18n()
-const UI_LOCALES: Record<string, typeof fr> = { fr, en, de, es }
-const uiLocale = computed(() => UI_LOCALES[locale.value] ?? fr)
+const localeByCode = uiLocales as unknown as Record<string, (typeof uiLocales)['fr']>
+const uiLocale = computed(() => localeByCode[locale.value] ?? uiLocales.fr)
 
 // Langue du document (lecteurs d'écran, césure, traduction automatique).
 // Le module la pose dans la plupart des cas, mais nos `htmlAttrs` statiques de

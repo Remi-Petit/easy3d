@@ -1,8 +1,8 @@
 name: Cargo Build & Test
 
 # Deux dossiers, deux mondes : la CI ne lance que ce qui est concerné.
-#   - un commit qui ne touche ni `backend/` ni `frontend/` (README, modèles,
-#     compose…) ne déclenche **aucun** job ;
+#   - un commit qui ne touche ni `backend/`, ni `frontend/`, ni `scripts/`
+#     (README, modèles, compose…) ne déclenche **aucun** job ;
 #   - un changement purement frontend n'exécute pas la matrice Rust (job
 #     `changes` + `if:` sur chaque job), et inversement.
 # Les workflows font partie des filtres : modifier la CI la relance.
@@ -15,11 +15,13 @@ on:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'scripts/**'
       - '.github/workflows/**'
   pull_request:
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'scripts/**'
       - '.github/workflows/**'
 
 env: 
@@ -38,6 +40,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      scripts: ${{ steps.filter.outputs.scripts }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,6 +56,8 @@ jobs:
             frontend:
               - 'frontend/**'
               - '.github/workflows/**'
+            scripts:
+              - 'scripts/**'
 
   build_and_test:
     name: Rust project - latest
@@ -128,3 +133,36 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test
       - run: bun run build
+
+  # La ligne « langues » du README est calculée depuis `frontend/i18n/locales.json`
+  # et les fichiers de messages : ce job la régénère, et ne committe que si elle a
+  # bougé. Le commit ne porte que sur `README.md`, absent des `paths` ci-dessus,
+  # donc il ne relance pas la CI.
+  #
+  # Sur une pull request (et a fortiori depuis un fork, où le jeton est en
+  # lecture seule) le job ne tourne pas : la mise à jour se fera au merge.
+  readme:
+    name: README (langues)
+    needs: changes
+    if: >-
+      github.event_name == 'push' &&
+      (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.scripts == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Le crate vit dans `backend/` : ce job, lui, travaille à la racine.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - run: node scripts/readme-langs.mjs
+      - run: |
+          if git diff --quiet -- README.md; then
+            echo "README déjà à jour."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: langues du README' README.md
+          git push
