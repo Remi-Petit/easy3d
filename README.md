@@ -10,10 +10,14 @@ easy3d/
 │   ├── src/
 │   │   ├── main.rs
 │   │   ├── lib.rs
-│   │   ├── api.rs        ← routes HTTP (/models, /file, /note, /health)
+│   │   ├── api.rs        ← routes HTTP (/models, /file, /note, /health, /mcp)
+│   │   ├── mcp.rs        ← serveur MCP : outils pour les agents
 │   │   ├── collab.rs     ← édition collaborative des notes (CRDT Yjs)
+│   │   ├── config.rs     ← configuration YAML (rechargée à chaud)
+│   │   ├── formats/      ← un fichier par format (stl, obj, three_mf, gcode)
 │   │   ├── notes.rs      ← notes Markdown (.easy3d-notes/)
 │   │   ├── scanner.rs    ← scan récursif + métadonnées
+│   │   ├── thumbnail.rs  ← aperçus PNG (.easy3d-thumbs/)
 │   │   └── watcher.rs    ← description des événements FS
 │   └── tests/
 ├── frontend/      ← app Nuxt (bun) : UI catalogue + proxy API
@@ -58,6 +62,60 @@ cargo run
 - Sécurité : `/file` rejette la traversée de dossier (`..`, chemins absolus).
 - Surveille `./models` (via `MODELS_ROOT`, relatif au repo par défaut).
 - `.env` : `PORT=60005`.
+
+## MCP (agents)
+
+Le backend expose un **serveur MCP** sur `http://127.0.0.1:8090/mcp` (transport
+*Streamable HTTP*, monté dans le même process axum : `cargo run` suffit).
+
+Les outils partagent l'état vivant du serveur — le catalogue courant, la
+configuration et les documents collaboratifs — donc les modifications d'un agent
+sont visibles dans l'interface sans redémarrage, et inversement.
+
+| Outil | Rôle |
+|-------|------|
+| `list_formats` | formats reconnus (extensions, aperçu, visionneuse) |
+| `list_models` | catalogue, filtrable par nom / dossier / extension |
+| `get_model` | détail d'une entrée (format, aperçu, note, taille, dates) |
+| `list_notes` | notes existantes + nombre d'entrées à documenter |
+| `read_note` | contenu d'une note |
+| `create_note` / `update_note` / `append_note` | écriture d'une note |
+| `get_config` | dossier des modèles, mode d'affichage, chemin du YAML |
+| `set_display_mode` | bascule `3d` / `image` |
+| `delete_note` | ⚠️ suppression d'une note |
+| `set_models_root` | ⚠️ changement de dossier des modèles |
+
+Points à connaître :
+
+- Les notes s'écrivent **via le CRDT**, jamais en écrivant le `.md` : si un onglet
+a la note ouverte, les deux modifications fusionnent au lieu de s'écraser, et la
+persistance (`.md` + `.ydoc`) suit le flush habituel. Une note ne peut être créée
+que sur un élément **existant** du catalogue (fichier ou dossier).
+- Les outils ⚠️ (destructeurs) sont **désactivés** par défaut :
+`EASY3D_MCP_ALLOW_WRITE=1 cargo run` pour les activer.
+- Un changement de dossier des modèles écrit la configuration ; c'est le watcher
+qui rebascule la surveillance (quelques dizaines de ms plus tard). `get_config`
+distingue le dossier configuré, le dossier résolu et celui réellement surveillé.
+
+Côté client, il n'y a **rien à lancer** : le serveur MCP est le backend lui-même.
+
+```jsonc
+// .vscode/mcp.json  (VS Code / Copilot)
+{ "servers": { "easy3d": { "type": "http", "url": "http://127.0.0.1:8090/mcp" } } }
+```
+
+```bash
+# Claude Code
+claude mcp add --transport http easy3d http://127.0.0.1:8090/mcp
+
+# Claude Desktop (HTTP non natif : passer par un proxy stdio)
+npx mcp-remote http://127.0.0.1:8090/mcp
+```
+
+L'API n'a **aucune authentification** : le MCP s'adresse à `127.0.0.1`. Ne
+l'exposez pas au-delà (bind public, tunnel) sans ajouter au minimum un jeton
+d'API — sinon `set_models_root` et `delete_note` sont ouverts à qui peut joindre
+le port.
 
 ## Frontend
 
@@ -115,6 +173,8 @@ bun run dev
 |---------------------|--------------------|---------------------------|
 | `PORT`              | backend            | `8090`                    |
 | `MODELS_ROOT`       | backend            | `../models` (relatif repo)|
+| `EASY3D_CONFIG`     | backend            | `backend/config.yml`      |
+| `EASY3D_MCP_ALLOW_WRITE` | backend       | *désactivé* (`1` = outils destructeurs) |
 | `NUXT_HPCCAT_API_BASE` | frontend        | `http://127.0.0.1:8090`   |
 | `NUXT_HPCCAT_API_PORT` | frontend        | `8090`                    |
 | `NUXT_HPCCAT_WS_BASE`  | frontend        | `ws://127.0.0.1:8090`     |

@@ -31,6 +31,7 @@ mod three_mf;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::path::Path;
 
@@ -46,7 +47,7 @@ pub(crate) const THUMB_H: usize = 366;
 /// Le backend ignore *avec quel* loader le frontend l'affichera (ça, c'est du
 /// three.js) : il indique seulement la **nature** du contenu, et le frontend
 /// choisit la visionneuse correspondante.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Viewer {
     /// Maillage : visionneuse 3D.
@@ -87,11 +88,12 @@ pub trait Format: Sync {
     }
 }
 
-/// Descripteur d'un format, exposé au frontend (`GET /models`).
+/// Descripteur d'un format, exposé au frontend (`GET /models`) et aux agents
+/// (outil MCP `list_formats`).
 ///
 /// Le frontend n'a ainsi **aucune extension en dur** : il reçoit la liste de ce
 /// que le backend sait effectivement lire et afficher.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 pub struct FormatInfo {
     /// Nom lisible (ex : `3MF`).
     pub name: &'static str,
@@ -161,6 +163,15 @@ pub fn can_have_preview(name: &str) -> bool {
     find(name).is_some_and(|f| f.has_preview())
 }
 
+/// Visionneuse d'un fichier : [`Viewer::Mesh`], [`Viewer::Gcode`], ou
+/// [`Viewer::None`] si le format est inconnu.
+///
+/// Miroir backend de `viewerOf` côté frontend : sert notamment au serveur MCP,
+/// qui décrit le catalogue sans connaître lui-même les extensions.
+pub fn viewer_of(name: &str) -> Viewer {
+    find(name).map_or(Viewer::None, |f| f.viewer())
+}
+
 /// Génère l'aperçu PNG de `path` dans `out`, selon son format.
 ///
 /// `None` si le format est inconnu, sans aperçu, ou si la génération échoue.
@@ -225,5 +236,10 @@ mod tests {
         let gcode = formats.iter().find(|f| f.name == "G-code").unwrap();
         assert_eq!(gcode.extensions, ["gcode", "gco"].as_slice());
         assert_eq!(gcode.viewer, Viewer::Gcode);
+
+        // La visionneuse se déduit de l'extension du fichier.
+        assert_eq!(viewer_of("a.stl"), Viewer::Mesh);
+        assert_eq!(viewer_of("a.gco"), Viewer::Gcode);
+        assert_eq!(viewer_of("notes.md"), Viewer::None);
     }
 }

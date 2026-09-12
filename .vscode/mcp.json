@@ -1,0 +1,13 @@
+{
+  // Serveur MCP d'easy3d : c'est le backend lui-même (transport Streamable HTTP),
+  // il n'y a donc aucun process à lancer ici — démarrer `cargo run` dans
+  // `backend/`, puis ce serveur devient disponible dans le chat.
+  // Outils destructeurs (delete_note, set_models_root) : voir
+  // EASY3D_MCP_ALLOW_WRITE dans le README.
+  "servers": {
+    "easy3d": {
+      "type": "http",
+      "url": "http://127.0.0.1:8090/mcp"
+    }
+  }
+}
