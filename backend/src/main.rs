@@ -1,32 +1,10 @@
 use easy3d::{api, config, render, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 use tokio::sync::broadcast;
-
-/// Chemin du dossier de modèles.
-///
-/// Priorité : `config.models_root`, sinon variable d'env `MODELS_ROOT`,
-/// sinon les données à la racine du repo (`../models` depuis `backend/`).
-fn resolve_models_root(config: &config::Config) -> String {
-    if let Some(p) = config.models_root.clone() {
-        let path = Path::new(&p);
-        let joined = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
-        };
-        return joined.to_string_lossy().into_owned();
-    }
-    std::env::var("MODELS_ROOT").unwrap_or_else(|_| {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../models")
-            .to_string_lossy()
-            .into_owned()
-    })
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::fs::canonicalize(config::Config::config_path())
         .unwrap_or_else(|_| config::Config::config_path());
 
-    let resolved = resolve_models_root(&config);
+    let resolved = config.resolve_models_root();
     // Canonicalise la racine : évite les `..` (ex : `backend/../models`) et
     // fiabilise les tests de préfixe (`starts_with`) du watcher.
     let root = std::fs::canonicalize(&resolved).unwrap_or_else(|_| PathBuf::from(&resolved));
@@ -157,7 +135,7 @@ fn watch_dir(
             let changed = reloaded != *state.config.read().unwrap();
 
             if changed {
-                let new_root = PathBuf::from(resolve_models_root(&reloaded));
+                let new_root = reloaded.resolve_models_root();
                 let new_root = std::fs::canonicalize(&new_root).unwrap_or(new_root);
 
                 if new_root != current_root {

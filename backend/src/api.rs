@@ -27,6 +27,8 @@ pub struct AppState {
     pub root: Arc<RwLock<PathBuf>>,
     /// Configuration courante (rechargée à chaud).
     pub config: Arc<RwLock<Config>>,
+    /// Fichier YAML dont vient la config, réécrit par `PUT /config`.
+    pub config_path: Arc<PathBuf>,
     /// Canal broadcast : diffuse la liste des modèles (JSON) à tous les WS.
     pub ws: broadcast::Sender<String>,
     /// Documents collaboratifs ouverts (édition temps réel des notes).
@@ -39,9 +41,19 @@ impl AppState {
         Self {
             root: Arc::new(RwLock::new(root.into())),
             config: Arc::new(RwLock::new(config)),
+            config_path: Arc::new(Config::config_path()),
             ws,
             collab: Arc::new(collab::Rooms::new()),
         }
+    }
+
+    /// Redirige la réécriture de config vers un autre fichier.
+    ///
+    /// Les tests s'en servent pour écrire dans un dossier temporaire plutôt que
+    /// dans le `config.yml` du dépôt.
+    pub fn with_config_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config_path = Arc::new(path.into());
+        self
     }
 
     /// Copie la racine courante des modèles.
@@ -75,6 +87,7 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 pub fn routes(state: AppState) -> Router {
     Router::new()
         .route("/models", get(list_models))
+        .route("/config", get(get_config).put(put_config))
         .route("/file", get(get_file))
         .route("/note", get(get_note))
         .route("/health", get(health))
@@ -119,6 +132,111 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
         scanner::scan_models(&state.root()),
         &state.config(),
     ))
+}
+
+/// Réponse de `/config` : la configuration, plus le dossier réellement surveillé.
+///
+/// Le chemin résolu est ce qui intéresse l'interface : `models_root` peut être
+/// vide (valeur par défaut) ou relatif à `backend/`.
+#[derive(Serialize)]
+pub struct ConfigResponse {
+    pub config: Config,
+    pub models_root: String,
+}
+
+impl ConfigResponse {
+    fn of(config: Config) -> Self {
+        // Canonicalisé quand c'est possible : le chemin affiché dans
+        // l'interface ne doit pas contenir de `..` (ex : `backend/../models`).
+        let path = config.resolve_models_root();
+        let models_root = std::fs::canonicalize(&path).unwrap_or(path);
+
+        Self {
+            config,
+            models_root: tidy_path(&models_root),
+        }
+    }
+}
+
+/// Chemin lisible : Windows préfixe ses chemins canoniques par `\\?\`, ce qui
+/// n'a d'intérêt que pour le système de fichiers.
+fn tidy_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+}
+
+/// Renvoie la configuration **appliquée** (celle de l'état, pas du fichier).
+async fn get_config(State(state): State<AppState>) -> Json<ConfigResponse> {
+    Json(ConfigResponse::of(state.config()))
+}
+
+/// Remplace la configuration : écrit le YAML, que le watcher recharge à chaud.
+///
+/// On n'applique volontairement rien ici : le watcher est le **seul** à écrire
+/// dans l'état partagé (il compare le fichier rechargé à la config courante pour
+/// décider de rebasculer le dossier surveillé). Double emploi = il ne verrait
+/// plus de différence et ne changerait pas de dossier.
+///
+/// Le frontend reçoit donc la config demandée en réponse, puis la version
+/// appliquée via le WebSocket (~100 ms plus tard).
+async fn put_config(
+    State(state): State<AppState>,
+    Json(config): Json<Config>,
+) -> Result<Json<ConfigResponse>, (StatusCode, String)> {
+    // Refuse une config qui pointerait vers un dossier inexistant : le watcher
+    // basculerait dessus et le catalogue se viderait.
+    let root = config.resolve_models_root();
+    if !root.is_dir() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Dossier des modèles introuvable : {}", root.display()),
+        ));
+    }
+
+    // Rien à écrire si rien n'a changé : ça évite de réécrire le fichier (et de
+    // perdre ses commentaires) pour rien.
+    if config == state.config() {
+        return Ok(Json(ConfigResponse::of(config)));
+    }
+
+    let path = state.config_path.as_ref();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(internal_error)?;
+    }
+
+    // Le YAML est régénéré depuis la config : les commentaires du fichier
+    // d'origine ne survivent pas, d'où l'en-tête explicite.
+    let body = serde_yaml::to_string(&config).map_err(internal_error)?;
+    let yaml = format!(
+        "# easy3d — configuration de l'application\n\
+         #\n\
+         # Fichier réécrit par l'interface d'administration (PUT /config) :\n\
+         # les commentaires d'origine sont remplacés par cet en-tête.\n\
+         # Relu à chaud par le serveur, qui surveille ce fichier.\n\n{body}"
+    );
+    std::fs::write(path, yaml).map_err(internal_error)?;
+
+    // Application immédiate **si le dossier ne change pas** : sinon il faut
+    // attendre le watcher, qui n'applique qu'après son délai de regroupement
+    // (~50 ms) plus un rescan complet — un aller-retour inutile pour une simple
+    // bascule d'affichage.
+    //
+    // Si le dossier change, on ne touche à rien : le watcher est le seul à
+    // pouvoir rebasculer la surveillance du répertoire, et il ne le ferait pas
+    // s'il trouvait déjà la nouvelle config dans l'état partagé.
+    let same_root =
+        std::fs::canonicalize(&root).ok() == std::fs::canonicalize(state.root()).ok();
+    if same_root {
+        *state.config.write().unwrap() = config.clone();
+        broadcast_snapshot(&state);
+    }
+
+    Ok(Json(ConfigResponse::of(config)))
+}
+
+/// Erreur interne (écriture du fichier, sérialisation) → 500 avec le message.
+fn internal_error(e: impl std::fmt::Display) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
 /// WebSocket `/collab/{rel}` : édition collaborative de la note d'un élément.
@@ -318,6 +436,85 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = res.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn put_config_ecrit_le_fichier_et_renvoie_la_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.yml");
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let app =
+            routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
+
+        let body = serde_json::json!({
+            "models_root": models.to_string_lossy(),
+            "display": { "mode": "image" }
+        })
+        .to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/config")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // La réponse porte la config demandée et le dossier résolu.
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["config"]["display"]["mode"], "image");
+        assert_eq!(
+            v["models_root"].as_str().unwrap(),
+            models.to_string_lossy().as_ref()
+        );
+
+        // Le fichier est écrit dans le format que `Config::load_from` relit —
+        // c'est exactement ce que fait le watcher pour appliquer à chaud.
+        let reloaded = Config::load_from(&config_path);
+        assert!(reloaded.is_image_mode());
+        assert_eq!(
+            reloaded.models_root.as_deref(),
+            Some(models.to_string_lossy().as_ref())
+        );
+    }
+
+    #[tokio::test]
+    async fn put_config_refuse_un_dossier_introuvable() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.yml");
+        let missing = dir.path().join("pas-la");
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let app =
+            routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
+
+        let body = serde_json::json!({ "models_root": missing.to_string_lossy() }).to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/config")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        // Rien n'a été écrit : on n'enregistre pas une config inutilisable.
+        assert!(!config_path.exists());
     }
 
     #[tokio::test]
