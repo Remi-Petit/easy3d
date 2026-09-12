@@ -1,6 +1,6 @@
-use crate::{notes, render};
-use notify::event::{ModifyKind, RenameMode};
+use crate::{notes, thumbnail};
 use notify::EventKind;
+use notify::event::{ModifyKind, RenameMode};
 use notify_debouncer_full::DebouncedEvent;
 use std::path::{Path, PathBuf};
 
@@ -85,11 +85,7 @@ pub struct BatchEffect {
 ///   source ;
 /// - les dossiers cachés `.easy3d-thumbs/` et `.easy3d-notes/` sont ignorés :
 ///   ce sont nos propres artefacts, les rediffuser bouclerait.
-pub fn handle_batch(
-    root: &Path,
-    config_path: &Path,
-    events: &[DebouncedEvent],
-) -> BatchEffect {
+pub fn handle_batch(root: &Path, config_path: &Path, events: &[DebouncedEvent]) -> BatchEffect {
     let mut effect = BatchEffect::default();
     let mut removed: Vec<PathBuf> = Vec::new();
     let mut created: Vec<PathBuf> = Vec::new();
@@ -111,7 +107,7 @@ pub fn handle_batch(
             continue;
         }
 
-        let thumbs_root = root.join(render::THUMB_DIR);
+        let thumbs_root = root.join(thumbnail::THUMB_DIR);
         let notes_root = root.join(notes::NOTES_DIR);
         if event
             .paths
@@ -138,9 +134,9 @@ pub fn handle_batch(
 
             // Aperçus : régénéré pour la cible, supprimé pour la source.
             if path.exists() {
-                render::ensure_for_changed(root, &thumbs_root, path);
+                thumbnail::ensure_for_changed(root, &thumbs_root, path);
             } else {
-                render::remove_for_path(root, &thumbs_root, path);
+                thumbnail::remove_for_path(root, &thumbs_root, path);
             }
         }
 
@@ -274,7 +270,10 @@ mod tests {
     fn decrit_les_changements_en_francais() {
         let cases = [
             (EventKind::Create(CreateKind::File), "Ajout : models/a.stl"),
-            (EventKind::Remove(RemoveKind::File), "Suppression : models/a.stl"),
+            (
+                EventKind::Remove(RemoveKind::File),
+                "Suppression : models/a.stl",
+            ),
             (
                 EventKind::Modify(ModifyKind::Name(RenameMode::Any)),
                 "Renommage : models/a.stl",
@@ -295,7 +294,10 @@ mod tests {
     #[test]
     fn chemin_absent_donne_un_message_vide() {
         // Certains événements n'ont pas de chemin : on ne doit pas paniquer.
-        let ev = DebouncedEvent::new(Event::new(EventKind::Create(CreateKind::Any)), Instant::now());
+        let ev = DebouncedEvent::new(
+            Event::new(EventKind::Create(CreateKind::Any)),
+            Instant::now(),
+        );
         assert_eq!(describe_event(&ev).as_deref(), Some("Ajout : "));
     }
 
@@ -372,7 +374,10 @@ mod tests {
 
         assert!(effect.models_changed);
         assert!(note_of(&root, "A/x.stl").is_none());
-        assert_eq!(note_of(&root, "A/y.stl").as_deref(), Some("# note à suivre"));
+        assert_eq!(
+            note_of(&root, "A/y.stl").as_deref(),
+            Some("# note à suivre")
+        );
     }
 
     /// Déplacement **entre dossiers** : l'OS le signale comme une suppression
@@ -397,7 +402,10 @@ mod tests {
         handle_batch(&root, &root.join("config.yml"), &batch);
 
         assert!(note_of(&root, "A/x.stl").is_none());
-        assert_eq!(note_of(&root, "B/x.stl").as_deref(), Some("# note à suivre"));
+        assert_eq!(
+            note_of(&root, "B/x.stl").as_deref(),
+            Some("# note à suivre")
+        );
     }
 
     #[test]
@@ -462,7 +470,10 @@ mod tests {
         let effect = handle_batch(
             root,
             &config,
-            &[event(EventKind::Modify(ModifyKind::Any), config.to_str().unwrap())],
+            &[event(
+                EventKind::Modify(ModifyKind::Any),
+                config.to_str().unwrap(),
+            )],
         );
         assert!(effect.config_changed);
         assert!(!effect.models_changed);
@@ -473,7 +484,10 @@ mod tests {
         let effect = handle_batch(
             root,
             &config,
-            &[event(EventKind::Create(CreateKind::File), model.to_str().unwrap())],
+            &[event(
+                EventKind::Create(CreateKind::File),
+                model.to_str().unwrap(),
+            )],
         );
         assert!(effect.models_changed);
         assert!(effect.messages[0].starts_with("Ajout : "));
@@ -483,7 +497,10 @@ mod tests {
         let effect = handle_batch(
             root,
             &config,
-            &[event(EventKind::Create(CreateKind::File), outside.to_str().unwrap())],
+            &[event(
+                EventKind::Create(CreateKind::File),
+                outside.to_str().unwrap(),
+            )],
         );
         assert!(!effect.models_changed && !effect.config_changed);
 
@@ -491,7 +508,10 @@ mod tests {
         let effect = handle_batch(
             root,
             &config,
-            &[event(EventKind::Access(AccessKind::Read), model.to_str().unwrap())],
+            &[event(
+                EventKind::Access(AccessKind::Read),
+                model.to_str().unwrap(),
+            )],
         );
         assert!(!effect.models_changed && !effect.config_changed);
     }
@@ -503,7 +523,7 @@ mod tests {
         let config = root.join("config.yml");
 
         // Écrire une note ne doit pas déclencher de rediffusion (boucle).
-        for dir_name in [crate::render::THUMB_DIR, crate::notes::NOTES_DIR] {
+        for dir_name in [crate::thumbnail::THUMB_DIR, crate::notes::NOTES_DIR] {
             let file = root.join(dir_name).join("sub/a.stl.md");
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(&file, "x").unwrap();
@@ -511,7 +531,10 @@ mod tests {
             let effect = handle_batch(
                 root,
                 &config,
-                &[event(EventKind::Modify(ModifyKind::Any), file.to_str().unwrap())],
+                &[event(
+                    EventKind::Modify(ModifyKind::Any),
+                    file.to_str().unwrap(),
+                )],
             );
             assert_eq!(
                 effect,

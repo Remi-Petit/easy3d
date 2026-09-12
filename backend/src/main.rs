@@ -1,6 +1,6 @@
-use easy3d::{api, config, render, watcher};
+use easy3d::{api, config, formats, thumbnail, watcher};
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult};
+use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -9,6 +9,11 @@ use tokio::sync::broadcast;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+
+    // Rappel des formats reconnus (registre `formats`) : utile pour vérifier
+    // qu'un format ajouté est bien pris en compte au démarrage.
+    let names: Vec<&str> = formats::all().iter().map(|f| f.name()).collect();
+    println!("Formats reconnus : {}", names.join(", "));
 
     // Charge la configuration YAML (mode d'affichage, dossier des modèles…).
     let config = config::Config::load();
@@ -25,11 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::fs::canonicalize(&resolved).unwrap_or_else(|_| PathBuf::from(&resolved));
 
     // Dossier des aperçus générés par le backend (`<models_root>/.easy3d-thumbs`).
-    let thumbs_root = root.join(render::THUMB_DIR);
+    let thumbs_root = root.join(thumbnail::THUMB_DIR);
 
     // Génère un aperçu PNG pour chaque modèle déjà présent, avant de démarrer.
     // (Garde un aperçu à jour ; coût une fois au lancement.)
-    render::generate_all(&root, &thumbs_root);
+    thumbnail::generate_all(&root, &thumbs_root);
 
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
@@ -147,7 +152,10 @@ fn watch_dir(
                     let _ = debouncer.unwatch(&current_root);
                     match debouncer.watch(&new_root, RecursiveMode::Recursive) {
                         Ok(()) => {
-                            render::generate_all(&new_root, &new_root.join(render::THUMB_DIR));
+                            thumbnail::generate_all(
+                                &new_root,
+                                &new_root.join(thumbnail::THUMB_DIR),
+                            );
                             current_root = new_root;
                         }
                         Err(e) => {

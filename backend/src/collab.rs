@@ -66,10 +66,7 @@ impl Rooms {
     ///
     /// `rel` doit désigner un élément **existant** du catalogue : on ne crée pas
     /// de document pour une chaîne arbitraire. Renvoie `None` sinon.
-    pub fn join(
-        state: &AppState,
-        rel: &str,
-    ) -> Option<(Arc<Room>, broadcast::Receiver<Vec<u8>>)> {
+    pub fn join(state: &AppState, rel: &str) -> Option<(Arc<Room>, broadcast::Receiver<Vec<u8>>)> {
         let root = state.root();
         // Même validation que pour le fichier de note, puis existence exigée.
         notes::note_path(&root, rel)?;
@@ -429,11 +426,7 @@ mod tests {
 
     fn state(root: &Path) -> AppState {
         let (ws, _) = broadcast::channel::<String>(16);
-        AppState::new(
-            root.to_path_buf(),
-            ws,
-            crate::config::Config::default(),
-        )
+        AppState::new(root.to_path_buf(), ws, crate::config::Config::default())
     }
 
     /// Prépare un catalogue jetable contenant `sub/model.stl`.
@@ -496,13 +489,17 @@ mod tests {
         assert_eq!(peer.text(), "bonjour");
 
         // Le `.md` n'est pas encore écrit : c'est la tâche différée qui s'en charge.
-        assert!(!dir.path().join(notes::NOTES_DIR).join("sub/model.stl.md").exists());
+        assert!(
+            !dir.path()
+                .join(notes::NOTES_DIR)
+                .join("sub/model.stl.md")
+                .exists()
+        );
 
         assert!(flush(&room, &state, "sub/model.stl"));
-        let ecrit = std::fs::read_to_string(
-            dir.path().join(notes::NOTES_DIR).join("sub/model.stl.md"),
-        )
-        .unwrap();
+        let ecrit =
+            std::fs::read_to_string(dir.path().join(notes::NOTES_DIR).join("sub/model.stl.md"))
+                .unwrap();
         assert_eq!(ecrit, "bonjour");
     }
 
@@ -536,7 +533,11 @@ mod tests {
         assert_eq!(a.text(), b.text(), "les deux pairs doivent converger");
         assert!(a.text().contains("AAA"), "AAA perdu : {}", a.text());
         assert!(a.text().contains("ZZZ"), "ZZZ perdu : {}", a.text());
-        assert_eq!(a.text().chars().count(), 6, "rien d'autre ne doit apparaître");
+        assert_eq!(
+            a.text().chars().count(),
+            6,
+            "rien d'autre ne doit apparaître"
+        );
     }
 
     #[tokio::test]
@@ -638,9 +639,10 @@ mod tests {
     }
 
     async fn ouvrir(addr: SocketAddr, chemin: &str, client_id: u64) -> (Socket, Peer) {
-        let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/collab/{chemin}"))
-            .await
-            .unwrap();
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/collab/{chemin}"))
+                .await
+                .unwrap();
         let mut peer = Peer::new(client_id);
 
         // Le serveur envoie son état, puis la présence connue.
@@ -663,7 +665,9 @@ mod tests {
                 let replies = peer.receive(&frame.into_data());
                 for reply in replies {
                     if socket
-                        .send(tokio_tungstenite::tungstenite::Message::Binary(reply.into()))
+                        .send(tokio_tungstenite::tungstenite::Message::Binary(
+                            reply.into(),
+                        ))
                         .await
                         .is_err()
                     {
@@ -683,7 +687,9 @@ mod tests {
             let replies = peer.receive(&frame.into_data());
             for reply in replies {
                 let _ = socket
-                    .send(tokio_tungstenite::tungstenite::Message::Binary(reply.into()))
+                    .send(tokio_tungstenite::tungstenite::Message::Binary(
+                        reply.into(),
+                    ))
                     .await;
             }
         }
@@ -691,7 +697,9 @@ mod tests {
 
     async fn envoyer(socket: &mut Socket, frame: Vec<u8>) {
         socket
-            .send(tokio_tungstenite::tungstenite::Message::Binary(frame.into()))
+            .send(tokio_tungstenite::tungstenite::Message::Binary(
+                frame.into(),
+            ))
             .await
             .unwrap();
     }
@@ -718,7 +726,11 @@ mod tests {
             drainer(&mut ws_b, &mut b, Duration::from_millis(200)).await;
             vu = b.text().contains("écrit par A");
         }
-        assert!(vu, "B n'a jamais reçu la modification de A : {:?}", b.text());
+        assert!(
+            vu,
+            "B n'a jamais reçu la modification de A : {:?}",
+            b.text()
+        );
 
         // Et dans l'autre sens : A reçoit la réponse de B.
         b.insert(b.text().len() as u32, " et B aussi");
@@ -731,7 +743,11 @@ mod tests {
             }
             drainer(&mut ws_a, &mut a, Duration::from_millis(200)).await;
         }
-        assert!(retour, "A n'a jamais reçu la modification de B : {:?}", a.text());
+        assert!(
+            retour,
+            "A n'a jamais reçu la modification de B : {:?}",
+            a.text()
+        );
         assert_eq!(a.text(), "écrit par A et B aussi");
 
         // Et le fichier de note finit par être écrit sur disque.
@@ -808,4 +824,3 @@ mod tests {
         );
     }
 }
-
