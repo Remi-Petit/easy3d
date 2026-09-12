@@ -73,6 +73,29 @@ impl Config {
     pub fn is_image_mode(&self) -> bool {
         self.display.mode == DisplayMode::Image
     }
+
+    /// Chemin **résolu** du dossier des modèles.
+    ///
+    /// Priorité : `models_root` (absolu, ou relatif à `backend/`), sinon la
+    /// variable d'env `MODELS_ROOT`, sinon `../models` depuis `backend/`.
+    ///
+    /// Vit ici (et non dans `main.rs`) parce que trois endroits doivent
+    /// résoudre le même chemin : le démarrage, le rechargement à chaud du
+    /// watcher, et `PUT /config` qui doit valider ce que l'on enregistre.
+    pub fn resolve_models_root(&self) -> PathBuf {
+        if let Some(p) = self.models_root.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            let path = Path::new(p);
+            return if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+            };
+        }
+
+        std::env::var("MODELS_ROOT").map(PathBuf::from).unwrap_or_else(|_| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../models")
+        })
+    }
 }
 
 #[cfg(test)]

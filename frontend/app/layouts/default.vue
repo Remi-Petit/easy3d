@@ -15,16 +15,20 @@ const header = usePageHeaderState()
 const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
   useFilter()
 
+/** `true` sur la page d'administration : section distincte du catalogue. */
+const isAdmin = computed(() => route.path.startsWith('/admin'))
+
 /** Titre de la page courante, déduit de la route (pas de flash à l'hydratation). */
 const title = computed(() => {
+  if (isAdmin.value) return 'Administration'
   if (route.params.name) return decodeURIComponent(String(route.params.name))
   if (route.params.rel) return basename(decodeURIComponent(String(route.params.rel)))
   return 'Models'
 })
 
 const isHome = computed(() => route.path === '/')
-/** La vue fichier n'a pas de liste à filtrer. */
-const showFilter = computed(() => !route.params.rel)
+/** Barre de recherche du catalogue : ni sur la vue fichier, ni sur l'admin. */
+const showFilter = computed(() => !route.params.rel && !isAdmin.value)
 
 const placeholder = computed(() =>
   route.params.name ? 'Filtrer par nom de fichier…' : 'Filtrer par nom de fichier ou de dossier…',
@@ -63,6 +67,8 @@ function isActive(to: string) {
 const navItems = computed<NavigationMenuItem[]>(() => [
   { type: 'label', label: 'Catalogue' },
   { label: 'Models', icon: 'i-lucide-box', to: '/', active: isActive('/') },
+  { type: 'label', label: 'Système' },
+  { label: 'Administration', icon: 'i-lucide-settings', to: '/admin', active: isAdmin.value },
 ])
 
 /**
