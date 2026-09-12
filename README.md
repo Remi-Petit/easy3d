@@ -35,7 +35,7 @@ modifier met à jour son aperçu, le renommer emmène sa note. Rien à relancer.
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
   consulte et modifie la configuration — par le même chemin que l'interface, donc
   sans jamais écraser une édition en cours.
-- **Quatre langues** : français, anglais, allemand, espagnol.
+- <!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 133 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright — et une CI qui
   refuse le moindre avertissement du compilateur.

@@ -21,10 +21,17 @@ import 'md-editor-v3/lib/style.css'
 // `i18n/locales/` au build, si bien qu'un `import` classique renvoie des arbres
 // compilés (`{ type, body, loc… }`) et non des chaînes. md-editor, qui attend
 // des chaînes, afficherait « [object Object] » partout.
-import deRaw from '~~/i18n/locales/de.json?raw'
-import enRaw from '~~/i18n/locales/en.json?raw'
-import esRaw from '~~/i18n/locales/es.json?raw'
-import frRaw from '~~/i18n/locales/fr.json?raw'
+//
+// Les fichiers sont énumérés au build (glob) : ajouter une langue dans
+// `i18n/locales/` suffit, il n'y a pas d'imports à compléter ici.
+const rawLocales = import.meta.glob('../../i18n/locales/*.json', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+/** Code de langue déduit du chemin trouvé par le glob (`…/locales/fr.json`). */
+const codeOf = (path: string) => path.slice(path.lastIndexOf('/') + 1, -'.json'.length)
 
 /** Extrait le bloc `notes.editor` d'un fichier de langue brut. */
 function editorText(raw: string): StaticTextDefaultValue {
@@ -39,25 +46,22 @@ const props = defineProps<{
 }>()
 
 /**
- * Textes français (la bibliothèque n'embarque que `zh-CN` et `en-US`).
- * Tous les champs sont optionnels : on ne traduit que la barre d'outils.
+ * Libellés lus par md-editor (la bibliothèque n'embarque que `zh-CN` et
+ * `en-US`). Tous les champs sont optionnels : on ne traduit que la barre d'outils.
  */
 config({
   editorConfig: {
     /**
-     * md-editor-v3 n'embarque que `zh-CN` et `en-US` : les quatre langues de
-     * l'app sont donc déclarées ici.
+     * md-editor-v3 n'embarque que `zh-CN` et `en-US` : les langues de l'app
+     * sont donc déclarées ici, une entrée par fichier de `i18n/locales/`.
      *
      * Elles doivent l'être **d'un coup** : `config()` est un réglage global,
      * appelé une seule fois à l'import, alors que md-editor choisit son libellé
      * à l'affichage selon le `language` courant.
      */
-    languageUserDefined: {
-      fr: editorText(frRaw),
-      en: editorText(enRaw),
-      de: editorText(deRaw),
-      es: editorText(esRaw),
-    },
+    languageUserDefined: Object.fromEntries(
+      Object.entries(rawLocales).map(([path, raw]) => [codeOf(path), editorText(raw)]),
+    ),
   },
   // Extensions CodeMirror : c'est par là qu'on branche la synchronisation Yjs
   // et les curseurs des autres participants. Un seul appel à `config()`, donc
