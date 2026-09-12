@@ -14,6 +14,12 @@ export interface FileInfo {
 export interface FolderInfo {
   name: string
   count: number
+  /**
+   * Dernière modification du dossier (mtime du répertoire, secondes unix) :
+   * ajout, suppression ou renommage d'un fichier dedans — pas seulement
+   * l'édition d'un fichier existant.
+   */
+  modified: number | null
   files: FileInfo[]
   /** Note explicative (Markdown) du dossier, si présente. */
   note?: string | null
