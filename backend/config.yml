@@ -1,21 +1,9 @@
 # easy3d — configuration de l'application
 #
-# Ce fichier est **relu à chaud** : le serveur le surveille et applique toute
-# modification sans redémarrage. Le frontend est rafraîchi automatiquement
-# (WebSocket), sans rechargement de la page.
-#
-# Chemin par défaut : ce fichier (config.yml), à côté du Cargo.toml du backend.
-# Surcharge : variable d'env EASY3D_CONFIG=<chemin> pour pointer ailleurs.
+# Fichier réécrit par l'interface d'administration (PUT /config) :
+# les commentaires d'origine sont remplacés par cet en-tête.
+# Relu à chaud par le serveur, qui surveille ce fichier.
 
-# ── Répertoire des modèles ────────────────────────────────────────────────
-# Chemin (absolu, ou relatif au dossier backend/) où chercher les modèles.
-# Priorité : ici > variable d'env MODELS_ROOT > défaut ../models.
 models_root: ../models
-
-# ── Affichage des modèles ────────────────────────────────────────────────
 display:
-  # "3d"   : (défaut) vue interactive Three.js / WebGL.
-  # "image": aperçu statique image si une image du même nom existe à côté du
-  #          modèle (ex : boitier.stl + boitier.png), sinon repli 3D.
-  # mode: "3d"
-  mode: "image"
+  mode: image
