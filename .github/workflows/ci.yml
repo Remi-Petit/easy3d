@@ -1,8 +1,26 @@
 name: Cargo Build & Test
 
+# Deux dossiers, deux mondes : la CI ne lance que ce qui est concerné.
+#   - un commit qui ne touche ni `backend/` ni `frontend/` (README, modèles,
+#     compose…) ne déclenche **aucun** job ;
+#   - un changement purement frontend n'exécute pas la matrice Rust (job
+#     `changes` + `if:` sur chaque job), et inversement.
+# Les workflows font partie des filtres : modifier la CI la relance.
+#
+# `branches: [master]` : sans ce filtre, pousser un tag relançait toute la CI
+# (les releases ont leur propre workflow, `release.yml`).
 on:
   push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
   pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
 
 env: 
   CARGO_TERM_COLOR: always
@@ -13,8 +31,33 @@ defaults:
     working-directory: backend
 
 jobs:
+  # Y a-t-il du backend à vérifier ? du frontend à tester ?
+  changes:
+    name: Fichiers modifiés
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Comparer au commit précédent, pas seulement au dernier commit.
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/**'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/**'
+
   build_and_test:
     name: Rust project - latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,6 +73,8 @@ jobs:
 
   latest_deps:
     name: Latest Dependencies
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
@@ -42,6 +87,8 @@ jobs:
       - run: cargo test --verbose
 
   msrv:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -49,6 +96,8 @@ jobs:
     - run: cargo hack check --rust-version --workspace --all-targets --ignore-private
 
   warnings:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     env:
       CARGO_BUILD_WARNINGS: deny
@@ -57,3 +106,25 @@ jobs:
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       - run: cargo clippy --all-targets --all-features --keep-going
+
+  # Tests unitaires (vitest) et build Nuxt : le build est le seul endroit qui
+  # attrape une erreur de gabarit ou de SSR, invisible aux tests unitaires.
+  # Les tests de bout en bout (Playwright) ne sont pas encore ici : ils attendent
+  # un catalogue, alors que `models/` est vide en CI (seul `.gitkeep` est suivi).
+  frontend:
+    name: Frontend (bun)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      # Version de bun lue dans `packageManager` (frontend/package.json).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: frontend/package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build
