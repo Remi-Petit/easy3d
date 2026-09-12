@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basename, ext, toDate, timeAgo } from '~/utils/format'
+import { basename, ext, fileDownloadUrl, fileUrl, toDate, timeAgo } from '~/utils/format'
 
 describe('basename', () => {
   it('extrait le nom final du chemin', () => {
@@ -17,6 +17,17 @@ describe('ext', () => {
     expect(ext('a.gcode')).toBe('gcode')
     expect(ext('sans_extension')).toBe('')
     expect(ext('archive.gco')).toBe('gco')
+  })
+})
+
+describe('fileDownloadUrl', () => {
+  it('ajoute le drapeau download à l’URL du fichier', () => {
+    expect(fileDownloadUrl('a.stl')).toBe(`${fileUrl('a.stl')}&download=1`)
+  })
+  it('encode les chemins et les accents', () => {
+    expect(fileDownloadUrl('DemaAuto/Boitier déma auto.gcode')).toBe(
+      '/api/file?path=DemaAuto%2FBoitier%20d%C3%A9ma%20auto.gcode&download=1',
+    )
   })
 })
 

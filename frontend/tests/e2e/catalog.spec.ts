@@ -29,3 +29,16 @@ test('fichier : le détail charge le viewer et la table de méta', async ({ page
   await expect(page.locator('.viewer-card')).toBeVisible()
   await expect(page.locator('.meta-table')).toBeVisible()
 })
+
+test('fichier : le modèle est téléchargeable', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('a[href*="/fichier/"]').first().click()
+  const dl = page.locator('.detail-bar a[download]')
+  await expect(dl).toBeVisible()
+  await expect(dl).toHaveAttribute('href', /\/api\/file\?path=.+&download=1$/)
+
+  // Le clic déclenche bien un téléchargement, sous le nom du fichier.
+  const name = await dl.getAttribute('download')
+  const [download] = await Promise.all([page.waitForEvent('download'), dl.click()])
+  expect(download.suggestedFilename()).toBe(name)
+})
