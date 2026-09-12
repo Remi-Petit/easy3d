@@ -89,6 +89,33 @@ impl Rooms {
         let rx = room.tx.subscribe();
         Some((room, rx))
     }
+
+    /// Contenu **live** d'une note déjà ouverte, sans ouvrir de document.
+    ///
+    /// Le `.md` peut avoir jusqu'à [`FLUSH_DELAY`] de retard sur le document :
+    /// pour lire, on préfère donc le CRDT quand il est encore en mémoire.
+    pub fn live_text(state: &AppState, rel: &str) -> Option<String> {
+        let map = state.collab.map.lock().unwrap();
+        map.get(rel).map(|room| room.text())
+    }
+
+    /// Écrit une note en passant par le **document collaboratif**.
+    ///
+    /// C'est le chemin des outils MCP : les éditeurs ouverts reçoivent la
+    /// modification (elle est relayée), la fusion reste faite par le CRDT, et la
+    /// persistance `.md` + `.ydoc` suit le flush habituel. [`Rooms::join`] exige
+    /// que l'élément existe dans le catalogue : on ne crée pas de note orpheline.
+    pub fn set_text(state: &AppState, rel: &str, content: &str) -> Result<(), String> {
+        let (room, _rx) = Rooms::join(state, rel)
+            .ok_or_else(|| format!("« {rel} » n'existe pas dans le catalogue"))?;
+
+        if let Some(frame) = room.replace_text(content) {
+            // Personne à l'écoute (aucun éditeur ouvert) : l'envoi échoue sans
+            // conséquence, le document reste modifié et sera persisté.
+            let _ = room.tx.send(frame);
+        }
+        Ok(())
+    }
 }
 
 /// Un document partagé et son canal de diffusion.
@@ -164,6 +191,40 @@ impl Room {
     /// Marque le document comme modifié (écriture différée sur disque).
     fn touch(&self) {
         self.dirty.store(true, Ordering::SeqCst);
+    }
+
+    /// Remplace le contenu du document et renvoie la trame à relayer.
+    ///
+    /// Écriture **côté serveur** (outil MCP, import…) : elle passe par le CRDT
+    /// pour que les éditeurs ouverts fusionnent la modification au lieu de la
+    /// voir écrasée. Renvoie `None` si le contenu est déjà celui demandé.
+    pub fn replace_text(&self, content: &str) -> Option<Vec<u8>> {
+        if self.text() == content {
+            return None;
+        }
+
+        let awareness = self.awareness.lock().unwrap();
+        let doc = awareness.doc();
+        // `get_or_insert_text` **avant** toute transaction : appelé après, il
+        // attendrait sa propre transaction de lecture (voir `text()`).
+        let text = doc.get_or_insert_text(TEXT_KEY);
+        let mut txn = doc.transact_mut();
+        let len = text.len(&txn);
+        if len > 0 {
+            text.remove_range(&mut txn, 0, len);
+        }
+        if !content.is_empty() {
+            text.insert(&mut txn, 0, content);
+        }
+        drop(txn);
+
+        // État complet plutôt qu'un delta : les notes sont courtes, et un update
+        // CRDT est idempotent, donc rien à arbitrer côté client.
+        let update = doc
+            .transact()
+            .encode_state_as_update_v1(&StateVector::default());
+        self.touch();
+        Some(encode(&YMessage::Sync(YSync::Update(update))))
     }
 }
 
