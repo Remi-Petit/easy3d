@@ -1,0 +1,173 @@
+{
+  "app": {
+    "tagline": "model catalogue"
+  },
+  "nav": {
+    "menuTitle": "Navigation",
+    "menuDescription": "Application navigation",
+    "catalog": "Catalog",
+    "system": "System",
+    "models": "Models",
+    "admin": "Administration"
+  },
+  "status": {
+    "live": "live",
+    "offline": "offline",
+    "polling": "polling fallback"
+  },
+  "common": {
+    "back": "← Back",
+    "backAria": "Go back",
+    "download": "Download",
+    "loading": "Loading…",
+    "unknownError": "Unknown error",
+    "close": "Close (Esc)",
+    "none": "—"
+  },
+  "language": {
+    "label": "Language",
+    "choose": "Choose language"
+  },
+  "filter": {
+    "placeholder": "Filter by file or folder name…",
+    "placeholderFolder": "Filter by file name…",
+    "items": "Filter items…",
+    "date": "Date",
+    "sort": {
+      "none": "date (default order)",
+      "desc": "date: newest → oldest",
+      "asc": "date: oldest → newest"
+    },
+    "sortBy": "Sort by {mode}",
+    "sortHint": "Sort by {mode} (click to change)",
+    "typeTitle": "Filter: {count} file {type} | Filter: {count} files {type}",
+    "clear": "✕ Clear"
+  },
+  "catalog": {
+    "title": "Models",
+    "subtitle": "model catalogue · STL / 3MF / GCODE",
+    "all": "All ({count})",
+    "folders": "Folders",
+    "root": "Root ({count})",
+    "noFolder": "No folder found.",
+    "noRootFile": "No file at the root.",
+    "noResult": "No result.",
+    "noResultFor": "No result for {what}."
+  },
+  "folder": {
+    "subtitle": "{count} file · STL / 3MF / GCODE | {count} files · STL / 3MF / GCODE",
+    "subtitleFiltered": "{shown} / {count} file · STL / 3MF / GCODE | {shown} / {count} files · STL / 3MF / GCODE",
+    "meta": "{count} file · {when} | {count} files · {when}",
+    "empty": "Empty folder",
+    "noMatch": "No file matches the filter.",
+    "hasNote": "This folder has a note"
+  },
+  "file": {
+    "subtitle": "{type} · {when}",
+    "meta": "{type} · {when}",
+    "metaInFolder": "{type} · 📁 {folder} · {when}",
+    "metaFile": "File",
+    "metaType": "Type",
+    "metaPath": "Path",
+    "metaModified": "Modified",
+    "noPreview": "3D preview is not available for this file type.",
+    "hasNote": "This file has a note",
+    "gcodeBadge": "🖨 GCODE"
+  },
+  "viewer": {
+    "loading": "loading…",
+    "httpError": "HTTP error {status}",
+    "noExtrusion": "No extrusion path found",
+    "segments": "segments",
+    "triangles": "triangles",
+    "hint": "Drag to rotate · scroll to zoom"
+  },
+  "notes": {
+    "title": "📝 Note",
+    "empty": "No note yet.",
+    "placeholder": "Describe this file or this folder…",
+    "connected": "Connected",
+    "offline": "Offline",
+    "peers": "👥 {count} people",
+    "edit": "Edit",
+    "add": "Add a note",
+    "finish": "Done",
+    "editor": {
+      "toolbarTips": {
+        "bold": "Bold",
+        "underline": "Underline",
+        "italic": "Italic",
+        "strikeThrough": "Strikethrough",
+        "title": "Heading",
+        "sub": "Subscript",
+        "sup": "Superscript",
+        "quote": "Quote",
+        "unorderedList": "Bullet list",
+        "orderedList": "Numbered list",
+        "task": "Checkbox",
+        "codeRow": "Inline code",
+        "code": "Code block",
+        "link": "Link",
+        "image": "Image",
+        "table": "Table",
+        "revoke": "Undo",
+        "next": "Redo",
+        "save": "Save",
+        "prettier": "Format",
+        "pageFullscreen": "Page fullscreen",
+        "fullscreen": "Fullscreen",
+        "preview": "Preview",
+        "previewOnly": "Preview only",
+        "htmlPreview": "HTML",
+        "catalog": "Outline",
+        "github": "GitHub"
+      },
+      "titleItem": {
+        "h1": "Heading 1",
+        "h2": "Heading 2",
+        "h3": "Heading 3",
+        "h4": "Heading 4",
+        "h5": "Heading 5",
+        "h6": "Heading 6"
+      },
+      "linkModalTips": {
+        "linkTitle": "Insert a link",
+        "imageTitle": "Insert an image",
+        "descLabel": "Text",
+        "descLabelPlaceHolder": "Displayed text…",
+        "urlLabel": "Address",
+        "urlLabelPlaceHolder": "https://…",
+        "buttonOK": "Confirm"
+      },
+      "footer": {
+        "markdownTotal": "characters",
+        "scrollAuto": "Synchronised scrolling"
+      }
+    }
+  },
+  "admin": {
+    "title": "Administration",
+    "subtitle": "settings and notes",
+    "settings": "Settings",
+    "display": "Model display",
+    "mode3d": "Interactive 3D",
+    "modeImage": "Image preview",
+    "hint": "Applied and written to {file} on click.",
+    "saved": "Applied",
+    "saveFailed": "Saving failed.",
+    "applied": "Applied",
+    "rootRead": "Folder read",
+    "notes": "Notes",
+    "noItems": "No item.",
+    "whereFolder": "folder",
+    "whereRoot": "root",
+    "hasNote": "Has a note"
+  },
+  "time": {
+    "now": "just now",
+    "seconds": "{count}s ago",
+    "minutes": "{count} min ago",
+    "hours": "{count}h ago",
+    "days": "{count}d ago"
+  }
+}

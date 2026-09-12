@@ -4,6 +4,7 @@ import { useNow } from '~/composables/useNow'
 
 const route = useRoute()
 const { data, error, live } = useModels()
+const { t } = useI18n()
 
 // Chemin relatif encodé (ex : `DemaAuto%2Fboitier.stl`) -> décodé.
 const rel = computed(() => decodeURIComponent(String(route.params.rel)))
@@ -20,12 +21,11 @@ const file = computed<FileInfo | null>(() => {
   )
 })
 
-const now = useNow()
 const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
 const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
-const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
+const when = useTimeAgo(() => file.value?.modified ?? null)
 /**
  * La page détail fait exception au réglage global : un modèle (STL / OBJ / 3MF)
  * ou un G-code y est **toujours** rendu en 3D, même si le catalogue est réglé
@@ -35,7 +35,7 @@ const showViewer = computed(() => isModel.value || isGcode.value)
 
 // En-tête global (rendu par le layout `default`).
 usePageHeader(() => ({
-  subtitle: `${type.value.toUpperCase()} · ${when.value}`,
+  subtitle: t('file.subtitle', { type: type.value.toUpperCase(), when: when.value }),
   count: 0,
   live: live.value,
   offline: !!error.value,
@@ -62,7 +62,7 @@ usePageHeader(() => ({
         <path d="m7 10 5 5 5-5" />
         <path d="M5 21h14" />
       </svg>
-      Télécharger
+      {{ $t('common.download') }}
       <span class="download__size">{{ type.toUpperCase() }}</span>
     </a>
   </div>
@@ -75,16 +75,16 @@ usePageHeader(() => ({
       <ModelViewer v-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
       <div v-else class="file-detail-placeholder">
         <span class="ph-badge">{{ type.toUpperCase() }}</span>
-        <p>Aperçu 3D non disponible pour ce type de fichier.</p>
+        <p>{{ $t('file.noPreview') }}</p>
       </div>
     </div>
 
     <aside class="detail__side">
       <dl class="meta-table">
-        <div class="meta-row"><dt>Fichier</dt><dd>{{ name }}</dd></div>
-        <div class="meta-row"><dt>Type</dt><dd>{{ type.toUpperCase() }}</dd></div>
-        <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
-        <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
+        <div class="meta-row"><dt>{{ $t('file.metaFile') }}</dt><dd>{{ name }}</dd></div>
+        <div class="meta-row"><dt>{{ $t('file.metaType') }}</dt><dd>{{ type.toUpperCase() }}</dd></div>
+        <div class="meta-row"><dt>{{ $t('file.metaPath') }}</dt><dd :title="rel">{{ rel }}</dd></div>
+        <div class="meta-row"><dt>{{ $t('file.metaModified') }}</dt><dd>{{ when }}</dd></div>
       </dl>
 
       <!-- Note du fichier (Markdown) : affichage + édition assistée. -->

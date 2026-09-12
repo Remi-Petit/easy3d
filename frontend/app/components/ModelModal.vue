@@ -17,12 +17,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div class="modal" @click.self="emit('close')">
       <div class="modal__head">
         <span class="modal__title">{{ name }}</span>
-        <button class="modal__close" @click="emit('close')" title="Fermer (Échap)">✕</button>
+        <button class="modal__close" @click="emit('close')" :title="$t('common.close')">✕</button>
       </div>
       <div class="modal__body">
         <ModelViewer :rel="rel" :auto-rotate="false" show-info />
       </div>
-      <p class="modal__hint">Glisser pour pivoter · molette pour zoomer</p>
+      <p class="modal__hint">{{ $t('viewer.hint') }}</p>
     </div>
   </Teleport>
 </template>

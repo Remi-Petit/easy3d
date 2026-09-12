@@ -38,16 +38,28 @@ export function toDate(ts: number | null): Date | null {
   return ts ? new Date(ts * 1000) : null
 }
 
-export function timeAgo(date: Date | null, now: Date = new Date()): string {
-  if (!date) return '—'
-  const diff = now.getTime() - date.getTime()
-  const s = Math.floor(diff / 1000)
-  if (s < 5) return 'à l’instant'
-  if (s < 60) return `il y a ${s}s`
+/**
+ * Temps relatif compact, découpé en **clé de traduction + valeur**.
+ *
+ * Le calcul est volontairement séparé du rendu : la fonction reste pure (donc
+ * testable sans contexte i18n) et les libellés vivent dans `time.*` des fichiers
+ * de langue. Le rendu est fait par le composable `useTimeAgo`.
+ */
+export interface RelativeTime {
+  /** `now` = moins de 5 s ; sinon l’unité affichée. */
+  key: 'now' | 'seconds' | 'minutes' | 'hours' | 'days'
+  count: number
+}
+
+/** `null` = date inconnue (à rendre par `common.none`). */
+export function relativeTime(date: Date | null, now: Date = new Date()): RelativeTime | null {
+  if (!date) return null
+  const s = Math.floor((now.getTime() - date.getTime()) / 1000)
+  if (s < 5) return { key: 'now', count: 0 }
+  if (s < 60) return { key: 'seconds', count: s }
   const m = Math.floor(s / 60)
-  if (m < 60) return `il y a ${m} min`
+  if (m < 60) return { key: 'minutes', count: m }
   const h = Math.floor(m / 60)
-  if (h < 24) return `il y a ${h}h`
-  const d = Math.floor(h / 24)
-  return `il y a ${d}j`
+  if (h < 24) return { key: 'hours', count: h }
+  return { key: 'days', count: Math.floor(h / 24) }
 }
