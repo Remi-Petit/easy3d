@@ -6,6 +6,7 @@
 //! 2. à défaut, rasteriser la géométrie des `<object>` du document.
 
 use super::Format;
+use super::Viewer;
 use super::mesh::{self, Mesh};
 use std::fs;
 use std::io::Read;
@@ -32,6 +33,10 @@ impl Format for ThreeMf {
 
     fn has_preview(&self) -> bool {
         true
+    }
+
+    fn viewer(&self) -> Viewer {
+        Viewer::Mesh
     }
 
     fn thumbnail(&self, path: &Path, out: &Path) -> Option<()> {
