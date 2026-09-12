@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SORT_ICONS,
-  SORT_LABELS,
+  SORT_LABEL_KEYS,
   collectTypes,
   matchesQuery,
   matchesTypes,
@@ -30,9 +30,10 @@ describe('nextSortMode', () => {
     expect(mode).toBe('none')
   })
 
-  it('a un libellé et une flèche pour chaque mode', () => {
+  it('a une clé de traduction et une flèche pour chaque mode', () => {
     for (const mode of ['none', 'date-asc', 'date-desc'] as SortMode[]) {
-      expect(SORT_LABELS[mode]).toBeTruthy()
+      // Les libellés sont traduits : ici on vérifie seulement qu'ils sont câblés.
+      expect(SORT_LABEL_KEYS[mode]).toMatch(/^filter\.sort\./)
       expect(SORT_ICONS[mode]).toBeTruthy()
     }
     // ↕ = normal, ↑ = ancien → récent, ↓ = récent → ancien.

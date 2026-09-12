@@ -8,6 +8,7 @@ import type { DisplayMode, FileInfo } from '~/composables/useModels'
 // (`NotePanel`, CRDT Yjs) : on n'écrit jamais un `.md` directement, sinon on
 // écrase le travail d'une autre session en cours.
 const { data, error, live } = useModels()
+const { t } = useI18n()
 
 // ── Réglages ────────────────────────────────────────────────────────────────
 // Un seul réglage exposé : le mode d'affichage. Il est écrit **dès le clic**
@@ -81,12 +82,12 @@ async function persist() {
           },
         })
         saveState.value = 'ok'
-        saveMessage.value = 'Appliqué'
+        saveMessage.value = t('admin.saved')
         await loadResolvedRoot()
       } catch (e: any) {
         saveState.value = 'error'
         saveMessage.value =
-          e?.data?.message ?? e?.data?.cause ?? e?.message ?? 'Échec de l’enregistrement.'
+          e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('admin.saveFailed')
       }
     } while (queued)
   } finally {
@@ -107,7 +108,7 @@ const targets = computed<NoteTarget[]>(() => {
   const folders: NoteTarget[] = Object.values(data.value.folders).map((f) => ({
     rel: f.name,
     label: f.name,
-    where: 'dossier',
+    where: t('admin.whereFolder'),
     hasNote: !!f.note,
   }))
 
@@ -115,7 +116,7 @@ const targets = computed<NoteTarget[]>(() => {
     ...data.value.files.map((f: FileInfo) => ({
       rel: f.rel,
       label: basename(f.rel),
-      where: 'racine',
+      where: t('admin.whereRoot'),
       hasNote: !!f.note,
     })),
     ...Object.entries(data.value.folders).flatMap(([name, folder]) =>
@@ -131,13 +132,13 @@ const targets = computed<NoteTarget[]>(() => {
   return [...folders, ...files]
 })
 
-const noteCount = computed(() => targets.value.filter((t) => t.hasNote).length)
+const noteCount = computed(() => targets.value.filter((target) => target.hasNote).length)
 
 /** Filtre + tri : les éléments qui ont déjà une note remontent en tête. */
 const filteredTargets = computed(() => {
   const q = noteQuery.value.trim().toLowerCase()
   return targets.value
-    .filter((t) => !q || t.rel.toLowerCase().includes(q))
+    .filter((target) => !q || target.rel.toLowerCase().includes(q))
     .sort((a, b) => Number(b.hasNote) - Number(a.hasNote) || a.rel.localeCompare(b.rel))
 })
 
@@ -155,7 +156,7 @@ const selectedNote = computed<string | null>(() => {
 
 // En-tête : le sous-titre est un état partagé, cette page doit le déclarer.
 usePageHeader(() => ({
-  subtitle: 'réglages et notes',
+  subtitle: t('admin.subtitle'),
   count: 0,
   live: live.value,
   offline: !!error.value,
@@ -165,27 +166,29 @@ usePageHeader(() => ({
 <template>
   <div v-if="error" class="error">{{ error }}</div>
 
-  <div v-if="!data" class="empty">Chargement…</div>
+  <div v-if="!data" class="empty">{{ $t('common.loading') }}</div>
 
   <div v-else class="admin">
     <!-- Réglages : écrits dans config.yml, appliqués à chaud par le backend. -->
     <section class="admin__card">
-      <h2 class="admin__title">Réglages</h2>
+      <h2 class="admin__title">{{ $t('admin.settings') }}</h2>
 
       <div class="admin__field">
-        <span class="admin__label">Affichage des modèles</span>
+        <span class="admin__label">{{ $t('admin.display') }}</span>
         <div class="admin__choices">
           <label class="admin__choice" :class="{ 'admin__choice--on': mode === '3d' }">
             <input v-model="mode" type="radio" value="3d" @change="persist" />
-            <span>3D interactif</span>
+            <span>{{ $t('admin.mode3d') }}</span>
           </label>
           <label class="admin__choice" :class="{ 'admin__choice--on': mode === 'image' }">
             <input v-model="mode" type="radio" value="image" @change="persist" />
-            <span>Aperçu image</span>
+            <span>{{ $t('admin.modeImage') }}</span>
           </label>
         </div>
         <p class="admin__hint">
-          Appliqué et écrit dans <code>backend/config.yml</code> dès le clic.
+          <i18n-t keypath="admin.hint" scope="global">
+            <template #file><code>backend/config.yml</code></template>
+          </i18n-t>
           <span v-if="saveState === 'saving'" class="admin__status">…</span>
           <span
             v-else-if="saveState === 'ok'"
@@ -200,12 +203,12 @@ usePageHeader(() => ({
 
       <dl class="admin__applied">
         <div>
-          <dt>Appliqué</dt>
-          <dd>{{ appliedMode === 'image' ? 'aperçu image' : '3D interactif' }}</dd>
+          <dt>{{ $t('admin.applied') }}</dt>
+          <dd>{{ $t(appliedMode === 'image' ? 'admin.modeImage' : 'admin.mode3d') }}</dd>
         </div>
         <div>
-          <dt>Dossier lu</dt>
-          <dd :title="resolvedRoot">{{ resolvedRoot || '—' }}</dd>
+          <dt>{{ $t('admin.rootRead') }}</dt>
+          <dd :title="resolvedRoot">{{ resolvedRoot || $t('common.none') }}</dd>
         </div>
       </dl>
     </section>
@@ -213,14 +216,14 @@ usePageHeader(() => ({
     <!-- Notes : liste des éléments, avec accès à l'éditeur collaboratif. -->
     <section class="admin__card">
       <h2 class="admin__title">
-        Notes <span class="admin__count">{{ noteCount }}</span>
+        {{ $t('admin.notes') }} <span class="admin__count">{{ noteCount }}</span>
       </h2>
 
       <input
         v-model="noteQuery"
         class="admin__input"
         type="search"
-        placeholder="Filtrer les éléments…"
+        :placeholder="$t('filter.items')"
       />
 
       <ul class="admin__list">
@@ -233,10 +236,10 @@ usePageHeader(() => ({
           >
             <span class="admin__item-label" :title="t.rel">{{ t.label }}</span>
             <span class="admin__item-where">{{ t.where }}</span>
-            <span v-if="t.hasNote" title="A une note">📝</span>
+            <span v-if="t.hasNote" :title="$t('admin.hasNote')">📝</span>
           </button>
         </li>
-        <li v-if="!filteredTargets.length" class="admin__empty">Aucun élément.</li>
+        <li v-if="!filteredTargets.length" class="admin__empty">{{ $t('admin.noItems') }}</li>
       </ul>
     </section>
 

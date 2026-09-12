@@ -169,6 +169,49 @@ body {
   flex-wrap: wrap;
 }
 
+/* Pied de sidebar : état du backend puis sélecteur de langue, empilés. */
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Sélecteur de langue : le `<select>` natif est remis à plat pour s'aligner
+   sur la pastille d'état. */
+.lang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.lang__label {
+  color: var(--muted);
+}
+
+.lang__select {
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.lang__select:hover {
+  border-color: var(--accent);
+}
+
+.lang__select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .pill {
   background: var(--surface-2);
   border: 1px solid var(--border);

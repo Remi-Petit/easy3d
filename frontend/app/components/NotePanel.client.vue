@@ -10,7 +10,26 @@
 // Composant `.client.vue` : la bibliothèque d'édition manipule le DOM, elle ne
 // doit pas être rendue côté serveur.
 import { MdEditor, MdPreview, config } from 'md-editor-v3'
+import type { StaticTextDefaultValue } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
+
+// Libellés de l'éditeur : ils viennent des mêmes fichiers que le reste de l'app
+// (sous `notes.editor`, donc inclus dans le test de couverture des langues) —
+// mais lus en **texte brut** puis analysés.
+//
+// Pourquoi pas un import direct : le module i18n compile les messages de
+// `i18n/locales/` au build, si bien qu'un `import` classique renvoie des arbres
+// compilés (`{ type, body, loc… }`) et non des chaînes. md-editor, qui attend
+// des chaînes, afficherait « [object Object] » partout.
+import deRaw from '~~/i18n/locales/de.json?raw'
+import enRaw from '~~/i18n/locales/en.json?raw'
+import esRaw from '~~/i18n/locales/es.json?raw'
+import frRaw from '~~/i18n/locales/fr.json?raw'
+
+/** Extrait le bloc `notes.editor` d'un fichier de langue brut. */
+function editorText(raw: string): StaticTextDefaultValue {
+  return JSON.parse(raw).notes.editor as StaticTextDefaultValue
+}
 
 const props = defineProps<{
   /** Chemin relatif du fichier, ou nom du dossier. */
@@ -25,59 +44,19 @@ const props = defineProps<{
  */
 config({
   editorConfig: {
+    /**
+     * md-editor-v3 n'embarque que `zh-CN` et `en-US` : les quatre langues de
+     * l'app sont donc déclarées ici.
+     *
+     * Elles doivent l'être **d'un coup** : `config()` est un réglage global,
+     * appelé une seule fois à l'import, alors que md-editor choisit son libellé
+     * à l'affichage selon le `language` courant.
+     */
     languageUserDefined: {
-      fr: {
-        toolbarTips: {
-          bold: 'Gras',
-          underline: 'Souligné',
-          italic: 'Italique',
-          strikeThrough: 'Barré',
-          title: 'Titre',
-          sub: 'Indice',
-          sup: 'Exposant',
-          quote: 'Citation',
-          unorderedList: 'Liste à puces',
-          orderedList: 'Liste numérotée',
-          task: 'Case à cocher',
-          codeRow: 'Code en ligne',
-          code: 'Bloc de code',
-          link: 'Lien',
-          image: 'Image',
-          table: 'Tableau',
-          revoke: 'Annuler',
-          next: 'Rétablir',
-          save: 'Enregistrer',
-          prettier: 'Formater',
-          pageFullscreen: 'Plein écran de la page',
-          fullscreen: 'Plein écran',
-          preview: 'Aperçu',
-          previewOnly: 'Aperçu seul',
-          htmlPreview: 'HTML',
-          catalog: 'Sommaire',
-          github: 'GitHub',
-        },
-        titleItem: {
-          h1: 'Titre 1',
-          h2: 'Titre 2',
-          h3: 'Titre 3',
-          h4: 'Titre 4',
-          h5: 'Titre 5',
-          h6: 'Titre 6',
-        },
-        linkModalTips: {
-          linkTitle: 'Insérer un lien',
-          imageTitle: 'Insérer une image',
-          descLabel: 'Texte',
-          descLabelPlaceHolder: 'Texte affiché…',
-          urlLabel: 'Adresse',
-          urlLabelPlaceHolder: 'https://…',
-          buttonOK: 'Valider',
-        },
-        footer: {
-          markdownTotal: 'caractères',
-          scrollAuto: 'Défilement synchronisé',
-        },
-      },
+      fr: editorText(frRaw),
+      en: editorText(enRaw),
+      de: editorText(deRaw),
+      es: editorText(esRaw),
     },
   },
   // Extensions CodeMirror : c'est par là qu'on branche la synchronisation Yjs
@@ -118,6 +97,9 @@ const editorId = editorIdFor(props.rel)
 const { text, connected, synced, peers, beginEdit } = useCollabNote(props.rel)
 
 const editing = ref(false)
+/** Langue de l'éditeur : elle suit celle de l'app (voir `config()` plus haut). */
+const { locale } = useI18n()
+const mdLanguage = computed(() => locale.value)
 /**
  * Contenu de l'éditeur. Il suit le document partagé — y compris les
  * modifications venues des autres participants, que CodeMirror applique — ce
@@ -146,14 +128,14 @@ function toggleEdit() {
 <template>
   <section class="note">
     <div class="note__head">
-      <h2 class="note__title">📝 Note</h2>
+      <h2 class="note__title">{{ $t('notes.title') }}</h2>
       <div class="note__actions">
         <span
           v-if="editing"
           class="note__status"
           :class="connected ? 'note__status--saved' : 'note__status--error'"
         >
-          {{ connected ? (peers > 0 ? `👥 ${peers + 1} personnes` : 'Connecté') : 'Hors ligne' }}
+          {{ connected ? (peers > 0 ? $t('notes.peers', { count: peers + 1 }) : $t('notes.connected')) : $t('notes.offline') }}
         </span>
         <button
           type="button"
@@ -161,7 +143,7 @@ function toggleEdit() {
           :class="{ 'note__btn--primary': editing }"
           @click="toggleEdit"
         >
-          {{ editing ? 'Terminer' : displayed ? 'Modifier' : 'Ajouter une note' }}
+          {{ editing ? $t('notes.finish') : displayed ? $t('notes.edit') : $t('notes.add') }}
         </button>
       </div>
     </div>
@@ -170,7 +152,7 @@ function toggleEdit() {
       v-if="editing"
       :id="editorId"
       v-model="content"
-      language="fr"
+      :language="mdLanguage"
       theme="dark"
       preview-theme="github"
       :toolbars="TOOLBARS"
@@ -181,21 +163,21 @@ function toggleEdit() {
       :no-prettier="true"
       :no-upload-img="true"
       :footers="['markdownTotal']"
-      placeholder="Décrivez ce fichier ou ce dossier…"
+      :placeholder="$t('notes.placeholder')"
     />
     <template v-else>
       <MdPreview
         v-if="displayed"
         class="note__preview"
         :model-value="displayed"
-        language="fr"
+        :language="mdLanguage"
         theme="dark"
         preview-theme="github"
         :no-highlight="true"
         :no-mermaid="true"
         :no-katex="true"
       />
-      <p v-else class="note__empty">Aucune note pour l’instant.</p>
+      <p v-else class="note__empty">{{ $t('notes.empty') }}</p>
     </template>
   </section>
 </template>
