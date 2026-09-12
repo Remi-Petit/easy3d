@@ -13,8 +13,11 @@
 .dark {
   --ui-bg: var(--bg);
   --ui-bg-muted: var(--surface);
-  --ui-bg-elevated: var(--surface);
-  --ui-bg-accented: var(--surface-2);
+  /* Un cran plus clair que la sidebar : c'est le fond de l'entrée de menu
+     active (`before:bg-elevated`), il doit se voir sur `bg-muted`.
+     (Avant : même valeur que la sidebar → aucune pastille visible.) */
+  --ui-bg-elevated: var(--surface-2);
+  --ui-bg-accented: #1f2b42;
   --ui-border: var(--border);
   --ui-border-muted: var(--border);
   --ui-border-accented: var(--border);
@@ -27,7 +30,7 @@
   --ui-success: var(--ok);
   --ui-error: var(--err);
   --ui-radius: var(--radius-sm);
-  --ui-header-height: 64px;
+  --ui-header-height: 56px;
 }
 
 :root {
@@ -63,18 +66,27 @@ body {
   line-height: 1.5;
 }
 
-a {
+/* Liens du contenu. Volontairement pas un `a` global : la règle n'est pas dans
+   un `@layer`, elle écraserait les couleurs des composants Nuxt UI (menu,
+   navbar…), qui gèrent les leurs. */
+.page a {
   color: var(--accent-2);
   text-decoration: none;
 }
 
 /* ---------- Coquille (composants Nuxt UI) ---------- */
-/* Le shell — sidebar repliable/redimensionnable, navbar, tiroir mobile — est
-   fourni par Nuxt UI (UDashboardGroup / Sidebar / Panel / Navbar). Ci-dessous
-   seulement ce que ses composants ne couvrent pas. */
+/* Le shell — sidebar, tiroir mobile, panneau — est fourni par Nuxt UI
+   (UDashboardGroup / Sidebar / Panel). Ci-dessous seulement ce que ses
+   composants ne couvrent pas. */
 
-/* Nom de l'app dans la sidebar : volontairement pas un titre, le <h1> est
-   celui de la page, rendu par la navbar. */
+/* Largeur fixe : Nuxt UI dimensionne la sidebar en % de la fenêtre, elle
+   s'élargissait donc avec l'écran. */
+.app-sidebar {
+  width: 13rem;
+}
+
+/* Nom de l'app dans la sidebar (volontairement pas un titre : le <h1> du
+   document est celui de la page, masqué visuellement). */
 .brand__name {
   margin: 0;
   font-size: 15px;
@@ -82,25 +94,23 @@ a {
   letter-spacing: -0.01em;
 }
 
-/* Sous-titre de la page, à côté du titre dans la navbar. */
-.navbar__subtitle {
-  color: var(--muted);
-  font-size: 12.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Barre de recherche + filtres : collée en haut de la zone de défilement
-   (le corps du panneau Nuxt UI est le conteneur qui défile). */
-.filters {
+/* Barre haute, collée en haut de la zone de défilement (le corps du panneau
+   Nuxt UI est le conteneur qui défile) : bascule du tiroir + filtres. */
+.topbar {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 24px 12px;
   background: var(--bg);
+}
+
+/* Bascule du tiroir : `lg:hidden` est déjà porté par le composant, donc
+   ce bloc ne prend aucune place au-dessus de `lg`. */
+.topbar__toggle {
+  margin: 12px 0 0 16px;
+}
+
+.topbar__filters {
+  padding: 16px 24px 12px;
 }
 
 /* Contenu de la page. */
@@ -109,7 +119,7 @@ a {
 }
 
 @media (max-width: 640px) {
-  .filters {
+  .topbar__filters {
     padding: 12px 16px 10px;
   }
 
@@ -141,10 +151,15 @@ a {
   color: #fff;
 }
 
+/* Une seule ligne : la sidebar est étroite, un retour à la ligne du sous-titre
+   déformerait le haut de la colonne. */
 .brand small {
+  display: block;
   color: var(--muted);
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stats {
