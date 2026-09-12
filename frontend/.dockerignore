@@ -1,0 +1,14 @@
+# Contexte de build du frontend : `bun run build` n'a besoin que des sources et
+# du lockfile. Tout ce qui est déjà compilé sur l'hôte est réexclu, sinon les
+# artefacts de l'hôte (`.output`, `.nuxt`) écraseraient ceux du conteneur.
+node_modules
+.nuxt
+.output
+.test-results
+test-results
+playwright-report
+.git
+.env
+Dockerfile
+.dockerignore
+*.md

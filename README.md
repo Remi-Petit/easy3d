@@ -29,6 +29,10 @@ easy3d/
 │   ├── server/api/       ← proxy vers le backend Rust
 │   └── nuxt.config.ts
 ├── models/        ← données 3D (STL / 3MF / GCODE), partagées
+├── scripts/       ← bump-version.mjs, docker-entrypoint.sh (PID 1 de l'image)
+├── .github/workflows/    ← ci.yml (push) et release.yml (tag vX.Y.Z)
+├── Dockerfile     ← image unique : API + frontend, deux process supervisés
+├── docker-compose.yml
 ├── .gitignore
 └── README.md
 ```
@@ -150,6 +154,80 @@ bun run dev
 - URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut dérivé de
   `NUXT_HPCCAT_API_PORT`, sinon `http://127.0.0.1:8090`).
 
+## Docker
+
+**Une seule image, un seul conteneur** : elle embarque l'API Rust et le serveur
+SSR Nuxt, lancés ensemble par `scripts/docker-entrypoint.sh`.
+
+```bash
+docker compose -f docker-compose.yml up --build
+
+# interface : http://localhost:3000
+# API + MCP : http://localhost:8090   (MCP sur http://localhost:8090/mcp)
+```
+
+Ou sans compose (l'image porte toutes les valeurs par défaut) :
+
+```bash
+docker run --rm -p 3000:3000 -p 8090:8090 -v "./models:/models" easy3d:latest
+```
+
+- **Image** (`Dockerfile`) : compilation du backend en release dans une couche à
+  part (les dépendances ne sont recompilées que si `backend/Cargo.toml` change),
+  build Nuxt par bun, puis **une base Node** pour l'exécution — elle fournit le
+  runtime du SSR et Debian pour `curl` (healthcheck). Le code du frontend n'est
+  pas exécuté par bun.
+- **Un conteneur, deux process** : `scripts/docker-entrypoint.sh` sert de PID 1,
+  relaie `SIGTERM` aux deux enfants (arrêt en moins d'une seconde, vérifié) et
+  arrête le conteneur si l'un des deux meurt — un conteneur « vivant » à moitié
+  en panne se diagnostique très mal.
+- **Deux ports, deux variables** : le backend lit `PORT` (8090), Nitro lit
+  `NITRO_PORT` (3000) — sans ça, les deux tenteraient le même port. L'API écoute
+  sur `0.0.0.0` **dans l'image** (`EASY3D_HOST`) : la publication de port ne
+  relaie pas vers la boucle locale du conteneur. Hors conteneur, le défaut reste
+  `127.0.0.1`, l'API n'ayant pas d'authentification.
+- **Volumes** : `./models` (lu **et écrit** : aperçus, notes) et `easy3d-config`
+  pour la configuration, que la page `/admin` réécrit.
+- ⚠️ **Sur Windows et macOS**, ajouter ou modifier un fichier **depuis l'hôte**
+  n'est pas vu par la surveillance de fichiers : les montages de Docker Desktop
+  sont virtualisés (les événements inotify ne traversent pas). Le catalogue est
+  scanné au démarrage, donc un redémarrage du conteneur suffit ; les
+  modifications faites **depuis** le conteneur, elles, sont vues normalement. Sur
+  Linux (bind mount sur le même noyau), tout fonctionne à chaud.
+- **Sous Linux**, un bind mount appartient à ton utilisateur : si son uid n'est
+  pas 1000 (celui de l'utilisateur `node` de l'image), décommente `user:` dans
+  `docker-compose.yml`, sinon l'API ne pourra pas écrire aperçus ni notes.
+- L'image publiée par la CI se tire avec `ghcr.io/<owner>/easy3d:0.1.0`.
+
+## Release
+
+Un tag = une version, la même partout. Le workflow refuse de publier si le tag
+ne correspond pas **exactement** à `backend/Cargo.toml` et
+`frontend/package.json` : c'est ce qui empêche un numéro de dériver.
+
+```bash
+bun scripts/bump-version.mjs 0.2.0
+git add -A && git commit -m "chore(release): v0.2.0"
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` publie alors, en parallèle :
+
+1. une **release GitHub** (notes générées) avec les binaires
+   `easy3d-<version>-linux-x86_64.tar.gz` et
+   `easy3d-<version>-windows-x86_64.zip` ;
+2. l'**image Docker** sur GHCR (`ghcr.io/<owner>/easy3d`), étiquetée `<version>`
+   **et** `latest`.
+
+Deux points à connaître :
+
+- `Cargo.lock` est ignoré par git (chaque build résout les dépendances). Pour des
+  releases reproductibles : le committer, puis ajouter `--locked` au
+  `cargo build --release` du `Dockerfile` et du workflow.
+- `ci.yml` tourne à chaque push (stable / beta / nightly, MSRV, et un job
+  `warnings` qui refuse le moindre avertissement clippy ou rustc) ;
+  `release.yml` ne se déclenche que sur un tag `v*`.
+
 ## Internationalisation
 
 - Messages : `frontend/i18n/locales/<code>.json` (`fr`, `en`, `de`, `es`).
@@ -172,6 +250,7 @@ bun run dev
 | Variable            | Backend / Frontend | Défaut                    |
 |---------------------|--------------------|---------------------------|
 | `PORT`              | backend            | `8090`                    |
+| `EASY3D_HOST`       | backend            | `127.0.0.1` (`0.0.0.0` en conteneur) |
 | `MODELS_ROOT`       | backend            | `../models` (relatif repo)|
 | `EASY3D_CONFIG`     | backend            | `backend/config.yml`      |
 | `EASY3D_MCP_ALLOW_WRITE` | backend       | *désactivé* (`1` = outils destructeurs) |

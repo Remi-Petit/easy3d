@@ -74,8 +74,19 @@ impl AppState {
 pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let app = routes(state);
 
+    // Adresse d'écoute. Le défaut est la boucle locale : l'API n'a **aucune
+    // authentification**, elle ne doit pas être joignable depuis le réseau.
+    //
+    // Un conteneur fait exception : la publication de port (`-p 8090:8090`) ne
+    // relaie pas vers la boucle locale du conteneur, il faut donc écouter sur
+    // toutes ses interfaces (`EASY3D_HOST=0.0.0.0`) — le port publié, lui, reste
+    // une décision explicite de celui qui lance le conteneur.
+    //
+    // Nom préfixé pour ne pas entrer en collision avec `HOST`, que lit aussi le
+    // serveur Nitro du frontend (même conteneur en image unique).
+    let host = std::env::var("EASY3D_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("PORT").unwrap_or_else(|_| "8090".to_string());
-    let addr = format!("127.0.0.1:{port}").parse::<SocketAddr>()?;
+    let addr = format!("{host}:{port}").parse::<SocketAddr>()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     println!("API HTTP : http://{addr}/models");
