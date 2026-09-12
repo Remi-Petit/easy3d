@@ -30,6 +30,16 @@ const placeholder = computed(() =>
   route.params.name ? 'Filtrer par nom de fichier…' : 'Filtrer par nom de fichier ou de dossier…',
 )
 
+/**
+ * Titre de l'en-tête. Sur l'accueil, il est suivi du nombre de fichiers
+ * (`Models - 11`) ; le compteur n'apparaît qu'une fois les données chargées,
+ * pour éviter un « Models - 0 » au premier rendu.
+ */
+const displayTitle = computed(() => {
+  if (!isHome.value || !header.value.count) return title.value
+  return `${title.value} - ${header.value.count}`
+})
+
 // "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
 const connected = computed(() => header.value.live || !header.value.offline)
 const statusLabel = computed(() =>
@@ -106,7 +116,6 @@ const navUi = {
           <span class="pill">
             <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
           </span>
-          <span v-if="isHome" class="pill"><b>{{ header.count }}</b> fichiers</span>
         </div>
       </template>
     </UDashboardSidebar>
@@ -120,7 +129,7 @@ const navUi = {
       -->
       <template #header>
         <UDashboardNavbar>
-          <template #title>{{ title }}</template>
+          <template #title>{{ displayTitle }}</template>
           <template #trailing>
             <small v-if="!isHome" class="navbar__subtitle">{{ header.subtitle }}</small>
           </template>
