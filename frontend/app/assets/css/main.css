@@ -565,8 +565,9 @@ body {
   margin-bottom: 0;
 }
 
+/* Colonne de droite de la page fichier : tout l'espacement vient du `gap`. */
 .detail__side .note {
-  margin-top: 0;
+  margin: 0;
 }
 
 /* Écran étroit : on empile, l'aperçu reste au-dessus des informations. */
@@ -732,9 +733,12 @@ body {
   pointer-events: none;
 }
 
-/* ---------- Note Markdown (pages de détail) ---------- */
+/* Note Markdown (pages de détail) —
+   pas de marge haute : le bouton « Retour » qui précède porte déjà la sienne,
+   les deux s'additionnaient. L'espace passe sous la note, pour la séparer de
+   la liste de fichiers. */
 .note {
-  margin-top: 26px;
+  margin: 0 0 26px;
 }
 
 .note__head {
