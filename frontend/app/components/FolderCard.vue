@@ -13,26 +13,20 @@ const href = computed(() => `/dossiers/${encodeURIComponent(props.folder.name)}`
 const now = useNow()
 /** Dernier changement du dossier (ajout, suppression, renommage…). */
 const when = useTimeAgo(() => props.folder.modified)
-
-function isModel(rel: string) {
-  return ['stl', 'obj', '3mf'].includes(ext(rel))
-}
-
-function isGcode(rel: string) {
-  return ['gcode', 'gco'].includes(ext(rel))
-}
+const { hasPreview, viewerOf, showsViewer } = useFormats()
 
 /**
  * Aperçu du dossier : on emprunte l'image d'un fichier qu'il contient — celle
- * du premier fichier qui a un aperçu, sinon la vignette 3D du premier modèle,
- * sinon celle du premier G-code. `null` si rien n'est représentable.
+ * du premier fichier qui a un aperçu, sinon celle du premier maillage, sinon
+ * celle du premier fichier dont le format est prévisualisable par le backend.
+ * `null` si rien n'est représentable.
  */
 const preview = computed<FileInfo | null>(() => {
   const files = props.folder.files
   return (
     files.find((f) => f.image) ??
-    files.find((f) => isModel(f.rel)) ??
-    files.find((f) => isGcode(f.rel)) ??
+    files.find((f) => viewerOf(f.rel) === 'mesh') ??
+    files.find((f) => hasPreview(f.rel)) ??
     null
   )
 })
@@ -40,11 +34,9 @@ const preview = computed<FileInfo | null>(() => {
 /** Aperçu statique (mode `image`) ou vignette 3D (mode `3d`), comme les cartes
  * de fichier. */
 const showImage = computed(() => props.displayMode === 'image' && !!preview.value?.image)
-const show3d = computed(() => {
-  const rel = preview.value?.rel
-  if (!rel) return false
-  return isModel(rel) || (isGcode(rel) && props.displayMode === '3d')
-})
+const show3d = computed(() =>
+  preview.value ? showsViewer(preview.value.rel, props.displayMode) : false,
+)
 </script>
 
 <template>

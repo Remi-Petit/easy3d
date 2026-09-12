@@ -25,14 +25,6 @@ export function fileDownloadUrl(rel: string): string {
   return `${fileUrl(rel)}&download=1`
 }
 
-/** Emoji représentant un fichier, d'après son extension. */
-export function fileIcon(rel: string): string {
-  const t = ext(rel)
-  if (['stl', 'obj', '3mf'].includes(t)) return '🧊'
-  if (['gcode', 'gco'].includes(t)) return '🖨'
-  return '📄'
-}
-
 /** Le backend renvoie des timestamps en secondes (unix). */
 export function toDate(ts: number | null): Date | null {
   return ts ? new Date(ts * 1000) : null

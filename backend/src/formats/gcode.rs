@@ -15,6 +15,7 @@
 //! Aucun parsing du toolpath n'est nécessaire.
 
 use super::Format;
+use super::Viewer;
 use super::{THUMB_H, THUMB_W};
 use regex::Regex;
 use std::fs;
@@ -43,6 +44,10 @@ impl Format for Gcode {
 
     fn has_preview(&self) -> bool {
         true
+    }
+
+    fn viewer(&self) -> Viewer {
+        Viewer::Gcode
     }
 
     fn thumbnail(&self, path: &Path, out: &Path) -> Option<()> {
