@@ -15,11 +15,14 @@ export type SortMode = 'none' | 'date-asc' | 'date-desc'
 /** Ordre de rotation au clic : normal -> récent → ancien -> ancien → récent -> normal. */
 export const SORT_CYCLE: readonly SortMode[] = ['none', 'date-desc', 'date-asc']
 
-/** Description du mode, utilisée pour l'infobulle et l'accessibilité. */
-export const SORT_LABELS: Record<SortMode, string> = {
-  none: 'date (ordre normal)',
-  'date-desc': 'date : récent → ancien',
-  'date-asc': 'date : ancien → récent',
+/**
+ * Clés de traduction du mode de tri, utilisées pour l'infobulle et
+ * l'accessibilité (voir `useFilter`).
+ */
+export const SORT_LABEL_KEYS: Record<SortMode, string> = {
+  none: 'filter.sort.none',
+  'date-desc': 'filter.sort.desc',
+  'date-asc': 'filter.sort.asc',
 }
 
 /** Flèche affichée : ↕ = normal, ↓ = récent → ancien, ↑ = ancien → récent. */

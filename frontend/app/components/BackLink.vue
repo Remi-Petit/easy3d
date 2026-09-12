@@ -25,7 +25,7 @@ function goBack() {
 </script>
 
 <template>
-  <button type="button" class="back" aria-label="Revenir en arrière" @click="goBack">
-    ← Retour
+  <button type="button" class="back" :aria-label="$t('common.backAria')" @click="goBack">
+    {{ $t('common.back') }}
   </button>
 </template>

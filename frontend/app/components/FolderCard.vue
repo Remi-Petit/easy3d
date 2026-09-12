@@ -12,7 +12,7 @@ const href = computed(() => `/dossiers/${encodeURIComponent(props.folder.name)}`
 
 const now = useNow()
 /** Dernier changement du dossier (ajout, suppression, renommage…). */
-const when = computed(() => timeAgo(toDate(props.folder.modified), now.value))
+const when = useTimeAgo(() => props.folder.modified)
 
 function isModel(rel: string) {
   return ['stl', 'obj', '3mf'].includes(ext(rel))
@@ -63,12 +63,12 @@ const show3d = computed(() => {
           <span class="folder-icon">📁</span>
         </div>
         <span class="folder-count">{{ folder.count }}</span>
-        <span v-if="folder.note" class="note-badge" title="Ce dossier a une note">📝</span>
+        <span v-if="folder.note" class="note-badge" :title="$t('folder.hasNote')">📝</span>
       </div>
       <div class="model-card__body">
         <span class="model-card__name" :title="folder.name">{{ folder.name }}</span>
         <span class="model-card__meta">
-          {{ folder.count }} fichier{{ folder.count > 1 ? 's' : '' }} · {{ when }}
+          {{ $t('folder.meta', { count: folder.count, when }, folder.count) }}
         </span>
       </div>
     </NuxtLink>

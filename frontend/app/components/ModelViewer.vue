@@ -21,6 +21,9 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const stats = ref<{ triangles: number; dims?: number[] }>({ triangles: 0 })
 
+// `n` = formatage des nombres selon la langue (1 234 vs 1,234).
+const { t, n } = useI18n()
+
 /** Un G-code se dessine en segments (`LineSegments`), pas en maillage triangulé. */
 const isGcode = computed(() => ['gcode', 'gco'].includes(ext(props.rel)))
 
@@ -170,7 +173,7 @@ async function loadModel() {
   if (isGcode.value) return loadGcode()
   try {
     const res = await fetch(`/api/file?path=${encodeURIComponent(props.rel)}`)
-    if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`)
+    if (!res.ok) throw new Error(t('viewer.httpError', { status: res.status }))
     const buffer = await res.arrayBuffer()
 
     // `.3mf` est un zip chargé via le 3MFLoader (peut contenir plusieurs
@@ -225,10 +228,10 @@ async function loadGcode() {
   if (!scene || !camera) return
   try {
     const res = await fetch(`/api/file?path=${encodeURIComponent(props.rel)}`)
-    if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`)
+    if (!res.ok) throw new Error(t('viewer.httpError', { status: res.status }))
     // Analyse hors du thread principal : l'interface reste fluide.
     const parsed = await parseGcode(await res.arrayBuffer())
-    if (!parsed.segments) throw new Error('Aucun trajet d’extrusion trouvé')
+    if (!parsed.segments) throw new Error(t('viewer.noExtrusion'))
 
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3))
@@ -361,10 +364,10 @@ onBeforeUnmount(() => {
 <template>
   <div ref="wrapRef" class="model-viewer">
     <canvas ref="canvasRef" class="model-viewer__canvas" />
-    <div v-if="loading" class="model-viewer__overlay">chargement…</div>
+    <div v-if="loading" class="model-viewer__overlay">{{ $t('viewer.loading') }}</div>
     <div v-if="loadError" class="model-viewer__overlay model-viewer__overlay--err">⚠ {{ loadError }}</div>
     <div v-if="showInfo && !loading && !loadError" class="model-viewer__info">
-      {{ stats.triangles.toLocaleString('fr-FR') }} {{ isGcode ? 'segments' : 'triangles' }}
+      {{ n(stats.triangles) }} {{ $t(isGcode ? 'viewer.segments' : 'viewer.triangles') }}
       <template v-if="stats.dims">&nbsp;· {{ stats.dims.join(' × ') }}</template>
     </div>
   </div>

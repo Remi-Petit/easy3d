@@ -10,6 +10,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 // collée sous ce titre.
 const route = useRoute()
 const header = usePageHeaderState()
+const { t, locale, locales, setLocale } = useI18n()
 
 // Barre de filtre globale (recherche, types, tri), partagée avec les pages.
 const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
@@ -20,10 +21,10 @@ const isAdmin = computed(() => route.path.startsWith('/admin'))
 
 /** Titre de la page courante, déduit de la route (pas de flash à l'hydratation). */
 const title = computed(() => {
-  if (isAdmin.value) return 'Administration'
+  if (isAdmin.value) return t('nav.admin')
   if (route.params.name) return decodeURIComponent(String(route.params.name))
   if (route.params.rel) return basename(decodeURIComponent(String(route.params.rel)))
-  return 'Models'
+  return t('catalog.title')
 })
 
 const isHome = computed(() => route.path === '/')
@@ -31,7 +32,7 @@ const isHome = computed(() => route.path === '/')
 const showFilter = computed(() => !route.params.rel && !isAdmin.value)
 
 const placeholder = computed(() =>
-  route.params.name ? 'Filtrer par nom de fichier…' : 'Filtrer par nom de fichier ou de dossier…',
+  route.params.name ? t('filter.placeholderFolder') : t('filter.placeholder'),
 )
 
 /**
@@ -47,7 +48,7 @@ const displayTitle = computed(() => {
 // "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
 const connected = computed(() => header.value.live || !header.value.offline)
 const statusLabel = computed(() =>
-  header.value.live ? 'temps réel' : header.value.offline ? 'hors ligne' : 'repli polling',
+  header.value.live ? t('status.live') : header.value.offline ? t('status.offline') : t('status.polling'),
 )
 
 /** Routes rattachées à une section dont l'URL ne porte pas le préfixe. */
@@ -65,11 +66,23 @@ function isActive(to: string) {
  * page = ajouter une entrée ici.
  */
 const navItems = computed<NavigationMenuItem[]>(() => [
-  { type: 'label', label: 'Catalogue' },
-  { label: 'Models', icon: 'i-lucide-box', to: '/', active: isActive('/') },
-  { type: 'label', label: 'Système' },
-  { label: 'Administration', icon: 'i-lucide-settings', to: '/admin', active: isAdmin.value },
+  { type: 'label', label: t('nav.catalog') },
+  { label: t('nav.models'), icon: 'i-lucide-box', to: '/', active: isActive('/') },
+  { type: 'label', label: t('nav.system') },
+  { label: t('nav.admin'), icon: 'i-lucide-settings', to: '/admin', active: isAdmin.value },
 ])
+
+/** Langues du sélecteur : nom affiché + code (`locales` peut être mixte). */
+const languageItems = computed(() =>
+  locales.value.map((l) =>
+    typeof l === 'string' ? { code: l, name: l } : { code: l.code, name: l.name ?? l.code },
+  ),
+)
+
+/** Le changement passe par `setLocale` : lui seul écrit le cookie relu au SSR. */
+function onLanguageChange(event: Event) {
+  setLocale((event.target as HTMLSelectElement).value)
+}
 
 /**
  * Habillage de la navigation : entrées bien détachées (pastille arrondie sur
@@ -98,7 +111,7 @@ const navUi = {
     <UDashboardSidebar
       id="easy3d"
       class="app-sidebar"
-      :menu="{ title: 'Navigation', description: 'Navigation de l’application' }"
+      :menu="{ title: $t('nav.menuTitle'), description: $t('nav.menuDescription') }"
       :ui="{ root: 'bg-muted' }"
     >
       <!-- Identité de l'app. -->
@@ -107,7 +120,7 @@ const navUi = {
           <div class="logo">3D</div>
           <div>
             <p class="brand__name">easy3d</p>
-            <small>catalogue de modèles</small>
+            <small>{{ $t('app.tagline') }}</small>
           </div>
         </div>
       </template>
@@ -116,12 +129,28 @@ const navUi = {
            libellé blanc sur pastille grise pour l'entrée active. -->
       <UNavigationMenu :items="navItems" orientation="vertical" color="neutral" :ui="navUi" />
 
-      <!-- État du backend. -->
+      <!-- État du backend + langue de l'interface. -->
       <template #footer>
-        <div class="stats">
-          <span class="pill">
-            <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
-          </span>
+        <div class="foot">
+          <div class="stats">
+            <span class="pill">
+              <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
+            </span>
+          </div>
+
+          <label class="lang">
+            <span class="lang__label">{{ $t('language.label') }}</span>
+            <select
+              class="lang__select"
+              :value="locale"
+              :aria-label="$t('language.choose')"
+              @change="onLanguageChange"
+            >
+              <option v-for="item in languageItems" :key="item.code" :value="item.code">
+                {{ item.name }}
+              </option>
+            </select>
+          </label>
         </div>
       </template>
     </UDashboardSidebar>
@@ -155,12 +184,12 @@ const navUi = {
               type="button"
               class="sort"
               :class="`sort--${sortMode}`"
-              :title="`Trier par ${sortLabel} (cliquer pour changer)`"
-              :aria-label="`Trier par ${sortLabel}`"
+              :title="$t('filter.sortHint', { mode: sortLabel })"
+              :aria-label="$t('filter.sortBy', { mode: sortLabel })"
               @click="cycleSort"
             >
               <span class="sort__icon">{{ sortIcon }}</span>
-              <span class="sort__label">Date</span>
+              <span class="sort__label">{{ $t('filter.date') }}</span>
             </button>
           </div>
 
@@ -173,13 +202,13 @@ const navUi = {
               class="types__item"
               :class="{ 'types__item--on': types.includes(entry.type) }"
               :aria-pressed="types.includes(entry.type)"
-              :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
+              :title="$t('filter.typeTitle', { count: entry.count, type: entry.type.toUpperCase() }, entry.count)"
               @click="toggle(entry.type)"
             >
               {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
             </button>
             <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
-              ✕ Effacer
+              {{ $t('filter.clear') }}
             </button>
           </div>
         </div>

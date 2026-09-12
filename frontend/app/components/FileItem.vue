@@ -10,7 +10,7 @@ const props = withDefaults(
 const now = useNow()
 const name = computed(() => basename(props.file.path))
 const type = computed(() => ext(props.file.path) || '?')
-const when = computed(() => timeAgo(toDate(props.file.modified), now.value))
+const when = useTimeAgo(() => props.file.modified)
 const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 /**
@@ -40,15 +40,19 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
         />
         <ModelThumbnail v-else-if="show3d" :rel="file.rel" />
         <div v-else :class="['model-card__ph', isGcode ? 'ph--gcode' : 'ph--other']">
-          <span class="ph-badge">{{ isGcode ? '🖨 GCODE' : type }}</span>
+          <span class="ph-badge">{{ isGcode ? $t('file.gcodeBadge') : type }}</span>
         </div>
-        <span v-if="file.note" class="note-badge" title="Ce fichier a une note">📝</span>
+        <span v-if="file.note" class="note-badge" :title="$t('file.hasNote')">📝</span>
       </div>
 
       <div class="model-card__body">
         <span class="model-card__name" :title="file.path">{{ name }}</span>
         <span class="model-card__meta">
-          {{ type.toUpperCase() }}<template v-if="folder"> · 📁 {{ folder }}</template> · {{ when }}
+          {{
+            folder
+              ? $t('file.metaInFolder', { type: type.toUpperCase(), folder, when })
+              : $t('file.meta', { type: type.toUpperCase(), when })
+          }}
         </span>
       </div>
     </NuxtLink>

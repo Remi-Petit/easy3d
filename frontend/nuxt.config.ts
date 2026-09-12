@@ -1,6 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  modules: ['@nuxt/ui'],
+  modules: ['@nuxt/ui', '@nuxtjs/i18n'],
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
   // L'app est en thème sombre permanent : pas de bascule clair/sombre (sinon
@@ -9,6 +9,31 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { class: 'dark' },
+    },
+  },
+  // Internationalisation. La langue vit dans un cookie, pas dans l'URL
+  // (`no_prefix`) : les liens internes, le partage et les routes
+  // `/fichier/<rel>` restent inchangés en changeant de langue.
+  i18n: {
+    strategy: 'no_prefix',
+    defaultLocale: 'fr',
+    // Messages dans `frontend/i18n/locales/` (résolus depuis `restructureDir`,
+    // qui vaut `<rootDir>/i18n`). `language` sert au SEO et aux formats
+    // (`n()`, `d()`, temps relatif), `name` au sélecteur de langue.
+    locales: [
+      { code: 'fr', name: 'Français', language: 'fr-FR', file: 'fr.json' },
+      { code: 'en', name: 'English', language: 'en-US', file: 'en.json' },
+      { code: 'de', name: 'Deutsch', language: 'de-DE', file: 'de.json' },
+      { code: 'es', name: 'Español', language: 'es-ES', file: 'es.json' },
+    ],
+    // Le cookie est lu par le serveur : la langue est donc déjà bonne dans le
+    // HTML rendu par SSR, sans bascule visible à l'hydratation.
+    detectBrowserLanguage: {
+      useCookie: true,
+      cookieKey: 'easy3d_lang',
+      fallbackLocale: 'fr',
+      redirectOn: 'root',
+      alwaysRedirect: false,
     },
   },
   runtimeConfig: {

@@ -1,0 +1,173 @@
+{
+  "app": {
+    "tagline": "catálogo de modelos"
+  },
+  "nav": {
+    "menuTitle": "Navegación",
+    "menuDescription": "Navegación de la aplicación",
+    "catalog": "Catálogo",
+    "system": "Sistema",
+    "models": "Models",
+    "admin": "Administración"
+  },
+  "status": {
+    "live": "en vivo",
+    "offline": "sin conexión",
+    "polling": "respaldo por sondeo"
+  },
+  "common": {
+    "back": "← Volver",
+    "backAria": "Volver atrás",
+    "download": "Descargar",
+    "loading": "Cargando…",
+    "unknownError": "Error desconocido",
+    "close": "Cerrar (Esc)",
+    "none": "—"
+  },
+  "language": {
+    "label": "Idioma",
+    "choose": "Elegir idioma"
+  },
+  "filter": {
+    "placeholder": "Filtrar por nombre de archivo o carpeta…",
+    "placeholderFolder": "Filtrar por nombre de archivo…",
+    "items": "Filtrar elementos…",
+    "date": "Fecha",
+    "sort": {
+      "none": "fecha (orden normal)",
+      "desc": "fecha: reciente → antiguo",
+      "asc": "fecha: antiguo → reciente"
+    },
+    "sortBy": "Ordenar por {mode}",
+    "sortHint": "Ordenar por {mode} (clic para cambiar)",
+    "typeTitle": "Filtrar: {count} archivo {type} | Filtrar: {count} archivos {type}",
+    "clear": "✕ Borrar"
+  },
+  "catalog": {
+    "title": "Models",
+    "subtitle": "catálogo de modelos · STL / 3MF / GCODE",
+    "all": "Todos ({count})",
+    "folders": "Carpetas",
+    "root": "Raíz ({count})",
+    "noFolder": "No se encontró ninguna carpeta.",
+    "noRootFile": "Ningún archivo en la raíz.",
+    "noResult": "Sin resultados.",
+    "noResultFor": "Sin resultados para {what}."
+  },
+  "folder": {
+    "subtitle": "{count} archivo · STL / 3MF / GCODE | {count} archivos · STL / 3MF / GCODE",
+    "subtitleFiltered": "{shown} / {count} archivo · STL / 3MF / GCODE | {shown} / {count} archivos · STL / 3MF / GCODE",
+    "meta": "{count} archivo · {when} | {count} archivos · {when}",
+    "empty": "Carpeta vacía",
+    "noMatch": "Ningún archivo coincide con el filtro.",
+    "hasNote": "Esta carpeta tiene una nota"
+  },
+  "file": {
+    "subtitle": "{type} · {when}",
+    "meta": "{type} · {when}",
+    "metaInFolder": "{type} · 📁 {folder} · {when}",
+    "metaFile": "Archivo",
+    "metaType": "Tipo",
+    "metaPath": "Ruta",
+    "metaModified": "Modificado",
+    "noPreview": "La vista 3D no está disponible para este tipo de archivo.",
+    "hasNote": "Este archivo tiene una nota",
+    "gcodeBadge": "🖨 GCODE"
+  },
+  "viewer": {
+    "loading": "cargando…",
+    "httpError": "Error HTTP {status}",
+    "noExtrusion": "No se encontró ninguna trayectoria de extrusión",
+    "segments": "segmentos",
+    "triangles": "triángulos",
+    "hint": "Arrastra para girar · rueda para el zoom"
+  },
+  "notes": {
+    "title": "📝 Nota",
+    "empty": "Todavía no hay nota.",
+    "placeholder": "Describe este archivo o esta carpeta…",
+    "connected": "Conectado",
+    "offline": "Sin conexión",
+    "peers": "👥 {count} personas",
+    "edit": "Editar",
+    "add": "Añadir una nota",
+    "finish": "Terminar",
+    "editor": {
+      "toolbarTips": {
+        "bold": "Negrita",
+        "underline": "Subrayado",
+        "italic": "Cursiva",
+        "strikeThrough": "Tachado",
+        "title": "Título",
+        "sub": "Subíndice",
+        "sup": "Superíndice",
+        "quote": "Cita",
+        "unorderedList": "Lista con viñetas",
+        "orderedList": "Lista numerada",
+        "task": "Casilla de verificación",
+        "codeRow": "Código en línea",
+        "code": "Bloque de código",
+        "link": "Enlace",
+        "image": "Imagen",
+        "table": "Tabla",
+        "revoke": "Deshacer",
+        "next": "Rehacer",
+        "save": "Guardar",
+        "prettier": "Formatear",
+        "pageFullscreen": "Pantalla completa de la página",
+        "fullscreen": "Pantalla completa",
+        "preview": "Vista previa",
+        "previewOnly": "Solo vista previa",
+        "htmlPreview": "HTML",
+        "catalog": "Índice",
+        "github": "GitHub"
+      },
+      "titleItem": {
+        "h1": "Título 1",
+        "h2": "Título 2",
+        "h3": "Título 3",
+        "h4": "Título 4",
+        "h5": "Título 5",
+        "h6": "Título 6"
+      },
+      "linkModalTips": {
+        "linkTitle": "Insertar un enlace",
+        "imageTitle": "Insertar una imagen",
+        "descLabel": "Texto",
+        "descLabelPlaceHolder": "Texto mostrado…",
+        "urlLabel": "Dirección",
+        "urlLabelPlaceHolder": "https://…",
+        "buttonOK": "Validar"
+      },
+      "footer": {
+        "markdownTotal": "caracteres",
+        "scrollAuto": "Desplazamiento sincronizado"
+      }
+    }
+  },
+  "admin": {
+    "title": "Administración",
+    "subtitle": "ajustes y notas",
+    "settings": "Ajustes",
+    "display": "Visualización de los modelos",
+    "mode3d": "3D interactivo",
+    "modeImage": "Vista previa de imagen",
+    "hint": "Se aplica y se escribe en {file} al hacer clic.",
+    "saved": "Aplicado",
+    "saveFailed": "Error al guardar.",
+    "applied": "Aplicado",
+    "rootRead": "Carpeta leída",
+    "notes": "Notas",
+    "noItems": "Ningún elemento.",
+    "whereFolder": "carpeta",
+    "whereRoot": "raíz",
+    "hasNote": "Tiene una nota"
+  },
+  "time": {
+    "now": "ahora mismo",
+    "seconds": "hace {count}s",
+    "minutes": "hace {count} min",
+    "hours": "hace {count}h",
+    "days": "hace {count}d"
+  }
+}

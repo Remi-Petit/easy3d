@@ -10,6 +10,7 @@ import type { FileInfo } from '~/composables/useModels'
  * ne fait que l'envelopper dans des refs partagés.
  */
 export function useFilter() {
+  const { t } = useI18n()
   const query = useState('filter:query', () => '')
   const sortMode = useState<SortMode>('filter:sort', () => 'none')
   /** Types sélectionnés (vide = aucun filtre de type). */
@@ -24,7 +25,7 @@ export function useFilter() {
   /** Un filtre quelconque est actif (texte ou type). */
   const filtering = computed(() => searching.value || hasTypeFilter.value)
 
-  const sortLabel = computed(() => SORT_LABELS[sortMode.value])
+  const sortLabel = computed(() => t(SORT_LABEL_KEYS[sortMode.value]))
   const sortIcon = computed(() => SORT_ICONS[sortMode.value])
 
   /** Passe au mode de tri suivant. */
