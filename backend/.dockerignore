@@ -1,0 +1,10 @@
+# Contexte de build du backend : uniquement ce dont `cargo build --release` a
+# besoin. `target/` est réexclu explicitement car il peut contenir des artefacts
+# de l'hôte (potentiellement volumineux et inutiles).
+target
+.git
+.github
+.env
+*.md
+Dockerfile
+.dockerignore

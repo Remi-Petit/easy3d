@@ -1,0 +1,131 @@
+name: Release
+
+# Une release = un tag `vX.Y.Z`. Le job `verify` refuse tout tag dont la version
+# ne correspond pas **exactement** à `backend/Cargo.toml` et
+# `frontend/package.json` : les numéros de version ne peuvent pas dériver.
+#
+#   bun scripts/bump-version.mjs 0.2.0
+#   git add -A && git commit -m "chore(release): v0.2.0"
+#   git tag v0.2.0 && git push origin v0.2.0
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # créer la release GitHub
+  packages: write # pousser les images sur GHCR
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Vérifier les versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: check
+        name: Tag == Cargo.toml == package.json
+        run: |
+          set -euo pipefail
+          # La lecture/vérification des versions vit dans le script (donc
+          # testable en local) : `--check` n'imprime que la version sur stdout.
+          version="$(node scripts/bump-version.mjs --check "${GITHUB_REF_NAME}")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  binaries:
+    name: Binaires (${{ matrix.os }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup update stable && rustup default stable
+      - run: cargo build --release --verbose
+
+      # Les archives sont écrites à la racine du dépôt (`../` depuis backend/),
+      # là où `upload-artifact` les attend (il ignore `working-directory`).
+      - name: Empaqueter (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tar -czf "../easy3d-${{ needs.verify.outputs.version }}-linux-x86_64.tar.gz" \
+            -C target/release easy3d
+      - name: Empaqueter (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/easy3d.exe `
+            -DestinationPath "../easy3d-${{ needs.verify.outputs.version }}-windows-x86_64.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easy3d-${{ runner.os }}
+          path: easy3d-${{ needs.verify.outputs.version }}-*
+          if-no-files-found: error
+
+  docker:
+    name: Image Docker
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Connexion à GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Construire et pousser
+        run: |
+          set -euo pipefail
+          # Une seule image (backend + frontend) ; GHCR n'accepte que des
+          # minuscules dans le nom du dépôt.
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${{ needs.verify.outputs.version }}"
+          docker buildx build \
+            --push \
+            --file Dockerfile \
+            . \
+            --tag "$image:$version" \
+            --tag "$image:latest" \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.version=$version"
+          echo "Poussé : $image:$version et $image:latest"
+
+  release:
+    name: Release GitHub
+    needs: [verify, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          # Rejouer le workflow sur un tag déjà publié remplace les fichiers au
+          # lieu d'échouer.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+          fi
