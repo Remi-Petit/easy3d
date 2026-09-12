@@ -25,6 +25,16 @@ const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)
 
 /** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
 const showImage = computed(() => props.displayMode === 'image' && !!props.file.image)
+/**
+ * Une vignette annoncée peut manquer (aucun aperçu exploitable dans le fichier,
+ * aperçu supprimé depuis le scan) : on bascule sur le repli plutôt que de
+ * laisser une image cassée et une erreur dans la console du navigateur.
+ */
+const imageFailed = ref(false)
+watch(
+  () => props.file.image,
+  () => (imageFailed.value = false),
+)
 </script>
 
 <template>
@@ -32,11 +42,12 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img
-          v-if="showImage"
+          v-if="showImage && !imageFailed"
           :src="fileUrl(file.image!)"
           :alt="name"
           class="model-card__img"
           loading="lazy"
+          @error="imageFailed = true"
         />
         <ModelThumbnail v-else-if="show3d" :rel="file.rel" />
         <div v-else :class="['model-card__ph', isGcode ? 'ph--gcode' : 'ph--other']">

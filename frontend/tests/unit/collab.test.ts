@@ -2,20 +2,29 @@ import { describe, expect, it } from 'vitest'
 import { collabBase, collabRoom, collabUrl, editorIdFor, wsBase } from '~/utils/collab'
 
 describe('wsBase', () => {
+  const here = { protocol: 'https:', host: 'easy3d.exemple.test' }
+
   it('utilise la base WebSocket quand elle est fournie', () => {
-    expect(wsBase({ hpccatWsBase: 'ws://127.0.0.1:8090' })).toBe('ws://127.0.0.1:8090')
+    expect(wsBase({ hpccatWsBase: 'ws://127.0.0.1:8090' }, here)).toBe('ws://127.0.0.1:8090')
   })
 
   it('retire les slashes finales', () => {
-    expect(wsBase({ hpccatWsBase: 'ws://127.0.0.1:8090//' })).toBe('ws://127.0.0.1:8090')
+    expect(wsBase({ hpccatWsBase: 'ws://127.0.0.1:8090//' }, here)).toBe('ws://127.0.0.1:8090')
   })
 
-  it('dérive la base WebSocket de l’URL de l’API', () => {
-    expect(wsBase({ hpccatApiBase: 'http://127.0.0.1:9000' })).toBe('ws://127.0.0.1:9000')
-    expect(wsBase({ hpccatApiBase: 'https://exemple.test' })).toBe('wss://exemple.test')
+  /**
+   * Sans configuration, le navigateur vise l'origine qui sert l'interface :
+   * Nitro relaie `/ws` et `/collab` vers le backend. C'est ce qui évite de figer
+   * une adresse — un `localhost` figé désigne la machine du **visiteur**.
+   */
+  it('se rabat sur l’origine de la page', () => {
+    expect(wsBase({}, here)).toBe('wss://easy3d.exemple.test')
+    expect(wsBase(undefined, { protocol: 'http:', host: 'localhost:3000' })).toBe(
+      'ws://localhost:3000',
+    )
   })
 
-  it('reste vide sans configuration', () => {
+  it('reste vide hors du navigateur (rendu serveur)', () => {
     expect(wsBase()).toBe('')
     expect(wsBase({})).toBe('')
   })
