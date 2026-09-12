@@ -76,6 +76,10 @@ bun run dev
 - **Aperçu 3D** : chaque fichier STL / 3MF affiche une vignette 3D (three.js),
   cliquable pour ouvrir une vue plein écran (triangles + rotation/zoom).
   Les GCODE affichent un badge (pas de maillage).
+- **Téléchargement** : la page détail d'un fichier propose un bouton
+  « Télécharger ». Il pointe vers `/api/file?path=<rel>&download=1`, la même
+  route que l'aperçu ; le paramètre `download` fait répondre le proxy en
+  `Content-Disposition: attachment` (nom de fichier conservé, accents compris).
 - **Mode d'affichage** (`display.mode` dans `config.yml`, réglable sur `/admin`) :
   `3d` charge un viewer three.js sur les cartes, `image` préfère l'aperçu
   statique extrait du fichier. La page **détail** fait exception : un modèle ou
