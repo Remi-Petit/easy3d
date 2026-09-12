@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js'
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { ParsedGcode } from '../utils/gcode'
 
@@ -24,8 +25,11 @@ const stats = ref<{ triangles: number; dims?: number[] }>({ triangles: 0 })
 // `n` = formatage des nombres selon la langue (1 234 vs 1,234).
 const { t, n } = useI18n()
 
+// Nature du contenu (annoncée par le backend) : maillage, G-code ou rien.
+const { viewerOf } = useFormats()
+
 /** Un G-code se dessine en segments (`LineSegments`), pas en maillage triangulé. */
-const isGcode = computed(() => ['gcode', 'gco'].includes(ext(props.rel)))
+const isGcode = computed(() => viewerOf(props.rel) === 'gcode')
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -168,6 +172,46 @@ function animate() {
   renderer.render(scene, camera)
 }
 
+/**
+ * Charge un maillage depuis les octets du fichier.
+ *
+ * Un loader three.js par extension : c'est le **seul** endroit du frontend qui
+ * dépend d'un loader (le backend, lui, annonce seulement `viewer: 'mesh'`).
+ * Compléter cette fonction pour un nouveau format maillé.
+ *
+ * `rotateX` : les formats écrits par les slicers sont Z-up, three.js attend du
+ * Y-up ; l'OBJ est déjà Y-up d'après la spec.
+ */
+function parseMesh(
+  buffer: ArrayBuffer,
+  type: string,
+): { object: THREE.Object3D; rotateX: boolean } {
+  if (type === 'obj') {
+    // OBJ est un fichier texte : le loader le prend en clair (pas de buffer).
+    return { object: new OBJLoader().parse(new TextDecoder().decode(buffer)), rotateX: false }
+  }
+
+  if (type === '3mf') {
+    // Archive zip pouvant contenir plusieurs mailles.
+    const object = new ThreeMFLoader().parse(buffer) as unknown as THREE.Group
+    return { object, rotateX: true }
+  }
+
+  // STL (binaire ou ASCII) : la géométrie seule, habillée de notre matériau.
+  const geometry = new STLLoader().parse(buffer)
+  geometry.computeVertexNormals()
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({
+      color: 0x818cf8,
+      metalness: 0.2,
+      roughness: 0.55,
+      flatShading: true,
+    }),
+  )
+  return { object: mesh, rotateX: true }
+}
+
 async function loadModel() {
   if (!scene || !camera) return
   if (isGcode.value) return loadGcode()
@@ -176,30 +220,9 @@ async function loadModel() {
     if (!res.ok) throw new Error(t('viewer.httpError', { status: res.status }))
     const buffer = await res.arrayBuffer()
 
-    // `.3mf` est un zip chargé via le 3MFLoader (peut contenir plusieurs
-    // mailles) ; STL (et OBJ sans loader dédié) passe par le STLLoader.
-    const is3mf = ext(props.rel) === '3mf'
-    let object: THREE.Object3D
-
-    if (is3mf) {
-      object = new ThreeMFLoader().parse(buffer) as unknown as THREE.Group
-      // Conforme au spec 3MF (Z-up, comme STL) : conversion en Y-up three.js.
-      object.rotation.x = -Math.PI / 2
-    } else {
-      const geometry = new STLLoader().parse(buffer)
-      geometry.computeVertexNormals()
-      const mesh = new THREE.Mesh(
-        geometry,
-        new THREE.MeshStandardMaterial({
-          color: 0x818cf8,
-          metalness: 0.2,
-          roughness: 0.55,
-          flatShading: true,
-        }),
-      )
-      mesh.rotation.x = -Math.PI / 2
-      object = mesh
-    }
+    const { object, rotateX } = parseMesh(buffer, ext(props.rel))
+    // Les formats produits par les slicers sont Z-up : conversion en Y-up.
+    if (rotateX) object.rotation.x = -Math.PI / 2
 
     object.updateMatrixWorld(true)
     scene.add(object)

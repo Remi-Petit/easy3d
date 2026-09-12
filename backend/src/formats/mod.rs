@@ -18,8 +18,9 @@
 //! 2. l'enregistrer dans [`REGISTRY`] (une ligne).
 //!
 //! Rien d'autre : le scan ([`crate::scanner`]), la génération d'aperçus
-//! ([`crate::thumbnail`]) et le type MIME servi par `GET /file`
-//! ([`crate::api`]) passent tous par ce registre.
+//! ([`crate::thumbnail`]), le type MIME servi par `GET /file` ([`crate::api`])
+//! et la description envoyée au frontend (`GET /models`) passent tous par ce
+//! registre.
 
 mod gcode;
 mod image;
@@ -30,6 +31,7 @@ mod three_mf;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
 
+use serde::Serialize;
 use std::path::Path;
 
 /// Dimensions (pixels) des aperçus produits par [`mesh`].
@@ -38,6 +40,22 @@ use std::path::Path;
 /// embarquée (G-code, 3MF) : au-delà, elle est réduite à cette échelle.
 pub(crate) const THUMB_W: usize = 480;
 pub(crate) const THUMB_H: usize = 366;
+
+/// Comment le contenu d'un format est destiné à être affiché.
+///
+/// Le backend ignore *avec quel* loader le frontend l'affichera (ça, c'est du
+/// three.js) : il indique seulement la **nature** du contenu, et le frontend
+/// choisit la visionneuse correspondante.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Viewer {
+    /// Maillage : visionneuse 3D.
+    Mesh,
+    /// G-code : visionneuse de tracés.
+    Gcode,
+    /// Rien à afficher (le fichier reste téléchargeable).
+    None,
+}
 
 /// Un format de fichier reconnu par easy3d.
 pub trait Format: Sync {
@@ -55,12 +73,45 @@ pub trait Format: Sync {
         false
     }
 
+    /// Nature du contenu, pour choisir la visionneuse côté frontend.
+    fn viewer(&self) -> Viewer {
+        Viewer::None
+    }
+
     /// Écrit dans `out` l'aperçu PNG du fichier `path` (chemin **absolu**).
     ///
     /// Retourne `None` si le format n'a pas d'aperçu, si le fichier est
     /// illisible ou s'il n'embarque pas de vignette exploitable.
     fn thumbnail(&self, _path: &Path, _out: &Path) -> Option<()> {
         None
+    }
+}
+
+/// Descripteur d'un format, exposé au frontend (`GET /models`).
+///
+/// Le frontend n'a ainsi **aucune extension en dur** : il reçoit la liste de ce
+/// que le backend sait effectivement lire et afficher.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct FormatInfo {
+    /// Nom lisible (ex : `3MF`).
+    pub name: &'static str,
+    /// Extensions gérées, minuscules et sans point.
+    pub extensions: &'static [&'static str],
+    /// Le backend sait générer un aperçu PNG de ce format.
+    pub preview: bool,
+    /// Visionneuse adaptée au contenu.
+    pub viewer: Viewer,
+}
+
+impl FormatInfo {
+    /// Décrit un format du registre.
+    fn of(format: &dyn Format) -> Self {
+        Self {
+            name: format.name(),
+            extensions: format.extensions(),
+            preview: format.has_preview(),
+            viewer: format.viewer(),
+        }
     }
 }
 
@@ -72,6 +123,11 @@ static REGISTRY: &[&dyn Format] = &[&stl::STL, &obj::OBJ, &three_mf::THREE_MF, &
 /// Tous les formats connus, dans l'ordre du registre.
 pub fn all() -> &'static [&'static dyn Format] {
     REGISTRY
+}
+
+/// Descripteurs de tous les formats connus (pour l'API).
+pub fn describe() -> Vec<FormatInfo> {
+    REGISTRY.iter().map(|f| FormatInfo::of(*f)).collect()
 }
 
 /// Extension (minuscule, sans point) d'un nom de fichier ou d'un chemin.
@@ -154,5 +210,20 @@ mod tests {
         assert_eq!(content_type("a.gcode"), "text/plain");
         assert_eq!(content_type("photo.jpg"), "image/jpeg");
         assert_eq!(content_type("archive.zip"), "application/octet-stream");
+    }
+
+    #[test]
+    fn decrit_les_formats_pour_le_frontend() {
+        let formats = describe();
+
+        let stl = formats.iter().find(|f| f.name == "STL").unwrap();
+        assert_eq!(stl.extensions, ["stl"].as_slice());
+        assert!(stl.preview);
+        assert_eq!(stl.viewer, Viewer::Mesh);
+
+        // Un format peut porter plusieurs extensions (alias de slicer).
+        let gcode = formats.iter().find(|f| f.name == "G-code").unwrap();
+        assert_eq!(gcode.extensions, ["gcode", "gco"].as_slice());
+        assert_eq!(gcode.viewer, Viewer::Gcode);
     }
 }
