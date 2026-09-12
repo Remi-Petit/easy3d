@@ -27,7 +27,10 @@ pub fn note_path(root: &Path, rel: &str) -> Option<PathBuf> {
     if rel.is_empty() || rel.contains('\\') || rel.contains(':') {
         return None;
     }
-    if rel.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+    if rel
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
         return None;
     }
 
@@ -210,7 +213,10 @@ mod tests {
         assert!(read(root, "DemaAuto/x.stl").is_none());
 
         write(root, "DemaAuto/x.stl", "# Titre\n\ndu **texte**").unwrap();
-        assert_eq!(read(root, "DemaAuto/x.stl").unwrap(), "# Titre\n\ndu **texte**");
+        assert_eq!(
+            read(root, "DemaAuto/x.stl").unwrap(),
+            "# Titre\n\ndu **texte**"
+        );
 
         // Une note vidée disparaît du disque.
         write(root, "DemaAuto/x.stl", "   \n").unwrap();
@@ -310,7 +316,10 @@ mod tests {
         move_for_path(&root, &root.join("A/x.stl"), &root.join("B/x.stl")).unwrap();
 
         // La cible est conservée, la source reste où elle est : aucune perte.
-        assert_eq!(read(&root, "B/x.stl").as_deref(), Some("# note destination"));
+        assert_eq!(
+            read(&root, "B/x.stl").as_deref(),
+            Some("# note destination")
+        );
         assert_eq!(read(&root, "A/x.stl").as_deref(), Some("# note source"));
     }
 

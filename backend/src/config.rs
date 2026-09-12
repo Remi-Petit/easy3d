@@ -46,9 +46,9 @@ pub struct Config {
 impl Config {
     /// Chemin du fichier de configuration.
     pub fn config_path() -> PathBuf {
-        std::env::var("EASY3D_CONFIG").map(PathBuf::from).unwrap_or_else(|_| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("config.yml")
-        })
+        std::env::var("EASY3D_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("config.yml"))
     }
 
     /// Charge la configuration depuis le YAML, avec repli sur les défauts.
@@ -62,7 +62,10 @@ impl Config {
     pub fn load_from(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(text) => serde_yaml::from_str(&text).unwrap_or_else(|e| {
-                eprintln!("⚠️  Configuration invalide dans {}: {e}. Défauts utilisés.", path.display());
+                eprintln!(
+                    "⚠️  Configuration invalide dans {}: {e}. Défauts utilisés.",
+                    path.display()
+                );
                 Self::default()
             }),
             Err(_) => Self::default(),
@@ -83,7 +86,12 @@ impl Config {
     /// résoudre le même chemin : le démarrage, le rechargement à chaud du
     /// watcher, et `PUT /config` qui doit valider ce que l'on enregistre.
     pub fn resolve_models_root(&self) -> PathBuf {
-        if let Some(p) = self.models_root.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some(p) = self
+            .models_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
             let path = Path::new(p);
             return if path.is_absolute() {
                 path.to_path_buf()
@@ -92,9 +100,9 @@ impl Config {
             };
         }
 
-        std::env::var("MODELS_ROOT").map(PathBuf::from).unwrap_or_else(|_| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../models")
-        })
+        std::env::var("MODELS_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../models"))
     }
 }
 
@@ -106,7 +114,11 @@ mod tests {
     fn lit_le_fichier_de_configuration() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("config.yml");
-        std::fs::write(&file, "models_root: ../models\ndisplay:\n  mode: \"image\"\n").unwrap();
+        std::fs::write(
+            &file,
+            "models_root: ../models\ndisplay:\n  mode: \"image\"\n",
+        )
+        .unwrap();
 
         let cfg = Config::load_from(&file);
         assert_eq!(cfg.models_root.as_deref(), Some("../models"));
@@ -148,7 +160,13 @@ mod tests {
     #[test]
     fn le_mode_se_serialise_en_minuscules() {
         // Le frontend lit `config.display.mode` tel quel ("3d" | "image").
-        assert_eq!(serde_json::to_string(&DisplayMode::ThreeD).unwrap(), "\"3d\"");
-        assert_eq!(serde_json::to_string(&DisplayMode::Image).unwrap(), "\"image\"");
+        assert_eq!(
+            serde_json::to_string(&DisplayMode::ThreeD).unwrap(),
+            "\"3d\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DisplayMode::Image).unwrap(),
+            "\"image\""
+        );
     }
 }

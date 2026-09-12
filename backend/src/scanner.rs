@@ -1,4 +1,4 @@
-use crate::notes;
+use crate::{formats, notes, thumbnail};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -183,15 +183,6 @@ fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
     })
 }
 
-/// Extension (minuscule) d'un chemin relatif.
-fn ext_of(rel: &str) -> String {
-    Path::new(rel)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
 /// Nom de base sans extension d'un chemin relatif.
 fn file_stem(rel: &str) -> String {
     Path::new(rel)
@@ -201,50 +192,19 @@ fn file_stem(rel: &str) -> String {
         .to_string()
 }
 
-/// `true` si le fichier est un modèle 3D affichable (STL / OBJ / 3MF).
-fn is_model(rel: &str) -> bool {
-    matches!(ext_of(rel).as_str(), "stl" | "obj" | "3mf")
-}
-
-/// `true` si le fichier est un G-code (`.gcode` / `.gco`).
-fn is_gcode(rel: &str) -> bool {
-    matches!(ext_of(rel).as_str(), "gcode" | "gco")
-}
-
-/// `true` si le fichier peut recevoir un aperçu (modèle 3D ou G-code).
-fn can_have_preview(rel: &str) -> bool {
-    is_model(rel) || is_gcode(rel)
-}
-
-/// `true` si le fichier est une image d'aperçu.
-fn is_image(rel: &str) -> bool {
-    matches!(ext_of(rel).as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif")
-}
-
-/// Priorité d'extension image (0 = préférée), pour choisir l'aperçu.
-fn img_priority(ext: &str) -> u32 {
-    match ext {
-        "png" => 0,
-        "jpg" => 1,
-        "jpeg" => 2,
-        "webp" => 3,
-        "gif" => 4,
-        _ => 9,
-    }
-}
-
-/// Associe à chaque modèle (STL / OBJ / G-code) une image de même nom dans le
-/// même dossier, si elle existe (ex : `boitier.stl` + `boitier.png`).
+/// Associe à chaque fichier reconnu par le registre ([`formats`]) une image de
+/// même nom dans le même dossier, si elle existe
+/// (ex : `boitier.stl` + `boitier.png`).
 fn attach_sibling_images(files: &mut [FileInfo]) {
     use std::collections::HashMap;
     let mut best: HashMap<String, String> = HashMap::new();
     for f in files.iter() {
-        if is_image(&f.rel) {
+        if formats::is_image(&f.rel) {
             let stem = file_stem(&f.rel);
-            let prio = img_priority(&ext_of(&f.rel));
+            let prio = formats::image_priority(&formats::ext_of(&f.rel));
             let better = match best.get(&stem) {
                 None => true,
-                Some(cur) => prio < img_priority(&ext_of(cur)),
+                Some(cur) => prio < formats::image_priority(&formats::ext_of(cur)),
             };
             if better {
                 best.insert(stem, f.rel.clone());
@@ -252,19 +212,12 @@ fn attach_sibling_images(files: &mut [FileInfo]) {
         }
     }
     for f in files.iter_mut() {
-        if can_have_preview(&f.rel) {
-            if let Some(img) = best.get(&file_stem(&f.rel)) {
-                f.image = Some(img.clone());
-            }
+        if formats::can_have_preview(&f.rel)
+            && let Some(img) = best.get(&file_stem(&f.rel))
+        {
+            f.image = Some(img.clone());
         }
     }
-}
-
-/// Chemin (relatif à la racine) de l'aperçu généré pour un modèle donné.
-/// Ex : `chainsaw-man/Chainsaw_Man.stl` → `.easy3d-thumbs/chainsaw-man/Chainsaw_Man.png`.
-fn gen_thumb_rel(rel: &str) -> String {
-    let stem = Path::new(rel).with_extension("png");
-    format!(".easy3d-thumbs/{}", stem.display())
 }
 
 /// Associe à chaque modèle **sans image sœur** l'aperçu PNG généré par le
@@ -273,7 +226,7 @@ fn gen_thumb_rel(rel: &str) -> String {
 fn attach_generated_thumbs(files: &mut [FileInfo]) {
     use std::path::PathBuf;
     for f in files.iter_mut() {
-        if f.image.is_some() || !can_have_preview(&f.rel) {
+        if f.image.is_some() || !formats::can_have_preview(&f.rel) {
             continue;
         }
         // Racine des modèles = chemin absolu du modèle moins ses composantes rel.
@@ -281,7 +234,7 @@ fn attach_generated_thumbs(files: &mut [FileInfo]) {
         for _ in f.rel.split('/') {
             root.pop();
         }
-        let thumb_rel = gen_thumb_rel(&f.rel);
+        let thumb_rel = thumbnail::thumb_rel_path(&f.rel);
         if root.join(&thumb_rel).is_file() {
             f.image = Some(thumb_rel);
         }
@@ -398,7 +351,11 @@ mod tests {
         fs::create_dir_all(root.join("DemaAuto")).unwrap();
         fs::write(root.join("DemaAuto/a.stl"), "x").unwrap();
         fs::create_dir_all(root.join(".easy3d-notes/DemaAuto")).unwrap();
-        fs::write(root.join(".easy3d-notes/DemaAuto/a.stl.md"), "# Note fichier").unwrap();
+        fs::write(
+            root.join(".easy3d-notes/DemaAuto/a.stl.md"),
+            "# Note fichier",
+        )
+        .unwrap();
         fs::write(root.join(".easy3d-notes/DemaAuto.md"), "# Note dossier").unwrap();
 
         let scan = scan_models(root);
@@ -421,11 +378,12 @@ mod tests {
     #[test]
     fn eligibility_a_un_apercu() {
         // Modèles 3D et G-code : oui. Autre chose : non.
+        // (Le détail des extensions appartient au module `formats`.)
         for rel in ["a.stl", "a.obj", "a.3mf", "a.gcode", "a.gco", "sub/a.GCODE"] {
-            assert!(can_have_preview(rel), "devrait accepter {rel}");
+            assert!(formats::can_have_preview(rel), "devrait accepter {rel}");
         }
         for rel in ["notes.md", "photo.png", "readme.txt", ""] {
-            assert!(!can_have_preview(rel), "devrait refuser {rel}");
+            assert!(!formats::can_have_preview(rel), "devrait refuser {rel}");
         }
     }
 
@@ -454,4 +412,3 @@ mod tests {
         assert_eq!(gcode.image.as_deref(), Some(".easy3d-thumbs/piece.png"));
     }
 }
-

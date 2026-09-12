@@ -12,7 +12,7 @@
 
 use easy3d::{notes, watcher};
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult};
+use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
@@ -102,7 +102,16 @@ fn deplacer_un_dossier_emmene_les_notes_du_sous_arbre() {
         watcher::handle_batch(&root, &root.join("config.yml"), &events);
     }
 
-    assert_eq!(notes::read(&root, "B").as_deref(), Some("# note du dossier"));
-    assert_eq!(notes::read(&root, "B/x.stl").as_deref(), Some("# note de x"));
-    assert_eq!(notes::read(&root, "B/sous/y.stl").as_deref(), Some("# note de y"));
+    assert_eq!(
+        notes::read(&root, "B").as_deref(),
+        Some("# note du dossier")
+    );
+    assert_eq!(
+        notes::read(&root, "B/x.stl").as_deref(),
+        Some("# note de x")
+    );
+    assert_eq!(
+        notes::read(&root, "B/sous/y.stl").as_deref(),
+        Some("# note de y")
+    );
 }

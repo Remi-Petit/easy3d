@@ -1,10 +1,11 @@
 use crate::collab;
 use crate::config::Config;
+use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -224,8 +225,7 @@ async fn put_config(
     // Si le dossier change, on ne touche à rien : le watcher est le seul à
     // pouvoir rebasculer la surveillance du répertoire, et il ne le ferait pas
     // s'il trouvait déjà la nouvelle config dans l'état partagé.
-    let same_root =
-        std::fs::canonicalize(&root).ok() == std::fs::canonicalize(state.root()).ok();
+    let same_root = std::fs::canonicalize(&root).ok() == std::fs::canonicalize(state.root()).ok();
     if same_root {
         *state.config.write().unwrap() = config.clone();
         broadcast_snapshot(&state);
@@ -329,7 +329,7 @@ async fn get_file(State(state): State<AppState>, Query(q): Query<FileQuery>) -> 
 
     match tokio::fs::read(&relative).await {
         Ok(bytes) => {
-            let ct = content_type(&relative);
+            let ct = formats::content_type(&q.path);
             ([(header::CONTENT_TYPE, ct)], bytes).into_response()
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -352,26 +352,6 @@ fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
         return None;
     }
     Some(root.join(rel))
-}
-
-/// Type MIME approximatif selon l'extension.
-fn content_type(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("stl") => "model/stl",
-        Some("obj") => "model/obj",
-        Some("3mf") => "model/3mf",
-        Some("gcode") | Some("gco") => "text/plain",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        _ => "application/octet-stream",
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -400,8 +380,7 @@ async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> 
 
 /// Rescanne l'état courant et diffuse la liste des modèles aux clients WS.
 pub fn broadcast_snapshot(state: &AppState) {
-    let payload =
-        ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
+    let payload = ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
     if let Ok(json) = serde_json::to_string(&payload) {
         let _ = state.ws.send(json);
     }
@@ -446,8 +425,7 @@ mod tests {
         std::fs::create_dir_all(&models).unwrap();
 
         let (ws, _) = broadcast::channel::<String>(16);
-        let app =
-            routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
+        let app = routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
 
         let body = serde_json::json!({
             "models_root": models.to_string_lossy(),
@@ -495,8 +473,7 @@ mod tests {
         let missing = dir.path().join("pas-la");
 
         let (ws, _) = broadcast::channel::<String>(16);
-        let app =
-            routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
+        let app = routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
 
         let body = serde_json::json!({ "models_root": missing.to_string_lossy() }).to_string();
 
@@ -561,12 +538,7 @@ mod tests {
     async fn route_inconnue_renvoie_404() {
         let app = test_app(".");
         let res = app
-            .oneshot(
-                Request::builder()
-                    .uri("/nope")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/nope").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -590,12 +562,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let ct = res
-            .headers()
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
         assert_eq!(ct, "model/stl");
         let body = res.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], b"solid x");
@@ -783,4 +750,3 @@ mod tests {
         assert_eq!(v["files"][0]["note"], "la note");
     }
 }
-
