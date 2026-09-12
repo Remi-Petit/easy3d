@@ -37,7 +37,7 @@ const placeholder = computed(() =>
  */
 const displayTitle = computed(() => {
   if (!isHome.value || !header.value.count) return title.value
-  return `${title.value} - ${header.value.count}`
+  return `${title.value}  (${header.value.count})`
 })
 
 // "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
