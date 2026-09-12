@@ -16,6 +16,15 @@ export function fileUrl(rel: string): string {
   return `/api/file?path=${encodeURIComponent(rel)}`
 }
 
+/**
+ * URL de téléchargement d'un fichier : même route, plus `download` pour que le
+ * proxy réponde en `Content-Disposition: attachment`. Le nom enregistré est
+ * celui du chemin (accents compris).
+ */
+export function fileDownloadUrl(rel: string): string {
+  return `${fileUrl(rel)}&download=1`
+}
+
 /** Emoji représentant un fichier, d'après son extension. */
 export function fileIcon(rel: string): string {
   const t = ext(rel)

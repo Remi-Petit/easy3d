@@ -542,6 +542,69 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* Barre d'actions en tête des pages de détail : le retour à gauche, les
+   actions à droite. */
+.detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+/* L'espacement vertical vient de la barre : le retour n'a plus à porter le sien. */
+.detail-bar .back {
+  margin-bottom: 0;
+}
+
+/* Lien d'action « Télécharger ». La couleur est écrite avec les deux classes
+   pour l'emporter sur `.page a`, la règle globale de l'app. */
+.detail-bar .download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.detail-bar .download:hover {
+  color: var(--accent-2);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.detail-bar .download:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.detail-bar .download svg {
+  flex: none;
+}
+
+/* Rappel discret du format, pour distinguer les boutons d'une même page. */
+.download__size {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.detail-bar .download:hover .download__size {
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
 /* ---------- Pages de détail ---------- */
 /* Page fichier : aperçu à gauche, informations à droite. L'aperçu est la
    colonne qui grandit ; les infos sont bornées (métadonnées + note). */
