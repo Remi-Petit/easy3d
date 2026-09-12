@@ -101,15 +101,39 @@ fn watch_dir(
     // récursif) plutôt que le fichier lui-même : cela reste fiable lorsque
     // l'éditeur remplace le fichier (`rename`), ce qui invaliderait une
     // surveillance directe.
-    if let Some(dir) = config_path.parent() {
-        debouncer.watch(dir, RecursiveMode::NonRecursive)?;
-    }
+    //
+    // Un dossier absent ne doit **pas** faire tomber la surveillance des
+    // modèles : le cas se produit dès que la config est déplacée (image Docker,
+    // `EASY3D_CONFIG` pointant ailleurs). On le signale et on continue sans
+    // rechargement à chaud de la configuration.
+    let config_watched = match config_path.parent() {
+        Some(dir) if dir.is_dir() => {
+            debouncer.watch(dir, RecursiveMode::NonRecursive)?;
+            true
+        }
+        _ => {
+            eprintln!(
+                "⚠️  Configuration non surveillée : {} est introuvable.\n\
+                 Les modifications de {} ne seront pas appliquées à chaud.",
+                config_path.parent().unwrap_or(&config_path).display(),
+                config_path.display()
+            );
+            false
+        }
+    };
 
-    println!(
-        "Je surveille {} et {}… (Ctrl+C pour arrêter)",
-        current_root.display(),
-        config_path.display()
-    );
+    if config_watched {
+        println!(
+            "Je surveille {} et {}… (Ctrl+C pour arrêter)",
+            current_root.display(),
+            config_path.display()
+        );
+    } else {
+        println!(
+            "Je surveille {}… (Ctrl+C pour arrêter)",
+            current_root.display()
+        );
+    }
 
     for result in rx {
         let events = match result {
