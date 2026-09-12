@@ -543,6 +543,39 @@ body {
 }
 
 /* ---------- Pages de détail ---------- */
+/* Page fichier : aperçu à gauche, informations à droite. L'aperçu est la
+   colonne qui grandit ; les infos sont bornées (métadonnées + note). */
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 20px;
+  align-items: start;
+}
+
+.detail__side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Dans la grille, l'espacement est porté par le `gap` : on neutralise les
+   marges que ces blocs avaient en disposition verticale. */
+.detail .viewer-card {
+  margin-bottom: 0;
+}
+
+.detail__side .note {
+  margin-top: 0;
+}
+
+/* Écran étroit : on empile, l'aperçu reste au-dessus des informations. */
+@media (max-width: 900px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .viewer-card {
   position: relative;
   height: 480px;
