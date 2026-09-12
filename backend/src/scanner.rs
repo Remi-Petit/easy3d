@@ -25,6 +25,13 @@ pub struct FileInfo {
 pub struct FolderInfo {
     pub name: String,
     pub count: usize,
+    /// Dernière modification du dossier, en secondes unix.
+    ///
+    /// Le plus récent entre le `mtime` du **répertoire** (ajout, suppression ou
+    /// renommage d'une entrée) et celui de ses **fichiers** (édition de
+    /// contenu, qui ne touche pas le répertoire). Autrement dit : la dernière
+    /// fois que quelque chose a changé dans ce dossier.
+    pub modified: Option<u64>,
     pub files: Vec<FileInfo>,
     /// Note explicative (Markdown) du dossier, si présente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,12 +90,14 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            let modified = folder_modified(&path, &files);
             scan.folders.insert(
                 name.clone(),
                 FolderInfo {
                     note: notes::read(root, &name),
                     name,
                     count: files.len(),
+                    modified,
                     files,
                 },
             );
@@ -141,6 +150,24 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .map(|c| c.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Dernière modification d'un dossier, en secondes unix.
+///
+/// Le plus récent entre son `mtime` (ajout, suppression ou renommage d'une
+/// entrée) et celui des fichiers qu'il contient (édition de contenu, qui ne
+/// touche pas le répertoire). `None` seulement si rien n'est lisible.
+fn folder_modified(dir: &Path, files: &[FileInfo]) -> Option<u64> {
+    let dir_mtime = std::fs::metadata(dir)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(to_unix_secs);
+    let files_mtime = files.iter().filter_map(|f| f.modified).max();
+
+    match (dir_mtime, files_mtime) {
+        (Some(dir), Some(file)) => Some(dir.max(file)),
+        (dir, file) => dir.or(file),
+    }
 }
 
 /// Lit les métadonnées d'un fichier en `FileInfo`.
@@ -294,6 +321,25 @@ mod tests {
         assert!(files.iter().any(|f| f.path.ends_with("b.txt")));
         // La date de modification est toujours disponible.
         assert!(files.iter().all(|f| f.modified.is_some()));
+    }
+
+    #[test]
+    fn scan_models_expose_la_date_de_modification_du_dossier() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("sub/a.txt"), "hello").unwrap();
+
+        let scan = scan_models(root);
+        let folder = &scan.folders["sub"];
+
+        assert_eq!(folder.count, 1);
+        // Le dossier porte sa propre date : le plus récent entre ses entrées
+        // (mtime du répertoire) et le contenu de ses fichiers.
+        let folder_mtime = folder.modified.expect("date du dossier");
+        let file_mtime = folder.files[0].modified.expect("date du fichier");
+        assert!(folder_mtime >= file_mtime);
     }
 
     #[test]
