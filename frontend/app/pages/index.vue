@@ -2,6 +2,7 @@
 import type { FileInfo, FolderInfo } from '~/composables/useModels'
 
 const { data, error, live } = useModels()
+const { t } = useI18n()
 
 // Filtre global : barre rendue par le layout `default`, état partagé.
 const { query, types, searching, hasTypeFilter, filtering, matches, sortFiles } = useFilter()
@@ -60,8 +61,8 @@ const resultCount = computed(() => matchedFolders.value.length + matchedFiles.va
 const emptyLabel = computed(() => {
   const parts: string[] = []
   if (searching.value) parts.push(`« ${query.value.trim()} »`)
-  if (hasTypeFilter.value) parts.push(types.value.map((t) => t.toUpperCase()).join(', '))
-  return parts.length ? `Aucun résultat pour ${parts.join(' + ')}.` : 'Aucun résultat.'
+  if (hasTypeFilter.value) parts.push(types.value.map((type) => type.toUpperCase()).join(', '))
+  return parts.length ? t('catalog.noResultFor', { what: parts.join(' + ') }) : t('catalog.noResult')
 })
 
 /** Résultats de recherche (fichiers) triés. */
@@ -73,7 +74,7 @@ const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
 
 // En-tête global (rendu par le layout `default`).
 usePageHeader(() => ({
-  subtitle: 'catalogue de modèles · STL / 3MF / GCODE',
+  subtitle: t('catalog.subtitle'),
   count: totalCount.value,
   live: live.value,
   offline: !!error.value,
@@ -86,7 +87,7 @@ usePageHeader(() => ({
   <template v-if="data">
     <!-- Filtre actif : une seule section « All » regroupant dossiers + fichiers. -->
     <template v-if="filtering">
-      <p class="section-label">All ({{ resultCount }})</p>
+      <p class="section-label">{{ $t('catalog.all', { count: resultCount }) }}</p>
       <div v-if="resultCount" class="file-grid">
         <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" :display-mode="displayMode" />
         <FileItem
@@ -102,21 +103,21 @@ usePageHeader(() => ({
 
     <!-- Vue par défaut : Dossiers + Racine. -->
     <template v-else>
-      <p class="section-label">Dossiers</p>
+      <p class="section-label">{{ $t('catalog.folders') }}</p>
       <div v-if="allFolders.length" class="file-grid">
         <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" :display-mode="displayMode" />
       </div>
-      <div v-else class="empty">Aucun dossier trouvé.</div>
+      <div v-else class="empty">{{ $t('catalog.noFolder') }}</div>
 
-      <p class="section-label">Racine ({{ rootFiles.length }})</p>
+      <p class="section-label">{{ $t('catalog.root', { count: rootFiles.length }) }}</p>
       <article class="card" v-if="rootFiles.length">
         <div class="file-grid">
           <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
         </div>
       </article>
-      <div v-else class="empty">Aucun fichier à la racine.</div>
+      <div v-else class="empty">{{ $t('catalog.noRootFile') }}</div>
     </template>
   </template>
 
-  <div v-else class="empty">Chargement…</div>
+  <div v-else class="empty">{{ $t('common.loading') }}</div>
 </template>

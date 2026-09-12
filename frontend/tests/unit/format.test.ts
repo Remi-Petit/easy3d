@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basename, ext, fileDownloadUrl, fileUrl, toDate, timeAgo } from '~/utils/format'
+import { basename, ext, fileDownloadUrl, fileUrl, relativeTime, toDate } from '~/utils/format'
 
 describe('basename', () => {
   it('extrait le nom final du chemin', () => {
@@ -43,26 +43,28 @@ describe('toDate', () => {
   })
 })
 
-describe('timeAgo', () => {
+// Le rendu est traduit (composable `useTimeAgo`) : ici on ne teste que le
+// découpage en unité + valeur, qui est la partie qui peut se tromper.
+describe('relativeTime', () => {
   const base = 1_700_000_000_000 // ms
   const now = new Date(base)
 
-  it("affiche « à l’instant » sous 5s", () => {
-    expect(timeAgo(new Date(base - 2_000), now)).toBe('à l’instant')
+  it('signale « maintenant » sous 5s', () => {
+    expect(relativeTime(new Date(base - 2_000), now)).toEqual({ key: 'now', count: 0 })
   })
-  it('affiche les secondes', () => {
-    expect(timeAgo(new Date(base - 20_000), now)).toBe('il y a 20s')
+  it('compte les secondes', () => {
+    expect(relativeTime(new Date(base - 20_000), now)).toEqual({ key: 'seconds', count: 20 })
   })
-  it('affiche les minutes', () => {
-    expect(timeAgo(new Date(base - 5 * 60_000), now)).toBe('il y a 5 min')
+  it('compte les minutes', () => {
+    expect(relativeTime(new Date(base - 5 * 60_000), now)).toEqual({ key: 'minutes', count: 5 })
   })
-  it('affiche les heures', () => {
-    expect(timeAgo(new Date(base - 3 * 3_600_000), now)).toBe('il y a 3h')
+  it('compte les heures', () => {
+    expect(relativeTime(new Date(base - 3 * 3_600_000), now)).toEqual({ key: 'hours', count: 3 })
   })
-  it('affiche les jours', () => {
-    expect(timeAgo(new Date(base - 2 * 86_400_000), now)).toBe('il y a 2j')
+  it('compte les jours', () => {
+    expect(relativeTime(new Date(base - 2 * 86_400_000), now)).toEqual({ key: 'days', count: 2 })
   })
-  it('renvoie « — » pour null', () => {
-    expect(timeAgo(null)).toBe('—')
+  it('renvoie null pour une date inconnue', () => {
+    expect(relativeTime(null, now)).toBeNull()
   })
 })

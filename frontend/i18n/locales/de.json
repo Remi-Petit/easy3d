@@ -1,0 +1,173 @@
+{
+  "app": {
+    "tagline": "Modellkatalog"
+  },
+  "nav": {
+    "menuTitle": "Navigation",
+    "menuDescription": "Navigation der Anwendung",
+    "catalog": "Katalog",
+    "system": "System",
+    "models": "Models",
+    "admin": "Administration"
+  },
+  "status": {
+    "live": "live",
+    "offline": "offline",
+    "polling": "Polling-Fallback"
+  },
+  "common": {
+    "back": "← Zurück",
+    "backAria": "Zurückgehen",
+    "download": "Herunterladen",
+    "loading": "Wird geladen…",
+    "unknownError": "Unbekannter Fehler",
+    "close": "Schließen (Esc)",
+    "none": "—"
+  },
+  "language": {
+    "label": "Sprache",
+    "choose": "Sprache wählen"
+  },
+  "filter": {
+    "placeholder": "Nach Datei- oder Ordnernamen filtern…",
+    "placeholderFolder": "Nach Dateinamen filtern…",
+    "items": "Einträge filtern…",
+    "date": "Datum",
+    "sort": {
+      "none": "Datum (Standardreihenfolge)",
+      "desc": "Datum: neu → alt",
+      "asc": "Datum: alt → neu"
+    },
+    "sortBy": "Sortieren nach {mode}",
+    "sortHint": "Sortieren nach {mode} (zum Ändern klicken)",
+    "typeTitle": "Filtern: {count} Datei {type} | Filtern: {count} Dateien {type}",
+    "clear": "✕ Löschen"
+  },
+  "catalog": {
+    "title": "Models",
+    "subtitle": "Modellkatalog · STL / 3MF / GCODE",
+    "all": "Alle ({count})",
+    "folders": "Ordner",
+    "root": "Wurzel ({count})",
+    "noFolder": "Kein Ordner gefunden.",
+    "noRootFile": "Keine Datei im Wurzelverzeichnis.",
+    "noResult": "Kein Ergebnis.",
+    "noResultFor": "Kein Ergebnis für {what}."
+  },
+  "folder": {
+    "subtitle": "{count} Datei · STL / 3MF / GCODE | {count} Dateien · STL / 3MF / GCODE",
+    "subtitleFiltered": "{shown} / {count} Datei · STL / 3MF / GCODE | {shown} / {count} Dateien · STL / 3MF / GCODE",
+    "meta": "{count} Datei · {when} | {count} Dateien · {when}",
+    "empty": "Leerer Ordner",
+    "noMatch": "Keine Datei entspricht dem Filter.",
+    "hasNote": "Dieser Ordner hat eine Notiz"
+  },
+  "file": {
+    "subtitle": "{type} · {when}",
+    "meta": "{type} · {when}",
+    "metaInFolder": "{type} · 📁 {folder} · {when}",
+    "metaFile": "Datei",
+    "metaType": "Typ",
+    "metaPath": "Pfad",
+    "metaModified": "Geändert",
+    "noPreview": "Für diesen Dateityp ist keine 3D-Vorschau verfügbar.",
+    "hasNote": "Diese Datei hat eine Notiz",
+    "gcodeBadge": "🖨 GCODE"
+  },
+  "viewer": {
+    "loading": "Wird geladen…",
+    "httpError": "HTTP-Fehler {status}",
+    "noExtrusion": "Kein Extrusionspfad gefunden",
+    "segments": "Segmente",
+    "triangles": "Dreiecke",
+    "hint": "Ziehen zum Drehen · Scrollen zum Zoomen"
+  },
+  "notes": {
+    "title": "📝 Notiz",
+    "empty": "Noch keine Notiz.",
+    "placeholder": "Beschreiben Sie diese Datei oder diesen Ordner…",
+    "connected": "Verbunden",
+    "offline": "Offline",
+    "peers": "👥 {count} Personen",
+    "edit": "Bearbeiten",
+    "add": "Notiz hinzufügen",
+    "finish": "Fertig",
+    "editor": {
+      "toolbarTips": {
+        "bold": "Fett",
+        "underline": "Unterstrichen",
+        "italic": "Kursiv",
+        "strikeThrough": "Durchgestrichen",
+        "title": "Überschrift",
+        "sub": "Tiefgestellt",
+        "sup": "Hochgestellt",
+        "quote": "Zitat",
+        "unorderedList": "Aufzählung",
+        "orderedList": "Nummerierte Liste",
+        "task": "Kontrollkästchen",
+        "codeRow": "Inline-Code",
+        "code": "Codeblock",
+        "link": "Link",
+        "image": "Bild",
+        "table": "Tabelle",
+        "revoke": "Rückgängig",
+        "next": "Wiederholen",
+        "save": "Speichern",
+        "prettier": "Formatieren",
+        "pageFullscreen": "Seite im Vollbild",
+        "fullscreen": "Vollbild",
+        "preview": "Vorschau",
+        "previewOnly": "Nur Vorschau",
+        "htmlPreview": "HTML",
+        "catalog": "Übersicht",
+        "github": "GitHub"
+      },
+      "titleItem": {
+        "h1": "Überschrift 1",
+        "h2": "Überschrift 2",
+        "h3": "Überschrift 3",
+        "h4": "Überschrift 4",
+        "h5": "Überschrift 5",
+        "h6": "Überschrift 6"
+      },
+      "linkModalTips": {
+        "linkTitle": "Link einfügen",
+        "imageTitle": "Bild einfügen",
+        "descLabel": "Text",
+        "descLabelPlaceHolder": "Angezeigter Text…",
+        "urlLabel": "Adresse",
+        "urlLabelPlaceHolder": "https://…",
+        "buttonOK": "Bestätigen"
+      },
+      "footer": {
+        "markdownTotal": "Zeichen",
+        "scrollAuto": "Synchrones Scrollen"
+      }
+    }
+  },
+  "admin": {
+    "title": "Administration",
+    "subtitle": "Einstellungen und Notizen",
+    "settings": "Einstellungen",
+    "display": "Modellanzeige",
+    "mode3d": "Interaktives 3D",
+    "modeImage": "Bildvorschau",
+    "hint": "Wird beim Klick übernommen und in {file} geschrieben.",
+    "saved": "Übernommen",
+    "saveFailed": "Speichern fehlgeschlagen.",
+    "applied": "Übernommen",
+    "rootRead": "Gelesener Ordner",
+    "notes": "Notizen",
+    "noItems": "Kein Eintrag.",
+    "whereFolder": "Ordner",
+    "whereRoot": "Wurzel",
+    "hasNote": "Hat eine Notiz"
+  },
+  "time": {
+    "now": "gerade eben",
+    "seconds": "vor {count}s",
+    "minutes": "vor {count} min",
+    "hours": "vor {count}h",
+    "days": "vor {count}T"
+  }
+}

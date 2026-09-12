@@ -52,6 +52,7 @@ export interface ModelsResponse {
  *   `/api/models` + tentative de reconnexion auto.
  */
 export function useModels(intervalMs = 5000) {
+  const { t } = useI18n()
   const data = ref<ModelsResponse | null>(null)
   const error = ref<string | null>(null)
   const loading = ref(false)
@@ -90,7 +91,7 @@ export function useModels(intervalMs = 5000) {
       error.value = null
       lastUpdated.value = new Date()
     } catch (e: any) {
-      error.value = e?.data?.statusMessage || e?.message || 'Erreur inconnue'
+      error.value = e?.data?.statusMessage || e?.message || t('common.unknownError')
     } finally {
       loading.value = false
     }

@@ -84,8 +84,30 @@ bun run dev
   `3d` charge un viewer three.js sur les cartes, `image` préfère l'aperçu
   statique extrait du fichier. La page **détail** fait exception : un modèle ou
   un G-code y est toujours rendu en 3D, quel que soit le mode.
+- **Langues** : interface en français, anglais, allemand et espagnol, via
+  `@nuxtjs/i18n`. La langue vit dans un cookie (`easy3d_lang`), pas dans l'URL
+  (stratégie `no_prefix`) : les liens internes et les routes `/fichier/<rel>`
+  restent identiques. Messages dans `frontend/i18n/locales/*.json`, `fr` faisant
+  office de référence. Le sélecteur est dans le pied de la sidebar.
 - URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut dérivé de
   `NUXT_HPCCAT_API_PORT`, sinon `http://127.0.0.1:8090`).
+
+## Internationalisation
+
+- Messages : `frontend/i18n/locales/<code>.json` (`fr`, `en`, `de`, `es`).
+  `fr` est la **référence** : toute clé qu'il déclare doit exister ailleurs.
+- `tests/unit/i18n.test.ts` est **bloquant** : listes de clés identiques d'une
+  langue à l'autre, mêmes variables (`{count}`, `{when}`…) dans chaque message,
+  aucune valeur vide, et toute clé utilisée dans le code doit exister.
+- Ce qui n'est **pas** dans les fichiers de langue, car ce n'est pas de la
+  traduction mais du formatage : nombres et temps relatifs. `n()` (vue-i18n)
+  remplace `toLocaleString('fr-FR')` du viewer, et `useTimeAgo` (au-dessus de
+  `utils/format#relativeTime`, pur et testé) rend « il y a 3h » / « 3h ago ».
+- Les noms de fichiers et de dossiers ne sont jamais traduits.
+- Deux composants tiers ont leur propre i18n, branchée sur la langue courante :
+  `UApp :locale` (paquets de `@nuxt/ui/locale`) et md-editor-v3
+  (`notes.editor` des fichiers de langue, lu en `?raw` — voir le commentaire
+  dans `NotePanel.client.vue`).
 
 ## Configuration
 

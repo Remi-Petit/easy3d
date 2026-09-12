@@ -8,6 +8,10 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3100',
     trace: 'on-first-retry',
+    // Langue du navigateur épinglée sur la langue de référence : sans ça, les
+    // assertions sur du texte dépendraient de la langue du poste (l'app suit
+    // `Accept-Language` au premier chargement).
+    locale: 'fr-FR',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Démarre le backend Rust (8090) + le frontend Nuxt (3100) avant le test.

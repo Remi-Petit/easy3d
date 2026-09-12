@@ -3,6 +3,7 @@ import type { FolderInfo } from '~/composables/useModels'
 
 const route = useRoute()
 const { data, error, live } = useModels()
+const { t } = useI18n()
 
 // Le nom est encodé dans l'URL ; on le décode pour retrouver la clé du dossier.
 const name = computed(() => decodeURIComponent(String(route.params.name)))
@@ -25,11 +26,12 @@ const files = computed(() => sortFiles((folder.value?.files ?? []).filter(matche
 
 // En-tête global (rendu par le layout `default`).
 usePageHeader(() => {
-  const suffix = total.value > 1 ? 's' : ''
+  const count = total.value
+  const shown = files.value.length
   return {
     subtitle: filtering.value
-      ? `${files.value.length} / ${total.value} fichier${suffix} · STL / 3MF / GCODE`
-      : `${total.value} fichier${suffix} · STL / 3MF / GCODE`,
+      ? t('folder.subtitleFiltered', { shown, count }, count)
+      : t('folder.subtitle', count, { count }),
     count: 0,
     live: live.value,
     offline: !!error.value,
@@ -48,8 +50,8 @@ usePageHeader(() => {
   <div v-if="folder" class="file-grid">
     <FileItem v-for="f in files" :key="f.path" :file="f" :display-mode="displayMode" />
     <p v-if="!files.length" class="empty">
-      {{ filtering ? 'Aucun fichier ne correspond au filtre.' : 'Dossier vide' }}
+      {{ filtering ? $t('folder.noMatch') : $t('folder.empty') }}
     </p>
   </div>
-  <div v-else class="empty">Chargement…</div>
+  <div v-else class="empty">{{ $t('common.loading') }}</div>
 </template>

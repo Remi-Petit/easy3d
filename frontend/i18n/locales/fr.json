@@ -1,0 +1,173 @@
+{
+  "app": {
+    "tagline": "catalogue de modèles"
+  },
+  "nav": {
+    "menuTitle": "Navigation",
+    "menuDescription": "Navigation de l’application",
+    "catalog": "Catalogue",
+    "system": "Système",
+    "models": "Models",
+    "admin": "Administration"
+  },
+  "status": {
+    "live": "temps réel",
+    "offline": "hors ligne",
+    "polling": "repli polling"
+  },
+  "common": {
+    "back": "← Retour",
+    "backAria": "Revenir en arrière",
+    "download": "Télécharger",
+    "loading": "Chargement…",
+    "unknownError": "Erreur inconnue",
+    "close": "Fermer (Échap)",
+    "none": "—"
+  },
+  "language": {
+    "label": "Langue",
+    "choose": "Choisir la langue"
+  },
+  "filter": {
+    "placeholder": "Filtrer par nom de fichier ou de dossier…",
+    "placeholderFolder": "Filtrer par nom de fichier…",
+    "items": "Filtrer les éléments…",
+    "date": "Date",
+    "sort": {
+      "none": "date (ordre normal)",
+      "desc": "date : récent → ancien",
+      "asc": "date : ancien → récent"
+    },
+    "sortBy": "Trier par {mode}",
+    "sortHint": "Trier par {mode} (cliquer pour changer)",
+    "typeTitle": "Filtrer : {count} fichier {type} | Filtrer : {count} fichiers {type}",
+    "clear": "✕ Effacer"
+  },
+  "catalog": {
+    "title": "Models",
+    "subtitle": "catalogue de modèles · STL / 3MF / GCODE",
+    "all": "All ({count})",
+    "folders": "Dossiers",
+    "root": "Racine ({count})",
+    "noFolder": "Aucun dossier trouvé.",
+    "noRootFile": "Aucun fichier à la racine.",
+    "noResult": "Aucun résultat.",
+    "noResultFor": "Aucun résultat pour {what}."
+  },
+  "folder": {
+    "subtitle": "{count} fichier · STL / 3MF / GCODE | {count} fichiers · STL / 3MF / GCODE",
+    "subtitleFiltered": "{shown} / {count} fichier · STL / 3MF / GCODE | {shown} / {count} fichiers · STL / 3MF / GCODE",
+    "meta": "{count} fichier · {when} | {count} fichiers · {when}",
+    "empty": "Dossier vide",
+    "noMatch": "Aucun fichier ne correspond au filtre.",
+    "hasNote": "Ce dossier a une note"
+  },
+  "file": {
+    "subtitle": "{type} · {when}",
+    "meta": "{type} · {when}",
+    "metaInFolder": "{type} · 📁 {folder} · {when}",
+    "metaFile": "Fichier",
+    "metaType": "Type",
+    "metaPath": "Chemin",
+    "metaModified": "Modifié",
+    "noPreview": "Aperçu 3D non disponible pour ce type de fichier.",
+    "hasNote": "Ce fichier a une note",
+    "gcodeBadge": "🖨 GCODE"
+  },
+  "viewer": {
+    "loading": "chargement…",
+    "httpError": "Erreur HTTP {status}",
+    "noExtrusion": "Aucun trajet d’extrusion trouvé",
+    "segments": "segments",
+    "triangles": "triangles",
+    "hint": "Glisser pour pivoter · molette pour zoomer"
+  },
+  "notes": {
+    "title": "📝 Note",
+    "empty": "Aucune note pour l’instant.",
+    "placeholder": "Décrivez ce fichier ou ce dossier…",
+    "connected": "Connecté",
+    "offline": "Hors ligne",
+    "peers": "👥 {count} personnes",
+    "edit": "Modifier",
+    "add": "Ajouter une note",
+    "finish": "Terminer",
+    "editor": {
+      "toolbarTips": {
+        "bold": "Gras",
+        "underline": "Souligné",
+        "italic": "Italique",
+        "strikeThrough": "Barré",
+        "title": "Titre",
+        "sub": "Indice",
+        "sup": "Exposant",
+        "quote": "Citation",
+        "unorderedList": "Liste à puces",
+        "orderedList": "Liste numérotée",
+        "task": "Case à cocher",
+        "codeRow": "Code en ligne",
+        "code": "Bloc de code",
+        "link": "Lien",
+        "image": "Image",
+        "table": "Tableau",
+        "revoke": "Annuler",
+        "next": "Rétablir",
+        "save": "Enregistrer",
+        "prettier": "Formater",
+        "pageFullscreen": "Plein écran de la page",
+        "fullscreen": "Plein écran",
+        "preview": "Aperçu",
+        "previewOnly": "Aperçu seul",
+        "htmlPreview": "HTML",
+        "catalog": "Sommaire",
+        "github": "GitHub"
+      },
+      "titleItem": {
+        "h1": "Titre 1",
+        "h2": "Titre 2",
+        "h3": "Titre 3",
+        "h4": "Titre 4",
+        "h5": "Titre 5",
+        "h6": "Titre 6"
+      },
+      "linkModalTips": {
+        "linkTitle": "Insérer un lien",
+        "imageTitle": "Insérer une image",
+        "descLabel": "Texte",
+        "descLabelPlaceHolder": "Texte affiché…",
+        "urlLabel": "Adresse",
+        "urlLabelPlaceHolder": "https://…",
+        "buttonOK": "Valider"
+      },
+      "footer": {
+        "markdownTotal": "caractères",
+        "scrollAuto": "Défilement synchronisé"
+      }
+    }
+  },
+  "admin": {
+    "title": "Administration",
+    "subtitle": "réglages et notes",
+    "settings": "Réglages",
+    "display": "Affichage des modèles",
+    "mode3d": "3D interactif",
+    "modeImage": "Aperçu image",
+    "hint": "Appliqué et écrit dans {file} dès le clic.",
+    "saved": "Appliqué",
+    "saveFailed": "Échec de l’enregistrement.",
+    "applied": "Appliqué",
+    "rootRead": "Dossier lu",
+    "notes": "Notes",
+    "noItems": "Aucun élément.",
+    "whereFolder": "dossier",
+    "whereRoot": "racine",
+    "hasNote": "A une note"
+  },
+  "time": {
+    "now": "à l’instant",
+    "seconds": "il y a {count}s",
+    "minutes": "il y a {count} min",
+    "hours": "il y a {count}h",
+    "days": "il y a {count}j"
+  }
+}
