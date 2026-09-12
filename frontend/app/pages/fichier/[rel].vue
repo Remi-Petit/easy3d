@@ -43,7 +43,29 @@ usePageHeader(() => ({
 </script>
 
 <template>
-  <BackLink />
+  <!-- Actions du détail : retour à gauche, téléchargement à droite. -->
+  <div class="detail-bar">
+    <BackLink />
+    <a class="download" :href="fileDownloadUrl(rel)" :download="name">
+      <svg
+        viewBox="0 0 24 24"
+        width="15"
+        height="15"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </svg>
+      Télécharger
+      <span class="download__size">{{ type.toUpperCase() }}</span>
+    </a>
+  </div>
 
   <div v-if="error" class="error">{{ error }}</div>
 
