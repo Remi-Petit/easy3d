@@ -1,7 +1,16 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  modules: ['@nuxt/ui'],
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
+  // L'app est en thème sombre permanent : pas de bascule clair/sombre (sinon
+  // les composants Nuxt UI arriveraient en clair au premier rendu).
+  ui: { colorMode: false },
+  app: {
+    head: {
+      htmlAttrs: { class: 'dark' },
+    },
+  },
   runtimeConfig: {
     // URL du backend Rust (axum).
     // Priorité : NUXT_HPCCAT_API_BASE, sinon NUXT_HPCCAT_API_PORT,
