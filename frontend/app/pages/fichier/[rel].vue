@@ -26,17 +26,12 @@ const type = computed(() => ext(rel.value) || '?')
 const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
 const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
 const when = computed(() => timeAgo(toDate(file.value?.modified ?? null), now.value))
-// Mode d'affichage issu de la config backend ("image" | "3d").
-const displayMode = computed(() => data.value?.config?.display?.mode ?? '3d')
-/** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
-const showDetailImage = computed(() => displayMode.value === 'image' && !!file.value?.image)
 /**
- * Viewer 3D : toujours pour un modèle ; pour un G-code seulement en mode `3d`
- * (en mode `image` on préfère l'aperçu statique extrait du fichier).
+ * La page détail fait exception au réglage global : un modèle (STL / OBJ / 3MF)
+ * ou un G-code y est **toujours** rendu en 3D, même si le catalogue est réglé
+ * sur « aperçu image ». Le mode `image` ne concerne donc que les vignettes.
  */
-const showViewer = computed(
-  () => isModel.value || (isGcode.value && displayMode.value === '3d'),
-)
+const showViewer = computed(() => isModel.value || isGcode.value)
 
 // En-tête global (rendu par le layout `default`).
 usePageHeader(() => ({
@@ -55,22 +50,10 @@ usePageHeader(() => ({
   <!-- Modèle à gauche, informations (métadonnées + note) à droite. -->
   <div class="detail">
     <div class="viewer-card">
-      <img
-        v-if="showDetailImage"
-        :src="fileUrl(file.image!)"
-        :alt="name"
-        class="model-card__img"
-      />
-      <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
+      <ModelViewer v-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
       <div v-else class="file-detail-placeholder">
         <span class="ph-badge">{{ type.toUpperCase() }}</span>
-        <p>
-          {{
-            isGcode
-              ? 'Aucun aperçu trouvé dans ce G-code.'
-              : 'Aperçu 3D non disponible pour ce type de fichier.'
-          }}
-        </p>
+        <p>Aperçu 3D non disponible pour ce type de fichier.</p>
       </div>
     </div>
 

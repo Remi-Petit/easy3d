@@ -76,6 +76,10 @@ bun run dev
 - **Aperçu 3D** : chaque fichier STL / 3MF affiche une vignette 3D (three.js),
   cliquable pour ouvrir une vue plein écran (triangles + rotation/zoom).
   Les GCODE affichent un badge (pas de maillage).
+- **Mode d'affichage** (`display.mode` dans `config.yml`, réglable sur `/admin`) :
+  `3d` charge un viewer three.js sur les cartes, `image` préfère l'aperçu
+  statique extrait du fichier. La page **détail** fait exception : un modèle ou
+  un G-code y est toujours rendu en 3D, quel que soit le mode.
 - URL du backend configurable : `NUXT_HPCCAT_API_BASE` (défaut dérivé de
   `NUXT_HPCCAT_API_PORT`, sinon `http://127.0.0.1:8090`).
 
