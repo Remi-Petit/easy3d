@@ -24,6 +24,7 @@ const title = computed(() => {
 const isHome = computed(() => route.path === '/')
 /** La vue fichier n'a pas de liste à filtrer. */
 const showFilter = computed(() => !route.params.rel)
+
 const placeholder = computed(() =>
   route.params.name ? 'Filtrer par nom de fichier…' : 'Filtrer par nom de fichier ou de dossier…',
 )
@@ -49,8 +50,19 @@ function isActive(to: string) {
  * page = ajouter une entrée ici.
  */
 const navItems = computed<NavigationMenuItem[]>(() => [
+  { type: 'label', label: 'Catalogue' },
   { label: 'Models', icon: 'i-lucide-box', to: '/', active: isActive('/') },
 ])
+
+/**
+ * Habillage de la navigation : entrées bien détachées (pastille arrondie sur
+ * l'entrée active) et intitulé de section en petites capitales.
+ */
+const navUi = {
+  list: 'flex flex-col gap-1',
+  label: 'px-3 pt-1 pb-1 text-[0.7rem] font-semibold uppercase tracking-wider text-dimmed',
+  link: 'px-3 py-2.5 gap-3 before:rounded-lg',
+}
 </script>
 
 <template>
@@ -60,19 +72,17 @@ const navItems = computed<NavigationMenuItem[]>(() => [
   -->
   <UDashboardGroup>
     <!--
-      `resizable` = poignée de redimensionnement (offert par Nuxt UI).
-      `collapsible` est volontairement absent : sur desktop le bouton de repli
-      (UDashboardSidebarToggle) est `lg:hidden`, on se retrouverait avec une
-      sidebar masquée sans bouton évident pour la rouvrir.
+      Largeur fixée par `.app-sidebar` (Nuxt UI dimensionne en % de la
+      fenêtre). Ni `resizable` ni `collapsible` : sur desktop le bouton de
+      repli (UDashboardSidebarToggle) est `lg:hidden`, une sidebar repliée
+      serait impossible à rouvrir. `bg-muted` = un cran plus clair que la
+      page, pour que la pastille active du menu (bg-elevated) ressorte.
     -->
     <UDashboardSidebar
       id="easy3d"
-      :default-size="18"
-      :min-size="14"
-      :max-size="24"
-      resizable
+      class="app-sidebar"
       :menu="{ title: 'Navigation', description: 'Navigation de l’application' }"
-      :ui="{ root: 'bg-elevated' }"
+      :ui="{ root: 'bg-muted' }"
     >
       <!-- Identité de l'app. -->
       <template #header>
@@ -85,8 +95,9 @@ const navItems = computed<NavigationMenuItem[]>(() => [
         </div>
       </template>
 
-      <!-- Navigation (une seule section pour l'instant). -->
-      <UNavigationMenu :items="navItems" orientation="vertical" />
+      <!-- Navigation : intitulé de section + entrées. `color="neutral"` =
+           libellé blanc sur pastille grise pour l'entrée active. -->
+      <UNavigationMenu :items="navItems" orientation="vertical" color="neutral" :ui="navUi" />
 
       <!-- État du backend. -->
       <template #footer>
@@ -99,60 +110,59 @@ const navItems = computed<NavigationMenuItem[]>(() => [
       </template>
     </UDashboardSidebar>
 
+    <!-- Pas de `#header` : la navbar ne portait que le titre / sous-titre de la
+         page, en doublon du générique de la sidebar et des compteurs. -->
     <UDashboardPanel id="catalog" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
-      <!-- Titre de la page courante + son sous-titre. -->
-      <template #header>
-        <UDashboardNavbar>
-          <template #title>{{ title }}</template>
-          <template #trailing>
-            <small class="navbar__subtitle">{{ header.subtitle }}</small>
-          </template>
-        </UDashboardNavbar>
-      </template>
-
       <template #body>
-        <!-- Barre de filtre globale : recherche + tri, puis types. Collée en
-             haut de la zone de défilement du panneau. -->
-        <div v-if="showFilter" class="filters">
-          <div class="toolbar">
-            <div class="search">
-              <span class="icon">🔍</span>
-              <input v-model="query" type="text" :placeholder="placeholder" />
-            </div>
-            <button
-              type="button"
-              class="sort"
-              :class="`sort--${sortMode}`"
-              :title="`Trier par ${sortLabel} (cliquer pour changer)`"
-              :aria-label="`Trier par ${sortLabel}`"
-              @click="cycleSort"
-            >
-              <span class="sort__icon">{{ sortIcon }}</span>
-              <span class="sort__label">Date</span>
-            </button>
-          </div>
+        <!-- Barre haute collée en haut de la zone de défilement : bascule du
+             tiroir (mobile, déjà `lg:hidden`), puis recherche, tri et types. -->
+        <div class="topbar">
+          <UDashboardSidebarToggle class="topbar__toggle" />
 
-          <!-- Filtre par type : formats détectés dans la vue courante. -->
-          <div v-if="availableTypes.length > 1" class="types">
-            <button
-              v-for="entry in availableTypes"
-              :key="entry.type"
-              type="button"
-              class="types__item"
-              :class="{ 'types__item--on': types.includes(entry.type) }"
-              :aria-pressed="types.includes(entry.type)"
-              :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
-              @click="toggle(entry.type)"
-            >
-              {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
-            </button>
-            <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
-              ✕ Effacer
-            </button>
+          <div v-if="showFilter" class="topbar__filters">
+            <div class="toolbar">
+              <div class="search">
+                <span class="icon">🔍</span>
+                <input v-model="query" type="text" :placeholder="placeholder" />
+              </div>
+              <button
+                type="button"
+                class="sort"
+                :class="`sort--${sortMode}`"
+                :title="`Trier par ${sortLabel} (cliquer pour changer)`"
+                :aria-label="`Trier par ${sortLabel}`"
+                @click="cycleSort"
+              >
+                <span class="sort__icon">{{ sortIcon }}</span>
+                <span class="sort__label">Date</span>
+              </button>
+            </div>
+
+            <!-- Filtre par type : formats détectés dans la vue courante. -->
+            <div v-if="availableTypes.length > 1" class="types">
+              <button
+                v-for="entry in availableTypes"
+                :key="entry.type"
+                type="button"
+                class="types__item"
+                :class="{ 'types__item--on': types.includes(entry.type) }"
+                :aria-pressed="types.includes(entry.type)"
+                :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
+                @click="toggle(entry.type)"
+              >
+                {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
+              </button>
+              <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
+                ✕ Effacer
+              </button>
+            </div>
           </div>
         </div>
 
         <div class="page">
+          <!-- Titre de la page : le design n'a plus d'en-tête, mais le document
+               a besoin d'un titre (lecteurs d'écran, tests e2e). -->
+          <h1 class="sr-only">{{ title }}</h1>
           <slot />
         </div>
       </template>
