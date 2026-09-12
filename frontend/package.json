@@ -15,9 +15,11 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@nuxt/ui": "^4.11.1",
     "@types/three": "^0.185.4",
     "md-editor-v3": "^6.5.6",
     "nuxt": "^4.0.0",
+    "tailwindcss": "^4.3.3",
     "three": "^0.185.1",
     "y-codemirror.next": "^0.3.6",
     "y-protocols": "^1.0.7",
@@ -25,6 +27,7 @@
     "yjs": "^13.6.32"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "^1.2.131",
     "@playwright/test": "^1.62.1",
     "vitest": "^4.1.11"
   }
