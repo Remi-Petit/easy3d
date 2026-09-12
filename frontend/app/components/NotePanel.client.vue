@@ -22,16 +22,12 @@ import 'md-editor-v3/lib/style.css'
 // compilés (`{ type, body, loc… }`) et non des chaînes. md-editor, qui attend
 // des chaînes, afficherait « [object Object] » partout.
 //
-// Les fichiers sont énumérés au build (glob) : ajouter une langue dans
-// `i18n/locales/` suffit, il n'y a pas d'imports à compléter ici.
-const rawLocales = import.meta.glob('../../i18n/locales/*.json', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>
-
-/** Code de langue déduit du chemin trouvé par le glob (`…/locales/fr.json`). */
-const codeOf = (path: string) => path.slice(path.lastIndexOf('/') + 1, -'.json'.length)
+// Et une ligne par langue, **pas** un `import.meta.glob` : le glob y récupère
+// ces mêmes messages compilés, quel que soit le suffixe demandé (`?raw` compris).
+import deRaw from '~~/i18n/locales/de.json?raw'
+import enRaw from '~~/i18n/locales/en.json?raw'
+import esRaw from '~~/i18n/locales/es.json?raw'
+import frRaw from '~~/i18n/locales/fr.json?raw'
 
 /** Extrait le bloc `notes.editor` d'un fichier de langue brut. */
 function editorText(raw: string): StaticTextDefaultValue {
@@ -59,9 +55,12 @@ config({
      * appelé une seule fois à l'import, alors que md-editor choisit son libellé
      * à l'affichage selon le `language` courant.
      */
-    languageUserDefined: Object.fromEntries(
-      Object.entries(rawLocales).map(([path, raw]) => [codeOf(path), editorText(raw)]),
-    ),
+    languageUserDefined: {
+      fr: editorText(frRaw),
+      en: editorText(enRaw),
+      de: editorText(deRaw),
+      es: editorText(esRaw),
+    },
   },
   // Extensions CodeMirror : c'est par là qu'on branche la synchronisation Yjs
   // et les curseurs des autres participants. Un seul appel à `config()`, donc
