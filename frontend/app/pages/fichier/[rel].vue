@@ -52,33 +52,38 @@ usePageHeader(() => ({
 
   <div v-if="error" class="error">{{ error }}</div>
 
-  <div class="viewer-card">
-    <img
-      v-if="showDetailImage"
-      :src="fileUrl(file.image!)"
-      :alt="name"
-      class="model-card__img"
-    />
-    <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
-    <div v-else class="file-detail-placeholder">
-      <span class="ph-badge">{{ type.toUpperCase() }}</span>
-      <p>
-        {{
-          isGcode
-            ? 'Aucun aperçu trouvé dans ce G-code.'
-            : 'Aperçu 3D non disponible pour ce type de fichier.'
-        }}
-      </p>
+  <!-- Modèle à gauche, informations (métadonnées + note) à droite. -->
+  <div class="detail">
+    <div class="viewer-card">
+      <img
+        v-if="showDetailImage"
+        :src="fileUrl(file.image!)"
+        :alt="name"
+        class="model-card__img"
+      />
+      <ModelViewer v-else-if="showViewer" :rel="rel" show-info :auto-rotate="false" />
+      <div v-else class="file-detail-placeholder">
+        <span class="ph-badge">{{ type.toUpperCase() }}</span>
+        <p>
+          {{
+            isGcode
+              ? 'Aucun aperçu trouvé dans ce G-code.'
+              : 'Aperçu 3D non disponible pour ce type de fichier.'
+          }}
+        </p>
+      </div>
     </div>
+
+    <aside class="detail__side">
+      <dl class="meta-table">
+        <div class="meta-row"><dt>Fichier</dt><dd>{{ name }}</dd></div>
+        <div class="meta-row"><dt>Type</dt><dd>{{ type.toUpperCase() }}</dd></div>
+        <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
+        <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
+      </dl>
+
+      <!-- Note du fichier (Markdown) : affichage + édition assistée. -->
+      <NotePanel v-if="file" :key="rel" :rel="rel" :note="file.note" />
+    </aside>
   </div>
-
-  <dl class="meta-table">
-    <div class="meta-row"><dt>Fichier</dt><dd>{{ name }}</dd></div>
-    <div class="meta-row"><dt>Type</dt><dd>{{ type.toUpperCase() }}</dd></div>
-    <div class="meta-row"><dt>Chemin</dt><dd :title="rel">{{ rel }}</dd></div>
-    <div class="meta-row"><dt>Modifié</dt><dd>{{ when }}</dd></div>
-  </dl>
-
-  <!-- Note du fichier (Markdown) : affichage + édition assistée. -->
-  <NotePanel v-if="file" :key="rel" :rel="rel" :note="file.note" />
 </template>
