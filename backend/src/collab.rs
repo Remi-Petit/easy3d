@@ -384,11 +384,12 @@ fn handle_frame(room: &Room, data: &[u8]) -> Handled {
 /// le décodage, le reste n'étant pas exploitable.
 fn apply_frame(awareness: &mut Awareness, data: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let mut decoder = DecoderV1::new(Cursor::new(data));
-    let mut reader = MessageReader::new(&mut decoder);
+    // `for` consomme le lecteur (et clippy refuse `while let Some(_) = reader.next()`).
+    let reader = MessageReader::new(&mut decoder);
     let mut replies = Vec::new();
     let mut relay = Vec::new();
 
-    while let Some(result) = reader.next() {
+    for result in reader {
         let Ok(message) = result else { break };
 
         // Seules les modifications du document et la présence intéressent les
@@ -726,9 +727,7 @@ mod tests {
                 let replies = peer.receive(&frame.into_data());
                 for reply in replies {
                     if socket
-                        .send(tokio_tungstenite::tungstenite::Message::Binary(
-                            reply.into(),
-                        ))
+                        .send(tokio_tungstenite::tungstenite::Message::Binary(reply))
                         .await
                         .is_err()
                     {
@@ -748,9 +747,7 @@ mod tests {
             let replies = peer.receive(&frame.into_data());
             for reply in replies {
                 let _ = socket
-                    .send(tokio_tungstenite::tungstenite::Message::Binary(
-                        reply.into(),
-                    ))
+                    .send(tokio_tungstenite::tungstenite::Message::Binary(reply))
                     .await;
             }
         }
@@ -758,9 +755,7 @@ mod tests {
 
     async fn envoyer(socket: &mut Socket, frame: Vec<u8>) {
         socket
-            .send(tokio_tungstenite::tungstenite::Message::Binary(
-                frame.into(),
-            ))
+            .send(tokio_tungstenite::tungstenite::Message::Binary(frame))
             .await
             .unwrap();
     }
