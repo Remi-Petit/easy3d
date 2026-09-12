@@ -188,3 +188,9 @@ cd backend && cargo test
 # frontend
 cd frontend && bun run test
 ```
+
+- `backend/src/mcp.rs` teste les **outils** MCP (catalogue, CRUD des notes via le
+  CRDT, gating des outils destructeurs, configuration).
+- `backend/tests/mcp_http.rs` teste le **transport** MCP à travers le Router axum :
+  handshake `initialize`, en-tête de session, `tools/list` (schémas d'entrée),
+  `tools/call` en lecture et en écriture, refus sans session.
