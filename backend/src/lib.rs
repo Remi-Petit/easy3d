@@ -7,6 +7,7 @@
 //! - [`formats`] : formats de fichiers reconnus (**un fichier par format**) et
 //!   registre qui les expose au scan, aux aperçus et aux types MIME.
 //! - [`thumbnail`] : cache et génération des aperçus PNG.
+//! - [`mcp`] : serveur MCP (agents) monté sur `/mcp`, même process.
 //! - [`notes`] : notes Markdown associées aux dossiers et fichiers.
 //! - [`collab`] : édition collaborative des notes (CRDT Yjs).
 
@@ -14,6 +15,7 @@ pub mod api;
 pub mod collab;
 pub mod config;
 pub mod formats;
+pub mod mcp;
 pub mod notes;
 pub mod scanner;
 pub mod thumbnail;

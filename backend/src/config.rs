@@ -10,11 +10,12 @@
 //! `main.rs`). Toute modification est appliquée sans redémarrer le serveur, et
 //! la nouvelle configuration est diffusée au frontend via le WebSocket.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Mode d'affichage des modèles côté interface.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum DisplayMode {
     /// Vue interactive (Three.js / WebGL).
     #[default]
@@ -75,6 +76,24 @@ impl Config {
     /// `true` si l'on doit afficher les modèles en image statique.
     pub fn is_image_mode(&self) -> bool {
         self.display.mode == DisplayMode::Image
+    }
+
+    /// Écrit la configuration dans `path`.
+    ///
+    /// Le YAML est régénéré depuis la structure : les commentaires du fichier
+    /// d'origine ne survivent pas, d'où l'en-tête explicite. Appelé par
+    /// `PUT /config` et par les outils MCP de configuration.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let body = serde_yaml::to_string(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let yaml = format!(
+            "# easy3d — configuration de l'application\n\
+             #\n\
+             # Fichier réécrit par l'interface d'administration (PUT /config) :\n\
+             # les commentaires d'origine sont remplacés par cet en-tête.\n\
+             # Relu à chaud par le serveur, qui surveille ce fichier.\n\n{body}"
+        );
+        std::fs::write(path, yaml)
     }
 
     /// Chemin **résolu** du dossier des modèles.

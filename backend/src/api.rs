@@ -10,6 +10,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -77,6 +79,14 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     println!("API HTTP : http://{addr}/models");
+    println!(
+        "MCP      : http://{addr}/mcp (outils destructeurs : {})",
+        if crate::mcp::destructive_allowed_from_env() {
+            "activés"
+        } else {
+            "désactivés — EASY3D_MCP_ALLOW_WRITE=1 pour les activer"
+        }
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -86,6 +96,19 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 /// Extraite de [`serve`] pour que les tests montent exactement le même
 /// serveur que la production.
 pub fn routes(state: AppState) -> Router {
+    // Serveur MCP monté sur `/mcp` (transport Streamable HTTP, voir `crate::mcp`).
+    // Il partage l'état : les outils lisent le catalogue courant et écrivent la
+    // configuration et les notes par les mêmes chemins que l'interface.
+    let mcp: StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager> =
+        StreamableHttpService::new(
+            {
+                let state = state.clone();
+                move || Ok(crate::mcp::Easy3dMcp::new(state.clone()))
+            },
+            Arc::new(LocalSessionManager::default()),
+            StreamableHttpServerConfig::default(),
+        );
+
     Router::new()
         .route("/models", get(list_models))
         .route("/config", get(get_config).put(put_config))
@@ -94,6 +117,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/ws", get(ws_models))
         .route("/collab/{*rel}", get(ws_collab))
+        .nest_service("/mcp", mcp)
         .with_state(state)
 }
 
@@ -165,7 +189,7 @@ impl ConfigResponse {
 
 /// Chemin lisible : Windows préfixe ses chemins canoniques par `\\?\`, ce qui
 /// n'a d'intérêt que pour le système de fichiers.
-fn tidy_path(path: &Path) -> String {
+pub fn tidy_path(path: &Path) -> String {
     let text = path.to_string_lossy();
     text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
 }
@@ -188,6 +212,18 @@ async fn put_config(
     State(state): State<AppState>,
     Json(config): Json<Config>,
 ) -> Result<Json<ConfigResponse>, (StatusCode, String)> {
+    apply_config(&state, config).map(Json)
+}
+
+/// Valide, enregistre et applique une configuration.
+///
+/// Utilisé par `PUT /config` **et** par les outils MCP de configuration : un seul
+/// comportement, donc un seul jeu de règles (dossier existant, écriture du YAML,
+/// application immédiate si la racine ne change pas).
+pub fn apply_config(
+    state: &AppState,
+    config: Config,
+) -> Result<ConfigResponse, (StatusCode, String)> {
     // Refuse une config qui pointerait vers un dossier inexistant : le watcher
     // basculerait dessus et le catalogue se viderait.
     let root = config.resolve_models_root();
@@ -201,25 +237,14 @@ async fn put_config(
     // Rien à écrire si rien n'a changé : ça évite de réécrire le fichier (et de
     // perdre ses commentaires) pour rien.
     if config == state.config() {
-        return Ok(Json(ConfigResponse::of(config)));
+        return Ok(ConfigResponse::of(config));
     }
 
     let path = state.config_path.as_ref();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(internal_error)?;
     }
-
-    // Le YAML est régénéré depuis la config : les commentaires du fichier
-    // d'origine ne survivent pas, d'où l'en-tête explicite.
-    let body = serde_yaml::to_string(&config).map_err(internal_error)?;
-    let yaml = format!(
-        "# easy3d — configuration de l'application\n\
-         #\n\
-         # Fichier réécrit par l'interface d'administration (PUT /config) :\n\
-         # les commentaires d'origine sont remplacés par cet en-tête.\n\
-         # Relu à chaud par le serveur, qui surveille ce fichier.\n\n{body}"
-    );
-    std::fs::write(path, yaml).map_err(internal_error)?;
+    config.save(path).map_err(internal_error)?;
 
     // Application immédiate **si le dossier ne change pas** : sinon il faut
     // attendre le watcher, qui n'applique qu'après son délai de regroupement
@@ -232,10 +257,10 @@ async fn put_config(
     let same_root = std::fs::canonicalize(&root).ok() == std::fs::canonicalize(state.root()).ok();
     if same_root {
         *state.config.write().unwrap() = config.clone();
-        broadcast_snapshot(&state);
+        broadcast_snapshot(state);
     }
 
-    Ok(Json(ConfigResponse::of(config)))
+    Ok(ConfigResponse::of(config))
 }
 
 /// Erreur interne (écriture du fichier, sérialisation) → 500 avec le message.
