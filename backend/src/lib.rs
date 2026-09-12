@@ -4,14 +4,17 @@
 //! - [`scanner`] : scan récursif d'un dossier + métadonnées.
 //! - [`watcher`] : description lisible des événements du debouncer.
 //! - [`config`] : configuration application (fichier YAML).
-//! - [`render`] : génération d'aperçus PNG côté backend (STL / OBJ / 3MF).
+//! - [`formats`] : formats de fichiers reconnus (**un fichier par format**) et
+//!   registre qui les expose au scan, aux aperçus et aux types MIME.
+//! - [`thumbnail`] : cache et génération des aperçus PNG.
 //! - [`notes`] : notes Markdown associées aux dossiers et fichiers.
 //! - [`collab`] : édition collaborative des notes (CRDT Yjs).
 
 pub mod api;
 pub mod collab;
 pub mod config;
+pub mod formats;
 pub mod notes;
-pub mod render;
 pub mod scanner;
+pub mod thumbnail;
 pub mod watcher;
