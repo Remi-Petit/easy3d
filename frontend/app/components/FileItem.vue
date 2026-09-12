@@ -8,18 +8,18 @@ const props = withDefaults(
 )
 
 const now = useNow()
+const { viewerOf, showsViewer } = useFormats()
 const name = computed(() => basename(props.file.path))
 const type = computed(() => ext(props.file.path) || '?')
 const when = useTimeAgo(() => props.file.modified)
-const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
-const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
+/** Visionneuse du format de ce fichier : `mesh`, `gcode` ou `none` (inconnu). */
+const viewer = computed(() => viewerOf(props.file.rel))
+const isGcode = computed(() => viewer.value === 'gcode')
 /**
- * Rendu 3D interactif : toujours pour un modèle ; pour un G-code seulement en
+ * Rendu 3D interactif : toujours pour un maillage ; pour un G-code seulement en
  * mode `3d` (en mode `image` on préfère l'aperçu statique du slicer).
  */
-const show3d = computed(
-  () => isModel.value || (isGcode.value && props.displayMode === '3d'),
-)
+const show3d = computed(() => showsViewer(props.file.rel, props.displayMode))
 /** Chemin relatif encodé -> URL `/fichier/[rel]`. */
 const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)
 
@@ -28,7 +28,7 @@ const showImage = computed(() => props.displayMode === 'image' && !!props.file.i
 </script>
 
 <template>
-  <article class="model-card" :class="{ 'model-card--file': !isModel && !isGcode }">
+  <article class="model-card" :class="{ 'model-card--file': viewer === 'none' }">
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img

@@ -110,6 +110,9 @@ pub struct ModelsResponse {
     pub folders: BTreeMap<String, FolderInfo>,
     pub files: Vec<FileInfo>,
     pub count: usize,
+    /// Formats reconnus (extensions, aperçu, visionneuse) : le frontend n'a
+    /// ainsi aucune extension codée en dur.
+    pub formats: Vec<formats::FormatInfo>,
     /// Configuration applicative, exposée au frontend.
     pub config: Config,
 }
@@ -122,6 +125,7 @@ impl ModelsResponse {
             folders: scan.folders,
             files: scan.files,
             count,
+            formats: formats::describe(),
             config: config.clone(),
         }
     }
@@ -532,6 +536,20 @@ mod tests {
         assert_eq!(folder["count"], 2);
         let folder_files = folder["files"].as_array().unwrap();
         assert_eq!(folder_files.len(), 2);
+
+        // Les formats reconnus accompagnent la liste : le frontend s'en sert
+        // pour l'affichage, sans extensions codées en dur.
+        let formats = v["formats"].as_array().unwrap();
+        let gcode = formats
+            .iter()
+            .find(|f| f["name"] == "G-code")
+            .expect("le G-code est annoncé");
+        assert_eq!(gcode["extensions"], serde_json::json!(["gcode", "gco"]));
+        assert_eq!(gcode["viewer"], "gcode");
+        assert_eq!(gcode["preview"], true);
+
+        let stl = formats.iter().find(|f| f["name"] == "STL").unwrap();
+        assert_eq!(stl["viewer"], "mesh");
     }
 
     #[tokio::test]

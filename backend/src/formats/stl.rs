@@ -4,6 +4,7 @@
 //! sont Z-up, d'où la rotation de rattrapage en Y-up.
 
 use super::Format;
+use super::Viewer;
 use super::mesh::{self, Mesh};
 use std::fs;
 use std::path::Path;
@@ -29,6 +30,10 @@ impl Format for Stl {
 
     fn has_preview(&self) -> bool {
         true
+    }
+
+    fn viewer(&self) -> Viewer {
+        Viewer::Mesh
     }
 
     fn thumbnail(&self, path: &Path, out: &Path) -> Option<()> {

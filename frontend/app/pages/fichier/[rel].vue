@@ -23,15 +23,17 @@ const file = computed<FileInfo | null>(() => {
 
 const name = computed(() => basename(rel.value))
 const type = computed(() => ext(rel.value) || '?')
-const isModel = computed(() => ['stl', 'obj', '3mf'].includes(type.value))
-const isGcode = computed(() => ['gcode', 'gco'].includes(type.value))
+const { viewerOf } = useFormats()
+/** Visionneuse du format : `mesh`, `gcode` ou `none` (format sans rendu). */
+const viewer = computed(() => viewerOf(rel.value))
 const when = useTimeAgo(() => file.value?.modified ?? null)
 /**
- * La page détail fait exception au réglage global : un modèle (STL / OBJ / 3MF)
- * ou un G-code y est **toujours** rendu en 3D, même si le catalogue est réglé
- * sur « aperçu image ». Le mode `image` ne concerne donc que les vignettes.
+ * La page détail fait exception au réglage global : tout fichier dont le format
+ * a une visionneuse (maillage STL / OBJ / 3MF, G-code) y est **toujours** rendu
+ * en 3D, même si le catalogue est réglé sur « aperçu image ». Le mode `image`
+ * ne concerne donc que les vignettes.
  */
-const showViewer = computed(() => isModel.value || isGcode.value)
+const showViewer = computed(() => viewer.value !== 'none')
 
 // En-tête global (rendu par le layout `default`).
 usePageHeader(() => ({
