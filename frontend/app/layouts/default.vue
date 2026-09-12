@@ -5,8 +5,9 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 // panneau), habillée avec les tokens de l'app (voir `main.css`).
 //
 // La sidebar porte l'identité de l'app, la navigation et l'état du backend.
-// Le panneau porte le titre de la **page courante** (déduit de la route, donc
-// identique côté serveur et client) et la barre de filtres, collée en haut.
+// Le panneau porte, en haut, le titre de la **page courante** — déduit de la
+// route, donc identique côté serveur et client — puis la barre de filtres,
+// collée sous ce titre.
 const route = useRoute()
 const header = usePageHeaderState()
 
@@ -18,7 +19,7 @@ const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIc
 const title = computed(() => {
   if (route.params.name) return decodeURIComponent(String(route.params.name))
   if (route.params.rel) return basename(decodeURIComponent(String(route.params.rel)))
-  return 'easy3d'
+  return 'Models'
 })
 
 const isHome = computed(() => route.path === '/')
@@ -110,59 +111,65 @@ const navUi = {
       </template>
     </UDashboardSidebar>
 
-    <!-- Pas de `#header` : la navbar ne portait que le titre / sous-titre de la
-         page, en doublon du générique de la sidebar et des compteurs. -->
     <UDashboardPanel id="catalog" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
+      <!--
+        En-tête : titre de la page courante. Sur les pages de détail, il est
+        complété par le contexte (nombre de fichiers, type et date) ; sur
+        l'accueil, le titre "Models" se suffit à lui-même.
+        La navbar porte aussi la bascule du tiroir sous `lg`.
+      -->
+      <template #header>
+        <UDashboardNavbar>
+          <template #title>{{ title }}</template>
+          <template #trailing>
+            <small v-if="!isHome" class="navbar__subtitle">{{ header.subtitle }}</small>
+          </template>
+        </UDashboardNavbar>
+      </template>
+
       <template #body>
-        <!-- Barre haute collée en haut de la zone de défilement : bascule du
-             tiroir (mobile, déjà `lg:hidden`), puis recherche, tri et types. -->
-        <div class="topbar">
-          <UDashboardSidebarToggle class="topbar__toggle" />
-
-          <div v-if="showFilter" class="topbar__filters">
-            <div class="toolbar">
-              <div class="search">
-                <span class="icon">🔍</span>
-                <input v-model="query" type="text" :placeholder="placeholder" />
-              </div>
-              <button
-                type="button"
-                class="sort"
-                :class="`sort--${sortMode}`"
-                :title="`Trier par ${sortLabel} (cliquer pour changer)`"
-                :aria-label="`Trier par ${sortLabel}`"
-                @click="cycleSort"
-              >
-                <span class="sort__icon">{{ sortIcon }}</span>
-                <span class="sort__label">Date</span>
-              </button>
+        <!-- Barre de recherche + filtres, collée sous l'en-tête pendant le
+             défilement. -->
+        <div v-if="showFilter" class="topbar">
+          <div class="toolbar">
+            <div class="search">
+              <span class="icon">🔍</span>
+              <input v-model="query" type="text" :placeholder="placeholder" />
             </div>
+            <button
+              type="button"
+              class="sort"
+              :class="`sort--${sortMode}`"
+              :title="`Trier par ${sortLabel} (cliquer pour changer)`"
+              :aria-label="`Trier par ${sortLabel}`"
+              @click="cycleSort"
+            >
+              <span class="sort__icon">{{ sortIcon }}</span>
+              <span class="sort__label">Date</span>
+            </button>
+          </div>
 
-            <!-- Filtre par type : formats détectés dans la vue courante. -->
-            <div v-if="availableTypes.length > 1" class="types">
-              <button
-                v-for="entry in availableTypes"
-                :key="entry.type"
-                type="button"
-                class="types__item"
-                :class="{ 'types__item--on': types.includes(entry.type) }"
-                :aria-pressed="types.includes(entry.type)"
-                :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
-                @click="toggle(entry.type)"
-              >
-                {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
-              </button>
-              <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
-                ✕ Effacer
-              </button>
-            </div>
+          <!-- Filtre par type : formats détectés dans la vue courante. -->
+          <div v-if="availableTypes.length > 1" class="types">
+            <button
+              v-for="entry in availableTypes"
+              :key="entry.type"
+              type="button"
+              class="types__item"
+              :class="{ 'types__item--on': types.includes(entry.type) }"
+              :aria-pressed="types.includes(entry.type)"
+              :title="`Filtrer : ${entry.count} fichier(s) ${entry.type.toUpperCase()}`"
+              @click="toggle(entry.type)"
+            >
+              {{ entry.type.toUpperCase() }} <b>{{ entry.count }}</b>
+            </button>
+            <button v-if="hasTypeFilter" type="button" class="types__clear" @click="clearTypes()">
+              ✕ Effacer
+            </button>
           </div>
         </div>
 
         <div class="page">
-          <!-- Titre de la page : le design n'a plus d'en-tête, mais le document
-               a besoin d'un titre (lecteurs d'écran, tests e2e). -->
-          <h1 class="sr-only">{{ title }}</h1>
           <slot />
         </div>
       </template>
