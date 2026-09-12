@@ -1,3 +1,35 @@
+/* --- Nuxt UI (branche de test) -------------------------------------------
+   Tailwind + le thème des composants. Les `@import` restent en tête de
+   fichier, avant les règles de l'app. */
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* --- Mapping des tokens Nuxt UI sur la palette maison ---------------------
+   L'app a son propre vocabulaire (--bg, --surface, --accent…). On le branche
+   sur les tokens de Nuxt UI pour que sidebar, navbar et menus héritent du
+   thème existant au lieu de leurs couleurs par défaut. Ces règles ne sont pas
+   dans un `@layer` : elles l'emportent donc sur celles de Tailwind. */
+:root,
+.dark {
+  --ui-bg: var(--bg);
+  --ui-bg-muted: var(--surface);
+  --ui-bg-elevated: var(--surface);
+  --ui-bg-accented: var(--surface-2);
+  --ui-border: var(--border);
+  --ui-border-muted: var(--border);
+  --ui-border-accented: var(--border);
+  --ui-text: var(--text);
+  --ui-text-muted: var(--muted);
+  --ui-text-dimmed: var(--muted);
+  --ui-text-highlighted: #f1f5f9;
+  --ui-primary: var(--accent);
+  --ui-secondary: var(--accent-2);
+  --ui-success: var(--ok);
+  --ui-error: var(--err);
+  --ui-radius: var(--radius-sm);
+  --ui-header-height: 64px;
+}
+
 :root {
   --bg: #0a0e16;
   --surface: #121826;
@@ -36,166 +68,53 @@ a {
   text-decoration: none;
 }
 
-/* ---------- Coquille : sidebar + contenu ---------- */
-.shell {
-  min-height: 100vh;
-}
+/* ---------- Coquille (composants Nuxt UI) ---------- */
+/* Le shell — sidebar repliable/redimensionnable, navbar, tiroir mobile — est
+   fourni par Nuxt UI (UDashboardGroup / Sidebar / Panel / Navbar). Ci-dessous
+   seulement ce que ses composants ne couvrent pas. */
 
-.sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 30;
-  width: var(--sidebar-w);
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  padding: 22px 16px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-}
-
-.sidebar .brand {
-  padding: 0 8px;
-}
-
-/* État du backend, plaqué en bas de la colonne. */
-.sidebar__foot {
-  margin-top: auto;
-}
-
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.nav__section {
-  margin: 0 0 6px;
-  padding: 0 12px;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.nav__item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 600;
-  transition: background 0.15s, color 0.15s;
-}
-
-.nav__item:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.nav__item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Section courante : teinte d'accent + liseré, comme les puces actives. */
-.nav__item--on {
-  background: var(--accent-soft);
-  color: var(--text);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.nav__icon {
+/* Nom de l'app dans la sidebar : volontairement pas un titre, le <h1> est
+   celui de la page, rendu par la navbar. */
+.brand__name {
+  margin: 0;
   font-size: 15px;
-  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
-.content {
-  margin-left: var(--sidebar-w);
-  min-width: 0;
-  padding: 24px 24px 60px;
+/* Sous-titre de la page, à côté du titre dans la navbar. */
+.navbar__subtitle {
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Colonne de lecture, centrée dans l'espace laissé par la sidebar
-   (même largeur maximale que l'ancien conteneur centré). */
-.header,
-.main {
-  max-width: 1180px;
-  margin-inline: auto;
-}
-
-/* Bouton ☰ : masqué tant que la sidebar est une colonne fixe. */
-.burger {
-  display: none;
-  appearance: none;
-  position: fixed;
-  top: 12px;
-  left: 12px;
-  z-index: 40;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  color: var(--text);
-  font-size: 17px;
-  cursor: pointer;
-}
-
-.burger:hover {
-  border-color: var(--accent);
-}
-
-/* Voile du tiroir : assombrit le contenu derrière la sidebar. */
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 35;
-  background: rgba(4, 7, 12, 0.6);
-}
-
-/* ---------- Header ---------- */
-/* Recherche + filtres : reste collé en haut pendant le défilement. */
-.header {
+/* Barre de recherche + filtres : collée en haut de la zone de défilement
+   (le corps du panneau Nuxt UI est le conteneur qui défile). */
+.filters {
   position: sticky;
   top: 0;
-  z-index: 20;
-  padding: 4px 0 14px;
-  background: rgba(10, 14, 22, 0.86);
-  backdrop-filter: blur(10px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px 12px;
+  background: var(--bg);
 }
 
-/* Sous 900px : sidebar en tiroir, contenu pleine largeur. */
-@media (max-width: 900px) {
-  .sidebar {
-    width: min(84vw, 320px);
-    transform: translateX(-100%);
-    transition: transform 0.22s ease;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+/* Contenu de la page. */
+.page {
+  padding: 4px 24px 48px;
+}
+
+@media (max-width: 640px) {
+  .filters {
+    padding: 12px 16px 10px;
   }
 
-  .sidebar--open {
-    transform: none;
-  }
-
-  .content {
-    margin-left: 0;
-    padding: 64px 16px 48px;
-  }
-
-  .header {
-    position: static;
-    background: none;
-    backdrop-filter: none;
-  }
-
-  .burger {
-    display: grid;
+  .page {
+    padding: 4px 16px 40px;
   }
 }
 
@@ -205,7 +124,7 @@ a {
   gap: 12px;
 }
 
-/* Le titre est un nom de dossier/fichier : il peut être long et sans espace. */
+/* Le titre de la sidebar est un nom de dossier/fichier : il peut être long. */
 .brand > div:last-child {
   min-width: 0;
 }
@@ -220,13 +139,6 @@ a {
   font-weight: 800;
   font-size: 18px;
   color: #fff;
-}
-
-.brand h1 {
-  font-size: 20px;
-  margin: 0;
-  letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
 }
 
 .brand small {
