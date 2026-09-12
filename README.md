@@ -71,18 +71,6 @@ docker compose up -d
 Tes modèles se déposent dans `./models` : le dossier est monté dans le conteneur,
 il n'y a rien à importer.
 
-### Derrière un reverse proxy
-
-**Un seul port à publier : `3000`.** L'interface relaie tout le reste vers le
-backend — `/api/*` (HTTP), `/ws` (catalogue en temps réel) et `/collab/*` (notes
-collaboratives) — donc rien à configurer : le navigateur s'adresse toujours à
-l'origine qui sert la page, quel que soit le nom de domaine. Le port `8090`
-reste utile en direct (API, MCP) et n'a pas besoin d'être exposé pour que
-l'interface fonctionne.
-
-Si le temps réel doit vraiment être joint sur un autre hôte, une variable
-existe pour ça : `NUXT_PUBLIC_HPCCAT_WS_BASE=wss://autre-hote` (vide par défaut).
-
 ## Serveur MCP (agents IA)
 
 Le serveur MCP est **le backend lui-même** : rien à lancer en plus, il suffit que
