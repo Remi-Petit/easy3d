@@ -2,17 +2,14 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import de from '../../i18n/locales/de.json'
-import en from '../../i18n/locales/en.json'
-import es from '../../i18n/locales/es.json'
-import fr from '../../i18n/locales/fr.json'
 
 /**
  * Couverture des langues.
  *
- * Le français est la langue de référence : toute clé qu'il déclare doit exister
- * dans les autres langues, et **aucune autre** ne doit s'y ajouter (sinon on
- * traîne des clés mortes que personne ne pense à supprimer).
+ * La langue de référence (`defaultLocale` de `i18n/locales.json`, le français)
+ * fixe le contrat : toute clé qu'elle déclare doit exister dans les autres
+ * langues, et **aucune autre** ne doit s'y ajouter (sinon on traîne des clés
+ * mortes que personne ne pense à supprimer).
  *
  * Les variables (`{count}`, `{when}`…) sont vérifiées aussi : c'est l'erreur
  * qu'on ne voit qu'à l'exécution — une traduction qui perd un placeholder
@@ -44,9 +41,29 @@ function placeholders(value: string): string[] {
   return [...new Set([...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort()
 }
 
-const REFERENCE = 'fr'
-const reference = flatten(fr as Messages)
-const others: Record<string, Messages> = { en, de, es }
+/**
+ * Liste des langues, lue depuis le disque.
+ *
+ * `i18n/locales.json` est la seule source (config Nuxt, ce test, ligne du README) :
+ * les langues ne sont donc pas recopiées ici, et en ajouter une n'oblige à
+ * toucher que le dossier `i18n/locales/` et cette liste.
+ */
+type LocaleEntry = { code: string; name: string; language: string; file: string }
+
+const i18nDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../i18n')
+const registry = JSON.parse(readFileSync(join(i18nDir, 'locales.json'), 'utf8')) as {
+  defaultLocale: string
+  locales: LocaleEntry[]
+}
+const localeEntries = registry.locales
+const read = (entry: LocaleEntry): Messages =>
+  JSON.parse(readFileSync(join(i18nDir, 'locales', entry.file), 'utf8')) as Messages
+
+const REFERENCE = registry.defaultLocale
+const reference = flatten(read(localeEntries.find((entry) => entry.code === REFERENCE)!))
+const others: Record<string, Messages> = Object.fromEntries(
+  localeEntries.filter((entry) => entry.code !== REFERENCE).map((e) => [e.code, read(e)]),
+)
 const missingKeys = (messages: Messages) =>
   [...reference.keys()].filter((key) => !flatten(messages).has(key))
 
@@ -54,6 +71,20 @@ const extraKeys = (messages: Messages) =>
   [...flatten(messages).keys()].filter((key) => !reference.has(key))
 
 describe('couverture des langues', () => {
+  it('la liste déclare la langue de référence', () => {
+    expect(localeEntries.map((entry) => entry.code)).toContain(REFERENCE)
+  })
+
+  // La liste et le dossier doivent dire la même chose : un fichier de messages
+  // oublié dans `locales.json` ne serait ni traduit dans le sélecteur de langue,
+  // ni compté par le README ; une entrée sans fichier ferait échouer la lecture.
+  it('la liste correspond aux fichiers de `i18n/locales/`', () => {
+    const files = readdirSync(join(i18nDir, 'locales'))
+      .filter((file) => file.endsWith('.json'))
+      .sort()
+    expect(localeEntries.map((entry) => entry.file).sort()).toEqual(files)
+  })
+
   it('la référence déclare des clés', () => {
     expect(reference.size).toBeGreaterThan(50)
   })
