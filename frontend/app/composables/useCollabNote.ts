@@ -13,7 +13,7 @@
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { yCollab } from 'y-codemirror.next'
-import { collabBase, collabRoom } from '~/utils/collab'
+import { collabBase, collabRoom, type WsConfig } from '~/utils/collab'
 
 /**
  * Extensions CodeMirror à injecter au prochain éditeur d'un `editorId` donné.
@@ -72,7 +72,7 @@ export interface CollabNote {
  * fichier). Le composant qui l'utilise doit être recréé quand `rel` change.
  */
 export function useCollabNote(rel: string): CollabNote {
-  const pub = useRuntimeConfig().public as { hpccatWsBase?: string; hpccatApiBase?: string }
+  const pub = useRuntimeConfig().public as WsConfig
 
   const ydoc = new Y.Doc()
   const ytext = ydoc.getText('markdown')

@@ -77,11 +77,6 @@ ENV EASY3D_HOST=0.0.0.0
 # `/admin` le crée au premier enregistrement.
 ENV EASY3D_CONFIG=/config/config.yml
 
-# Le WebSocket est ouvert par le **navigateur** : il doit viser l'hôte, pas le
-# réseau interne du conteneur. À adapter (ou surcharger) si le catalogue n'est
-# pas consulté depuis localhost.
-ENV NUXT_PUBLIC_HPCCAT_WS_BASE=ws://localhost:8090
-
 # Le dossier des modèles arrive par un volume : on l'écrit (aperçus `.easy3d-thumbs/`,
 # notes `.easy3d-notes/`), tout comme `/config` que remplit la page `/admin`.
 # Les créer ici avec le bon propriétaire initialise les volumes nommés en
