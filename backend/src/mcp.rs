@@ -454,7 +454,9 @@ impl Easy3dMcp {
             })?;
 
         let metadata = std::fs::metadata(root.join(&args.rel)).ok();
-        let size_bytes = metadata.as_ref().and_then(|m| m.is_file().then_some(m.len()));
+        let size_bytes = metadata
+            .as_ref()
+            .and_then(|m| m.is_file().then_some(m.len()));
 
         Ok(Json(ModelDetail {
             format_has_preview: formats::can_have_preview(&file.rel),
