@@ -39,6 +39,43 @@ pub fn read(root: &Path, rel: &str) -> Option<String> {
     fs::read_to_string(note_path(root, rel)?).ok()
 }
 
+/// Chemin de l'**état CRDT** d'une note (`<rel>.ydoc`).
+///
+/// Le Markdown reste la projection lisible ; ce fichier binaire contient
+/// l'histoire Yjs du document, et c'est lui qui permet au serveur de repartir
+/// sur le **même** document après un redémarrage. Sans lui, il ré-amorcerait un
+/// document neuf : ses insertions et celles que les clients détiennent encore
+/// se cumuleraient, et la note apparaîtrait en double.
+pub fn state_path(root: &Path, rel: &str) -> Option<PathBuf> {
+    note_path(root, rel).map(|path| path.with_extension("ydoc"))
+}
+
+/// Lit l'état CRDT d'une note, s'il existe.
+pub fn read_state(root: &Path, rel: &str) -> Option<Vec<u8>> {
+    fs::read(state_path(root, rel)?).ok()
+}
+
+/// Écrit l'état CRDT d'une note.
+pub fn write_state(root: &Path, rel: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let path = state_path(root, rel).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "chemin de note invalide")
+    })?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, bytes)
+}
+
+/// Supprime l'état CRDT d'une note (note vidée).
+///
+/// Indispensable : sans suppression, un redémarrage ressusciterait le texte
+/// depuis ce document alors que le Markdown a disparu.
+pub fn remove_state(root: &Path, rel: &str) {
+    if let Some(path) = state_path(root, rel) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// Écrit la note d'un élément.
 ///
 /// Un contenu vide (ou blanc) **supprime** le fichier, pour ne pas laisser
@@ -95,17 +132,23 @@ pub fn move_for_path(root: &Path, from: &Path, to: &Path) -> std::io::Result<boo
     let notes_root = root.join(NOTES_DIR);
     let mut moved = false;
 
-    // 1. La note de l'élément lui-même (`.easy3d-notes/<rel>.md`).
-    if let (Some(old), Some(new)) = (note_path(root, &from_rel), note_path(root, &to_rel))
-        && old.is_file()
-        // On n'écrase jamais une note déjà en place à la destination.
-        && !new.exists()
-    {
-        if let Some(parent) = new.parent() {
-            fs::create_dir_all(parent)?;
+    // 1. La note de l'élément lui-même (`.easy3d-notes/<rel>.md`) et son état
+    //    CRDT (`.easy3d-notes/<rel>.ydoc`).
+    for (old, new) in [
+        (note_path(root, &from_rel), note_path(root, &to_rel)),
+        (state_path(root, &from_rel), state_path(root, &to_rel)),
+    ] {
+        let (Some(old), Some(new)) = (old, new) else {
+            continue;
+        };
+        // On n'écrase jamais un fichier déjà en place à la destination.
+        if old.is_file() && !new.exists() {
+            if let Some(parent) = new.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(&old, &new)?;
+            moved = true;
         }
-        fs::rename(&old, &new)?;
-        moved = true;
     }
 
     // 2. Le sous-arbre de notes, si c'est un dossier qui a été déplacé.

@@ -33,9 +33,9 @@ use yrs::encoding::read::Cursor;
 use yrs::sync::{
     Awareness, DefaultProtocol, Message as YMessage, MessageReader, Protocol, SyncMessage as YSync,
 };
-use yrs::updates::decoder::DecoderV1;
+use yrs::updates::decoder::{Decode, DecoderV1};
 use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
-use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact};
+use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
 
 /// Nom du type racine partagé. Doit être identique côté client
 /// (`ydoc.getText('markdown')`).
@@ -107,24 +107,49 @@ pub struct Room {
 }
 
 impl Room {
-    /// Crée le document d'une note à partir de son contenu sur disque.
+    /// Ouvre le document d'une note.
+    ///
+    /// Priorité à l'**état CRDT** persisté (`.easy3d-notes/<rel>.ydoc`) : c'est
+    /// la même histoire Yjs que celle détenue par les clients, donc une
+    /// reconnexion après redémarrage fusionne sans rien dupliquer. À défaut
+    /// (première ouverture, état illisible), on amorce un document neuf depuis
+    /// le Markdown — et on persiste aussitôt cet état.
     fn load(root: &Path, rel: &str) -> Self {
         let content = notes::read(root, rel).unwrap_or_default();
-
         let doc = Doc::new();
-        {
+
+        let loaded = notes::read_state(root, rel)
+            .and_then(|bytes| Update::decode_v1(&bytes).ok())
+            .map(|update| doc.transact_mut().apply_update(update).is_ok())
+            .unwrap_or(false);
+
+        if !loaded {
             let text = doc.get_or_insert_text(TEXT_KEY);
             let mut txn = doc.transact_mut();
             text.push(&mut txn, &content);
         }
 
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-        Room {
+        let room = Room {
             awareness: Mutex::new(Awareness::new(doc)),
             tx,
             last: Mutex::new(content),
             dirty: AtomicBool::new(false),
-        }
+        };
+
+        // Persiste l'état dès l'ouverture : c'est lui qui rend les redémarrages
+        // suivants idempotents (mêmes identifiants d'insertion pour les clients).
+        let _ = notes::write_state(root, rel, &room.encode_state());
+
+        room
+    }
+
+    /// État binaire complet du document CRDT (pour la persistance).
+    fn encode_state(&self) -> Vec<u8> {
+        let awareness = self.awareness.lock().unwrap();
+        let doc = awareness.doc();
+        doc.transact()
+            .encode_state_as_update_v1(&StateVector::default())
     }
 
     /// Contenu courant du document partagé.
@@ -174,9 +199,21 @@ fn flush(room: &Room, state: &AppState, rel: &str) -> bool {
     if *last == text {
         return true;
     }
-    if notes::write(&state.root(), rel, &text).is_err() {
+
+    let root = state.root();
+    if notes::write(&root, rel, &text).is_err() {
         return false;
     }
+
+    // L'état CRDT suit le Markdown : c'est lui qui permet de repartir sur le
+    // même document au prochain démarrage. Une note vidée est effacée (les
+    // deux fichiers), sinon elle ressusciterait depuis ce document.
+    if text.trim().is_empty() {
+        notes::remove_state(&root, rel);
+    } else if notes::write_state(&root, rel, &room.encode_state()).is_err() {
+        return false;
+    }
+
     let presence_changed = last.trim().is_empty() != text.trim().is_empty();
     *last = text;
     drop(last);
@@ -728,6 +765,46 @@ mod tests {
         assert!(
             !ouvert,
             "un chemin hors catalogue ne doit servir aucun document"
+        );
+    }
+
+    /// Un redémarrage du serveur ne doit pas dupliquer la note.
+    ///
+    /// Scénario réel : un client garde la note ouverte, le backend est relancé,
+    /// puis le client se resynchronise (à la reconnexion, `y-websocket` rejoue
+    /// tout son état). Sans l'état CRDT persisté (`.ydoc`), le serveur
+    /// ré-amorçait un document neuf : ses insertions se cumulaient avec celles
+    /// encore détenues par le client, et la note apparaissait en double.
+    #[tokio::test]
+    async fn un_redemarrage_ne_duplique_pas_la_note() {
+        let dir = catalogue();
+        let root = dir.path();
+        let rel = "sub/model.stl";
+
+        // Un client ouvre la note et écrit.
+        let mut peer = Peer::new(1);
+        peer.insert(0, "# Note");
+
+        let premier = state(root);
+        let (room, _rx) = Rooms::join(&premier, rel).unwrap();
+        let trame = peer.update();
+        exchange(&room, &mut peer, trame);
+        flush(&room, &premier, rel);
+        assert_eq!(notes::read(root, rel).as_deref(), Some("# Note"));
+
+        // Redémarrage : nouvel état serveur, mêmes fichiers sur disque.
+        let redemarre = state(root);
+        let (room, _rx) = Rooms::join(&redemarre, rel).unwrap();
+
+        // Le client rejoue son état complet, comme à la reconnexion.
+        let trame = peer.update();
+        exchange(&room, &mut peer, trame);
+        flush(&room, &redemarre, rel);
+
+        assert_eq!(
+            notes::read(root, rel).as_deref(),
+            Some("# Note"),
+            "la note a été dupliquée au redémarrage du serveur"
         );
     }
 }

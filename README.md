@@ -50,6 +50,10 @@ cargo run
   `models/.easy3d-notes/`, en miroir de l'arborescence (`DemaAuto/x.stl` →
   `.easy3d-notes/DemaAuto/x.stl.md`). Le dossier est ignoré par le scan et par la
   surveillance, qui l'écrit lui-même.
+- Chaque note a un **compagnon binaire** `<rel>.ydoc` (état CRDT) à côté du `.md`.
+  Il permet au serveur de repartir sur le **même** document Yjs après un redémarrage :
+  sans lui, il ré-amorçait un document neuf, et les insertions encore détenues par les
+  clients connectés se cumulaient avec les siennes (texte en double).
 - Le champ `rel` est le chemin relatif à la racine, utilisé par le frontend pour `/file`.
 - Sécurité : `/file` rejette la traversée de dossier (`..`, chemins absolus).
 - Surveille `./models` (via `MODELS_ROOT`, relatif au repo par défaut).
