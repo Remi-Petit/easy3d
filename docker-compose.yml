@@ -1,50 +1,14 @@
-# easy3d : **un seul conteneur**, qui sert l'interface Nuxt (SSR) et l'API Rust
-# (HTTP + WebSocket + MCP).
-#
-#   docker compose -f docker-compose.yml up --build
-#
-#   interface : http://localhost:3000
-#   API + MCP : http://localhost:8090   (MCP sur http://localhost:8090/mcp)
-#
-# Les modèles sont lus **et écrits** dans `./models` (aperçus `.easy3d-thumbs/`,
-# notes `.easy3d-notes/`) : ce que tu déposes dans le dossier du dépôt apparaît
-# en direct dans l'interface.
-name: easy3d
-
 services:
   easy3d:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: easy3d:latest
+    image: ghcr.io/remi-petit/easy3d:latest
+    container_name: easy3d
     restart: unless-stopped
     ports:
-      - "3000:3000" # interface
-      - "8090:8090" # API, WebSocket du catalogue (/ws), collab (/collab/…), MCP (/mcp)
+      - "3000:3000" # interface web : catalogue, aperçu 3D, notes
+      - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
     volumes:
-      - ./models:/models
-      # La page /admin réécrit la configuration (PUT /config) : on lui donne un
-      # dossier persistant plutôt que le chemin interne de l'image. Au premier
-      # démarrage il est vide : les défauts + `MODELS_ROOT` s'appliquent, puis le
-      # premier enregistrement depuis /admin crée le fichier.
-      - easy3d-config:/config
-
-    # Rien à passer en `environment` : les ports, `MODELS_ROOT`, `EASY3D_CONFIG`
-    # et l'URL de l'API ont déjà les bonnes valeurs dans l'image. Pour changer un
-    # réglage, décommenter l'entrée correspondante sous `environment:` :
-    #
-    # environment:
-    #   # Outils MCP destructeurs (`delete_note`, `set_models_root`) — voir README.
-    #   EASY3D_MCP_ALLOW_WRITE: "1"
-    #   # Le WebSocket est ouvert par le **navigateur** : à adapter si le
-    #   # catalogue n'est pas consulté depuis localhost.
-    #   NUXT_PUBLIC_HPCCAT_WS_BASE: ws://mon-serveur:8090
-    #
-    # Sur Linux, un bind mount appartient à ton utilisateur : si son uid n'est pas
-    # 1000 (celui de l'utilisateur `node` de l'image), décommente en adaptant,
-    # sinon l'API ne pourra pas écrire les aperçus ni les notes.
-    #
-    # user: "1000:1000"
+      - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
+      - easy3d-config:/config # configuration, réécrite par la page /admin
 
 volumes:
   easy3d-config:
