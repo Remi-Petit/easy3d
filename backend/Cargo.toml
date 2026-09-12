@@ -20,6 +20,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 zip = "2"
 roxmltree = "0.20"
 yrs = { version = "0.27.4", features = ["sync"] }
+rmcp = { version = "3.3.0", features = ["transport-streamable-http-server"] }
+schemars = "1.2.2"
 
 [dev-dependencies]
 tempfile = "3"
