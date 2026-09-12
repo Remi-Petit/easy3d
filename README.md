@@ -1,5 +1,8 @@
 # easy3d
 
+[![release](https://img.shields.io/github/v/release/Remi-Petit/easy3d?sort=semver&label=release)](https://github.com/Remi-Petit/easy3d/releases/latest)
+[![CI](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml/badge.svg)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml)
+
 Catalogue de modèles 3D **auto-hébergé** : un dossier de fichiers (STL, OBJ, 3MF,
 G-code), une interface pour le parcourir, et un serveur MCP pour qu'un agent IA
 puisse le lire — et le documenter.
