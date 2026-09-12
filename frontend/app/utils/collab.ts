@@ -10,20 +10,37 @@
 /** Configuration publique du frontend (`runtimeConfig.public`). */
 export interface WsConfig {
   hpccatWsBase?: string
-  hpccatApiBase?: string
 }
 
-/** Base WebSocket du backend, dérivée de la configuration. */
-export function wsBase(pub?: WsConfig): string {
-  const base =
-    pub?.hpccatWsBase ||
-    (pub?.hpccatApiBase ? String(pub.hpccatApiBase).replace(/^http/, 'ws') : '')
-  return base.replace(/\/+$/, '')
+/** Origine de la page, telle qu'il faut pour en déduire une URL WebSocket. */
+export interface WsOrigin {
+  protocol: string
+  host: string
+}
+
+/**
+ * Base WebSocket du temps réel.
+ *
+ * Priorité à `NUXT_PUBLIC_HPCCAT_WS_BASE` si elle est posée ; sinon **l'origine
+ * de la page**. Nitro relaie `/ws` (catalogue) et `/collab/*` (notes) vers le
+ * backend, donc le navigateur n'a aucune adresse de backend à connaître : le
+ * site fonctionne tel qu'il est servi, proxy ou pas.
+ *
+ * L'ancien défaut, `ws://localhost:8090`, désignait la machine du **visiteur** :
+ * ouverte depuis un autre poste, l'interface se connectait donc au conteneur
+ * local de celui qui regardait, et non au serveur.
+ */
+export function wsBase(pub?: WsConfig, here?: WsOrigin): string {
+  const configured = (pub?.hpccatWsBase || '').replace(/\/+$/, '')
+  if (configured) return configured
+  const origin = here ?? (typeof location === 'undefined' ? undefined : location)
+  if (!origin) return ''
+  return `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}`
 }
 
 /** Base de la route collaborative, sans slash final (`ws://…/collab`). */
-export function collabBase(pub?: WsConfig): string {
-  return `${wsBase(pub)}/collab`
+export function collabBase(pub?: WsConfig, here?: WsOrigin): string {
+  return `${wsBase(pub, here)}/collab`
 }
 
 /**
@@ -42,8 +59,8 @@ export function collabRoom(rel: string): string {
 }
 
 /** URL WebSocket complète du document d'une note. */
-export function collabUrl(pub: WsConfig | undefined, rel: string): string {
-  return `${collabBase(pub)}/${collabRoom(rel)}`
+export function collabUrl(pub: WsConfig | undefined, rel: string, here?: WsOrigin): string {
+  return `${collabBase(pub, here)}/${collabRoom(rel)}`
 }
 
 /**

@@ -37,6 +37,16 @@ const showImage = computed(() => props.displayMode === 'image' && !!preview.valu
 const show3d = computed(() =>
   preview.value ? showsViewer(preview.value.rel, props.displayMode) : false,
 )
+/**
+ * L'aperçu du dossier est emprunté à l'un de ses fichiers : s'il ne charge pas
+ * (fichier déplacé depuis le scan), on montre le repli au lieu d'une image
+ * cassée.
+ */
+const imageFailed = ref(false)
+watch(
+  () => preview.value?.image,
+  () => (imageFailed.value = false),
+)
 </script>
 
 <template>
@@ -44,11 +54,12 @@ const show3d = computed(() =>
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img
-          v-if="showImage"
+          v-if="showImage && !imageFailed"
           :src="fileUrl(preview!.image!)"
           :alt="folder.name"
           class="model-card__img"
           loading="lazy"
+          @error="imageFailed = true"
         />
         <ModelThumbnail v-else-if="show3d" :rel="preview!.rel" />
         <div v-else class="model-card__ph ph--other">

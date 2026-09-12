@@ -45,11 +45,19 @@ export default defineNuxtConfig({
       process.env.NUXT_HPCCAT_API_BASE ||
       `http://127.0.0.1:${process.env.NUXT_HPCCAT_API_PORT || '8090'}`,
     public: {
-      // Base WebSocket du backend (exposée au navigateur pour la connexion WS).
-      // Priorité : NUXT_HPCCAT_WS_BASE, sinon dérivée du port API.
-      hpccatWsBase:
-        process.env.NUXT_HPCCAT_WS_BASE ||
-        `ws://127.0.0.1:${process.env.NUXT_HPCCAT_API_PORT || '8090'}`,
+      // Base WebSocket vue par le navigateur. Vide par défaut : les connexions
+      // visent l'origine qui sert l'interface, Nitro relayant `/ws` et
+      // `/collab/*` vers le backend (voir `server/routes/`). À poser seulement
+      // si le temps réel doit être joint sur un autre hôte que l'interface.
+      hpccatWsBase: process.env.NUXT_PUBLIC_HPCCAT_WS_BASE || '',
+    },
+  },
+  // Le temps réel (catalogue `/ws`, notes `/collab/*`) est relayé par Nitro
+  // vers le backend (voir `server/routes/`) : sans ce drapeau, Nitro refuse
+  // l'upgrade et les deux routes répondent 426.
+  nitro: {
+    experimental: {
+      websocket: true,
     },
   },
   compatibilityDate: '2026-08-28',

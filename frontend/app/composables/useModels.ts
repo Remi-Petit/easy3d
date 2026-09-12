@@ -1,5 +1,6 @@
 // Types alignés sur le JSON du backend Rust (scanner.rs / api.rs).
 import { DEFAULT_FORMATS, type FormatInfo } from '~/utils/formats'
+import type { WsConfig } from '~/utils/collab'
 
 export interface FileInfo {
   path: string
@@ -76,16 +77,11 @@ export function useModels(intervalMs = 5000) {
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-  // URL du WS, exposée côté client via runtimeConfig.public.
-  // http(s)://… → ws(s)://… + `/ws`.
+  // URL du WS, exposée côté client via runtimeConfig.public : même origine que
+  // l'interface par défaut, Nitro relayant `/ws` vers le backend.
   function wsUrl(): string {
-    const pub = useRuntimeConfig().public as Record<string, any>
-    const base: string =
-      pub.hpccatWsBase ||
-      (pub.hpccatApiBase
-        ? String(pub.hpccatApiBase).replace(/^http/, 'ws')
-        : '')
-    return `${base.replace(/\/$/, '')}/ws`
+    const base = wsBase(useRuntimeConfig().public as WsConfig)
+    return base ? `${base}/ws` : ''
   }
 
   /** Réinitialise le timeout de reconnexion (évite les piles de setTimeout). */
