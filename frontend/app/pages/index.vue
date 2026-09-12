@@ -88,7 +88,7 @@ usePageHeader(() => ({
     <template v-if="filtering">
       <p class="section-label">All ({{ resultCount }})</p>
       <div v-if="resultCount" class="file-grid">
-        <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" />
+        <FolderCard v-for="f in matchedFolders" :key="`folder:${f.name}`" :folder="f" :display-mode="displayMode" />
         <FileItem
           v-for="f in sortedMatchedFiles"
           :key="f.path"
@@ -104,7 +104,7 @@ usePageHeader(() => ({
     <template v-else>
       <p class="section-label">Dossiers</p>
       <div v-if="allFolders.length" class="file-grid">
-        <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" />
+        <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" :display-mode="displayMode" />
       </div>
       <div v-else class="empty">Aucun dossier trouvé.</div>
 
