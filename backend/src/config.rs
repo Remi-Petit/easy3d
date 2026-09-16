@@ -13,6 +13,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Mode d'affichage des modèles côté interface.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -125,6 +126,29 @@ impl Config {
     }
 }
 
+/// Intervalle du **re-scan périodique**, lu dans `EASY3D_WATCH_POLL` (secondes).
+///
+/// Filet de sécurité pour les systèmes de fichiers qui ne remontent pas
+/// d'événements : partages de fichiers Docker Desktop (Windows/macOS), montages
+/// réseau. Sans lui, un dossier ajouté **hors de l'interface** n'apparaîtrait
+/// qu'après un redémarrage. `0` ou absent → `None` : désactivé, puisque les
+/// événements suffisent sur un disque local.
+///
+/// Vit ici, et non dans `main.rs`, pour être testable : `main.rs` est un
+/// binaire, aucune de ses fonctions n'est atteignable par un test.
+pub fn watch_poll_interval() -> Option<Duration> {
+    parse_poll_interval(&std::env::var("EASY3D_WATCH_POLL").unwrap_or_default())
+}
+
+/// Lecture tolérante d'une durée en secondes : `"7"` → 7 s ; vide, `"0"` ou
+/// valeur non numérique → désactivé (on ne devine pas une intention).
+fn parse_poll_interval(raw: &str) -> Option<Duration> {
+    match raw.trim().parse::<u64>() {
+        Ok(secs) if secs > 0 => Some(Duration::from_secs(secs)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +211,21 @@ mod tests {
             serde_json::to_string(&DisplayMode::Image).unwrap(),
             "\"image\""
         );
+    }
+
+    #[test]
+    fn re_scan_periodique_absent_ou_invalide_desactive() {
+        assert_eq!(parse_poll_interval(""), None);
+        assert_eq!(parse_poll_interval("   "), None);
+        assert_eq!(parse_poll_interval("0"), None);
+        // Valeur non numérique ou négative : on désactive plutôt que de deviner.
+        assert_eq!(parse_poll_interval("vite"), None);
+        assert_eq!(parse_poll_interval("-5"), None);
+    }
+
+    #[test]
+    fn re_scan_periodique_lu_en_secondes() {
+        assert_eq!(parse_poll_interval("5"), Some(Duration::from_secs(5)));
+        assert_eq!(parse_poll_interval(" 30 "), Some(Duration::from_secs(30)));
     }
 }
