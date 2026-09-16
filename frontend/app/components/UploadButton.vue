@@ -14,7 +14,7 @@
 const props = withDefaults(defineProps<{ folder?: string | null }>(), { folder: null })
 
 const { t } = useI18n()
-const { state, total, done, current, failures, running, upload } = useUpload()
+const { running, total, done, current, upload } = useUpload()
 
 const filesInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
@@ -64,27 +64,8 @@ function onPicked(event: Event) {
   <input ref="filesInput" class="add__input" type="file" multiple @change="onPicked" />
   <input ref="folderInput" class="add__input" type="file" webkitdirectory @change="onPicked" />
 
-  <!-- Avancement, puis bilan : sur sa propre ligne, sous la barre d'outils. -->
+  <!-- Avancement de l'envoi : le bilan part en notification (voir `useUpload`). -->
   <p v-if="running" class="add__status">
     {{ $t('upload.running', { done, total, name: current }) }}
-  </p>
-  <p v-else-if="state === 'done'" class="add__status add__status--ok">
-    {{ $t('upload.done', { count: done }, done) }}
-  </p>
-  <!--
-    Échecs : le détail plutôt que le seul compteur. Un « 2 échecs » sans les
-    noms oblige à deviner lequel des fichiers pose problème et pourquoi.
-  -->
-  <div v-else-if="state === 'failed'" class="add__status add__status--err">
-    <p class="add__count">
-      {{ $t('upload.failed', { count: failures.length }, failures.length) }}
-    </p>
-    <ul class="add__failures">
-      <li v-for="failure in failures.slice(0, 3)" :key="failure">{{ failure }}</li>
-      <li v-if="failures.length > 3">…</li>
-    </ul>
-  </div>
-  <p v-else-if="state === 'empty'" class="add__status add__status--err">
-    {{ $t('upload.empty') }}
   </p>
 </template>
