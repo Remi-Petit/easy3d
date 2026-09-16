@@ -22,18 +22,38 @@ export function parentPath(path: string): string {
   const [section] = segments
 
   if (section === 'dossiers') {
-    return '/'
+    // Le paramètre porte le chemin relatif du dossier (encodé, comme pour les
+    // fichiers) : un sous-dossier remonte à son parent, un dossier de premier
+    // niveau à l'accueil.
+    const parts = relSegments(segments)
+    return parts.length > 1
+      ? folderHref(parts.slice(0, -1).join('/'))
+      : '/'
   }
 
   if (section === 'fichier') {
-    const rel = decodeURIComponent(segments.slice(1).join('/'))
-    const [folder, ...rest] = rel.split('/')
+    const [folder, ...rest] = relSegments(segments)
     // Un fichier à la racine n'a pas de dossier parent.
     if (!folder || rest.length === 0) {
       return '/'
     }
-    return `/dossiers/${encodeURIComponent(folder)}`
+    return folderHref(folder)
   }
 
   return '/'
+}
+
+/** URL de la page d'un dossier, à partir de son chemin relatif. */
+export function folderHref(rel: string): string {
+  return `/dossiers/${encodeURIComponent(rel)}`
+}
+
+/**
+ * Chemin relatif porté par les segments qui suivent la section, décodé puis
+ * découpé (`['dossiers', 'a%2Fb']` → `['a', 'b']`).
+ */
+function relSegments(segments: string[]): string[] {
+  return decodeURIComponent(segments.slice(1).join('/'))
+    .split('/')
+    .filter(Boolean)
 }

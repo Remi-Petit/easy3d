@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parentPath } from '~/utils/navigation'
+import { folderHref, parentPath } from '~/utils/navigation'
 
 describe('parentPath', () => {
   it('remonte un fichier de dossier vers son dossier', () => {
@@ -32,9 +32,29 @@ describe('parentPath', () => {
     expect(parentPath('/dossiers/Mes%20pi%C3%A8ces')).toBe('/')
   })
 
+  it('remonte un sous-dossier à son parent', () => {
+    // Le paramètre porte le chemin complet, encodé : le parent est le chemin
+    // moins son dernier segment.
+    expect(parentPath('/dossiers/Maison%2FMaison')).toBe('/dossiers/Maison')
+    expect(parentPath('/dossiers/Maison%2Fsous%2Fencore')).toBe('/dossiers/Maison%2Fsous')
+  })
+
   it('renvoie l’accueil depuis l’accueil ou un chemin inconnu', () => {
     expect(parentPath('/')).toBe('/')
     expect(parentPath('')).toBe('/')
     expect(parentPath('/inconnu')).toBe('/')
+  })
+})
+
+describe('folderHref', () => {
+  it('encode le chemin du dossier', () => {
+    expect(folderHref('DemaAuto')).toBe('/dossiers/DemaAuto')
+    expect(folderHref('Mes pièces')).toBe('/dossiers/Mes%20pi%C3%A8ces')
+  })
+
+  it('garde un sous-dossier en un seul segment d’URL', () => {
+    // Même convention que `/fichier/[rel]` : la barre oblique est encodée, la
+    // route reste `[name]`.
+    expect(folderHref('Maison/sous')).toBe('/dossiers/Maison%2Fsous')
   })
 })

@@ -74,7 +74,10 @@
     "meta": "{count} archivo · {when} | {count} archivos · {when}",
     "empty": "Carpeta vacía",
     "noMatch": "Ningún archivo coincide con el filtro.",
-    "hasNote": "Esta carpeta tiene una nota"
+    "hasNote": "Esta carpeta tiene una nota",
+    "subfolders": "Subcarpetas ({count})",
+    "files": "Archivos ({count})",
+    "notFound": "Carpeta no encontrada."
   },
   "file": {
     "subtitle": "{type} · {when}",

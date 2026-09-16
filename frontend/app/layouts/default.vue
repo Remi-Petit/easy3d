@@ -33,7 +33,9 @@ const isAdmin = computed(() => route.path.startsWith('/admin'))
 /** Titre de la page courante, déduit de la route (pas de flash à l'hydratation). */
 const title = computed(() => {
   if (isAdmin.value) return t('nav.admin')
-  if (route.params.name) return decodeURIComponent(String(route.params.name))
+  // Dossiers et fichiers sont désignés par un chemin relatif : le titre de la
+  // page est le **dernier** segment (un sous-dossier ne réaffiche pas sa parenté).
+  if (route.params.name) return basename(decodeURIComponent(String(route.params.name)))
   if (route.params.rel) return basename(decodeURIComponent(String(route.params.rel)))
   return t('catalog.title')
 })

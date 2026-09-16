@@ -74,7 +74,10 @@
     "meta": "{count} fichier · {when} | {count} fichiers · {when}",
     "empty": "Dossier vide",
     "noMatch": "Aucun fichier ne correspond au filtre.",
-    "hasNote": "Ce dossier a une note"
+    "hasNote": "Ce dossier a une note",
+    "subfolders": "Sous-dossiers ({count})",
+    "files": "Fichiers ({count})",
+    "notFound": "Dossier introuvable."
   },
   "file": {
     "subtitle": "{type} · {when}",
