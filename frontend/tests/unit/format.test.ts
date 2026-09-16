@@ -20,6 +20,22 @@ describe('ext', () => {
   })
 })
 
+describe('fileUrl', () => {
+  it('encode le chemin', () => {
+    expect(fileUrl('DemaAuto/Boitier déma auto.stl')).toBe(
+      '/api/file?path=DemaAuto%2FBoitier%20d%C3%A9ma%20auto.stl',
+    )
+  })
+  it('recopie la version annoncée par le backend', () => {
+    expect(fileUrl('piece.png', '1751032281000000000-1294')).toBe(
+      '/api/file?path=piece.png&v=1751032281000000000-1294',
+    )
+  })
+  it('omet la version quand il n’y en a pas', () => {
+    expect(fileUrl('piece.png', null)).toBe('/api/file?path=piece.png')
+  })
+})
+
 describe('fileDownloadUrl', () => {
   it('ajoute le drapeau download à l’URL du fichier', () => {
     expect(fileDownloadUrl('a.stl')).toBe(`${fileUrl('a.stl')}&download=1`)

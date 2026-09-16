@@ -15,6 +15,13 @@ pub struct FileInfo {
     /// Image d'aperçu associée (même nom, même dossier) si présente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Version de cette image (voir [`version_token`]).
+    ///
+    /// Le frontend la recopie **telle quelle** dans l'URL de l'aperçu : le
+    /// serveur peut alors répondre `immutable`, et le navigateur ne redemande
+    /// plus la vignette à chaque chargement de page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_version: Option<String>,
     /// Note explicative (Markdown) associée, si présente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -56,7 +63,7 @@ impl ModelsScan {
 pub fn scan_files(root: &Path) -> Vec<FileInfo> {
     let mut out = Vec::new();
     scan_dir_recursive(root, root, &mut out);
-    attach_sibling_images(&mut out);
+    attach_sibling_images(&mut out, root);
     attach_generated_thumbs(&mut out);
     attach_notes(&mut out, root);
     out
@@ -83,7 +90,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
         if path.is_dir() {
             let mut files = Vec::new();
             scan_dir_recursive(&path, root, &mut files);
-            attach_sibling_images(&mut files);
+            attach_sibling_images(&mut files, root);
             attach_generated_thumbs(&mut files);
             attach_notes(&mut files, root);
             let name = path
@@ -108,7 +115,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
         }
     }
 
-    attach_sibling_images(&mut scan.files);
+    attach_sibling_images(&mut scan.files, root);
     attach_generated_thumbs(&mut scan.files);
     attach_notes(&mut scan.files, root);
     scan
@@ -179,6 +186,7 @@ fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
         created: meta.created().ok().and_then(to_unix_secs),
         modified: meta.modified().ok().and_then(to_unix_secs),
         image: None,
+        image_version: None,
         note: None,
     })
 }
@@ -195,7 +203,9 @@ fn file_stem(rel: &str) -> String {
 /// Associe à chaque fichier reconnu par le registre ([`formats`]) une image de
 /// même nom dans le même dossier, si elle existe
 /// (ex : `boitier.stl` + `boitier.png`).
-fn attach_sibling_images(files: &mut [FileInfo]) {
+///
+/// `root` sert à calculer la version de l'aperçu (voir [`version_token`]).
+fn attach_sibling_images(files: &mut [FileInfo], root: &Path) {
     use std::collections::HashMap;
     let mut best: HashMap<String, String> = HashMap::new();
     for f in files.iter() {
@@ -216,6 +226,7 @@ fn attach_sibling_images(files: &mut [FileInfo]) {
             && let Some(img) = best.get(&file_stem(&f.rel))
         {
             f.image = Some(img.clone());
+            f.image_version = file_version(&root.join(img));
         }
     }
 }
@@ -235,8 +246,12 @@ fn attach_generated_thumbs(files: &mut [FileInfo]) {
             root.pop();
         }
         let thumb_rel = thumbnail::thumb_rel_path(&f.rel);
-        if root.join(&thumb_rel).is_file() {
+        let thumb = root.join(&thumb_rel);
+        if let Ok(meta) = std::fs::metadata(&thumb)
+            && meta.is_file()
+        {
             f.image = Some(thumb_rel);
+            f.image_version = version_token(&meta);
         }
     }
 }
@@ -251,6 +266,28 @@ fn attach_notes(files: &mut [FileInfo], root: &Path) {
 /// Convertit un `SystemTime` en secondes écoulées depuis `UNIX_EPOCH`.
 fn to_unix_secs(t: SystemTime) -> Option<u64> {
     t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+/// Version d'un fichier sur disque, ou `None` s'il est introuvable.
+fn file_version(path: &Path) -> Option<String> {
+    version_token(&std::fs::metadata(path).ok()?)
+}
+
+/// Jeton de version d'un fichier : `mtime` en nanosecondes + taille.
+///
+/// Il circule **tel quel** entre le scan (qui l'annonce au frontend) et le
+/// serveur de fichiers (qui le renvoie en `ETag` et compare au paramètre `v`) :
+/// les deux calculent la même chaîne, donc une URL déclarée « immuable » le
+/// reste vraiment. La nanoseconde évite qu'une réécriture dans la même seconde
+/// passe inaperçue ; la taille couvre les systèmes de fichiers à `mtime` grossier.
+pub fn version_token(meta: &std::fs::Metadata) -> Option<String> {
+    let nanos = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{nanos}-{}", meta.len()))
 }
 
 #[cfg(test)]

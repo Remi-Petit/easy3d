@@ -11,9 +11,21 @@ export function ext(p: string): string {
   return i >= 0 ? b.slice(i + 1).toLowerCase() : ''
 }
 
-/** URL d'un fichier du répertoire modèles (proxifiée par Nitro vers le backend). */
-export function fileUrl(rel: string): string {
-  return `/api/file?path=${encodeURIComponent(rel)}`
+/**
+ * URL d'un fichier du répertoire modèles (proxifiée par Nitro vers le backend).
+ *
+ * `version` est une version opaque annoncée par le backend (champ
+ * `image_version` du scan). Recopiée dans l'URL, elle permet au backend de
+ * répondre `immutable` : le navigateur ne redemande plus l'aperçu aux
+ * chargements suivants. Un fichier réécrit change de version, donc d'URL — le
+ * cache ne peut pas servir une vignette périmée.
+ *
+ * Sans version, la réponse est `no-cache` : le navigateur stocke mais doit
+ * revalider (le backend répond `304` avec son `ETag`).
+ */
+export function fileUrl(rel: string, version?: string | null): string {
+  const v = version ? `&v=${encodeURIComponent(version)}` : ''
+  return `/api/file?path=${encodeURIComponent(rel)}${v}`
 }
 
 /**

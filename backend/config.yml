@@ -6,4 +6,4 @@
 
 models_root: ../models
 display:
-  mode: 3d
+  mode: image

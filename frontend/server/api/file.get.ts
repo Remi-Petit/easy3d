@@ -1,5 +1,15 @@
-// Proxy vers le backend Rust : GET /file?path=<rel>
+// Proxy vers le backend Rust : GET /file?path=<rel>[&v=<version>][&download=1]
 // Relaie le contenu binaire d'un modèle (STL / OBJ / 3MF / GCODE) au navigateur.
+//
+// Le proxy **conserve les en-têtes de cache** du backend (`etag`, `cache-control`,
+// `last-modified`) et lui transmet `If-None-Match`. C'est le backend qui connaît
+// la version du fichier sur disque : c'est cette comparaison qui produit les
+// `304`. Ne relayer que le `content-type` — ce que faisait ce fichier — rendait
+// tout cache impossible, et chaque vignette était retéléchargée à chaque
+// chargement de page.
+//
+// Le corps est **diffusé** (`sendStream`) au lieu d'être chargé en mémoire : un
+// G-code de plusieurs mégaoctets ne doit pas passer par un `arrayBuffer()`.
 export default defineEventHandler(async (event) => {
   const q = getQuery(event)
   const rel = q.path
@@ -10,27 +20,58 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event)
   const base: string = config.hpccatApiBase
 
+  const upstream = new URL(`${base}/file`)
+  upstream.searchParams.set('path', rel)
+  // Version annoncée par le scan : recopiée telle quelle, elle vaut « cette URL
+  // ne changera plus » pour le backend (réponse `immutable`).
+  if (typeof q.v === 'string' && q.v) {
+    upstream.searchParams.set('v', q.v)
+  }
+
+  // Ce que le navigateur a déjà en cache : transmis au backend, seul juge.
+  const ifNoneMatch = getRequestHeader(event, 'if-none-match')
+  const ifModifiedSince = getRequestHeader(event, 'if-modified-since')
+
   try {
-    // fetch natif Node : fiable pour les réponses binaires (ArrayBuffer).
-    const res = await fetch(`${base}/file?path=${encodeURIComponent(rel)}`)
-    if (!res.ok) {
-      throw createError({
-        statusCode: res.status,
-        statusMessage: `Backend a répondu ${res.status}`,
-      })
+    const res = await fetch(upstream, {
+      headers: {
+        ...(ifNoneMatch ? { 'if-none-match': ifNoneMatch } : {}),
+        ...(ifModifiedSince ? { 'if-modified-since': ifModifiedSince } : {}),
+      },
+    })
+
+    // En-têtes recopiés du backend : il est le seul à connaître la version.
+    const relayed: Record<string, string> = {}
+    for (const name of ['content-type', 'etag', 'cache-control', 'last-modified']) {
+      const value = res.headers.get(name)
+      if (value) relayed[name] = value
     }
-    const ct = res.headers.get('content-type') || 'application/octet-stream'
-    setResponseHeaders(event, { 'content-type': ct })
 
     // `?download=1` : le navigateur doit enregistrer le fichier plutôt que
     // l'afficher. Sans cette en-tête, le `<a download>` suffit dans la plupart
     // des cas, mais pas pour une ouverture directe de l'URL (nouvel onglet,
     // clic-milieu).
     if (q.download) {
-      setResponseHeader(event, 'content-disposition', attachmentHeader(basename(rel)))
+      relayed['content-disposition'] = attachmentHeader(basename(rel))
     }
 
-    return Buffer.from(await res.arrayBuffer())
+    // Rien à transmettre : le cache du navigateur fait foi.
+    if (res.status === 304) {
+      setResponseStatus(event, 304)
+      setResponseHeaders(event, relayed)
+      return null
+    }
+
+    if (!res.ok) {
+      throw createError({
+        statusCode: res.status,
+        statusMessage: `Backend a répondu ${res.status}`,
+      })
+    }
+
+    setResponseHeaders(event, relayed)
+    // Flux direct vers la réponse : rien n'est bufferisé côté Nitro.
+    return res.body ? sendStream(event, res.body) : null
   } catch (err: any) {
     throw createError({
       statusCode: err?.statusCode || 502,
