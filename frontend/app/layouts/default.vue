@@ -12,6 +12,13 @@ const route = useRoute()
 const header = usePageHeaderState()
 const { t, locale, locales, setLocale } = useI18n()
 
+/**
+ * Version du projet, injectée par `nuxt.config.ts` depuis `package.json` :
+ * c'est le repère qui dit quel build tourne réellement (backend et frontend
+ * portent la même version, `scripts/bump-version.mjs` les tient alignés).
+ */
+const version = useRuntimeConfig().public.version
+
 // Barre de filtre globale (recherche, types, tri), partagée avec les pages.
 const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
   useFilter()
@@ -132,11 +139,15 @@ const navUi = {
       <!-- État du backend + langue de l'interface. -->
       <template #footer>
         <div class="foot">
+          
           <div class="stats">
             <span class="pill">
               <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
             </span>
           </div>
+
+          <!-- Version du projet, sous l'état du backend. -->
+          <p class="version">v{{ version }}</p>
 
           <label class="lang">
             <span class="lang__label">{{ $t('language.label') }}</span>
