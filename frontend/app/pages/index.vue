@@ -110,11 +110,9 @@ usePageHeader(() => ({
       <div v-else class="empty">{{ $t('catalog.noFolder') }}</div>
 
       <p class="section-label">{{ $t('catalog.root', { count: rootFiles.length }) }}</p>
-      <article class="card" v-if="rootFiles.length">
-        <div class="file-grid">
-          <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
-        </div>
-      </article>
+      <div v-if="rootFiles.length" class="file-grid">
+        <FileItem v-for="f in sortedRootFiles" :key="f.path" :file="f" :display-mode="displayMode" />
+      </div>
       <div v-else class="empty">{{ $t('catalog.noRootFile') }}</div>
     </template>
   </template>

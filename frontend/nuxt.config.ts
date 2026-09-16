@@ -5,6 +5,11 @@
 // un fichier dans `i18n/locales/` + une entrée ici.
 import i18nConfig from './i18n/locales.json'
 
+// Version affichée dans la sidebar. `frontend/package.json` fait foi : il est
+// tenu à jour avec `backend/Cargo.toml` par `scripts/bump-version.mjs`, et le
+// workflow de release refuse un tag qui divergerait de l'un des deux.
+import pkg from './package.json'
+
 export default defineNuxtConfig({
   modules: ['@nuxt/ui', '@nuxtjs/i18n'],
   devtools: { enabled: true },
@@ -45,6 +50,8 @@ export default defineNuxtConfig({
       process.env.NUXT_HPCCAT_API_BASE ||
       `http://127.0.0.1:${process.env.NUXT_HPCCAT_API_PORT || '8090'}`,
     public: {
+      // Version du projet, telle quelle dans l'interface (pied de sidebar).
+      version: pkg.version,
       // Base WebSocket vue par le navigateur. Vide par défaut : les connexions
       // visent l'origine qui sert l'interface, Nitro relayant `/ws` et
       // `/collab/*` vers le backend (voir `server/routes/`). À poser seulement
