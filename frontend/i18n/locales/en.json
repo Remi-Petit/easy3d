@@ -32,12 +32,14 @@
     "add": "Add",
     "files": "Files…",
     "folder": "Folder…",
+    "or": "or",
     "into": "Into “{folder}”",
     "running": "Uploading {done}/{total} · {name}",
     "done": "{count} file added | {count} files added",
     "failed": "{count} failure | {count} failures",
     "empty": "Nothing to send in this selection.",
-    "dropHere": "Drop files here",
+    "dropHere": "Drop your files or folders here",
+    "accepts": "Files and folders accepted",
     "atRoot": "at the catalogue root"
   },
   "filter": {

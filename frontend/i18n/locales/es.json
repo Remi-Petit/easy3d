@@ -32,12 +32,14 @@
     "add": "Añadir",
     "files": "Archivos…",
     "folder": "Carpeta…",
+    "or": "o",
     "into": "A «{folder}»",
     "running": "Enviando {done}/{total} · {name}",
     "done": "{count} archivo añadido | {count} archivos añadidos",
     "failed": "{count} fallo | {count} fallos",
     "empty": "Nada que enviar en esta selección.",
-    "dropHere": "Suelta los archivos aquí",
+    "dropHere": "Suelta tus archivos o carpetas aquí",
+    "accepts": "Se aceptan archivos y carpetas",
     "atRoot": "en la raíz del catálogo"
   },
   "filter": {
