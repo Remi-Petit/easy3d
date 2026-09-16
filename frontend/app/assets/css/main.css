@@ -420,30 +420,13 @@ body {
   display: none;
 }
 
-/* Avancement puis bilan de l'envoi : sur sa propre ligne, sous la barre. */
+/* Avancement de l'envoi : sur sa propre ligne, sous la barre d'outils. Le
+   bilan, lui, passe par les notifications de Nuxt UI. */
 .add__status {
   flex-basis: 100%;
   margin: 0;
   font-size: 12.5px;
   color: var(--muted);
-}
-
-.add__status--ok {
-  color: var(--ok);
-}
-
-.add__status--err {
-  color: var(--err);
-}
-
-.add__count {
-  margin: 0;
-}
-
-/* Détail des fichiers refusés : le nom et le motif, un par ligne. */
-.add__failures {
-  margin: 2px 0 0;
-  padding-left: 18px;
 }
 
 /* Puces de filtre par type : même vocabulaire que les `.pill` de l'en-tête. */

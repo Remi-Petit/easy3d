@@ -1,10 +1,7 @@
 import type { UploadPick, UploadTask } from '~/utils/upload'
 
-/** État d'un envoi : en cours, terminé, en échec, ou rien à envoyer. */
-export type UploadState = 'idle' | 'running' | 'done' | 'failed' | 'empty'
-
-/** Durée d'affichage du bilan d'un envoi terminé. */
-const RESULT_MS = 6000
+/** Durée d'affichage du bilan (le temps de lire trois lignes). */
+const RESULT_MS = 8000
 
 /** Envoi d'un fichier : le corps de la requête **est** le `File`. */
 async function post(task: UploadTask): Promise<void> {
@@ -50,39 +47,16 @@ async function send(task: UploadTask): Promise<void> {
  * fichiers et rediffuse la liste sur le WebSocket.
  */
 export function useUpload() {
-  const state = useState<UploadState>('upload:state', () => 'idle')
-  /** Nombre de fichiers de l'envoi en cours (ou du dernier bilan). */
+  const { t } = useI18n()
+  const toast = useToast()
+
+  /** Un envoi est en cours (l'état est partagé, cf. ci-dessus). */
+  const running = useState('upload:running', () => false)
+  /** Nombre de fichiers de l'envoi en cours. */
   const total = useState('upload:total', () => 0)
   const done = useState('upload:done', () => 0)
   /** Nom du fichier en cours d'envoi. */
   const current = useState('upload:current', () => '')
-  /** Échecs, un libellé lisible par fichier refusé. */
-  const failures = useState<string[]>('upload:failures', () => [])
-
-  const running = computed(() => state.value === 'running')
-
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  function clearTimer() {
-    if (timer) {
-      clearTimeout(timer)
-      timer = undefined
-    }
-  }
-
-  /** Efface le bilan après quelques secondes : il ne doit pas rester à l'écran. */
-  function scheduleReset() {
-    clearTimer()
-    timer = setTimeout(() => {
-      timer = undefined
-      state.value = 'idle'
-      total.value = 0
-      done.value = 0
-      failures.value = []
-    }, RESULT_MS)
-  }
-
-  onScopeDispose(clearTimer)
 
   /**
    * Envoie `picks` dans `folder` (vide = racine du catalogue).
@@ -92,19 +66,23 @@ export function useUpload() {
    */
   async function upload(picks: UploadPick[], folder = ''): Promise<void> {
     if (running.value) return
-    clearTimer()
 
     const tasks = uploadPlan(picks, folder)
     if (!tasks.length) {
-      state.value = 'empty'
-      scheduleReset()
+      toast.add({
+        title: t('upload.empty'),
+        color: 'warning',
+        icon: 'i-lucide-circle-alert',
+        duration: RESULT_MS,
+      })
       return
     }
 
-    state.value = 'running'
+    running.value = true
     total.value = tasks.length
     done.value = 0
-    failures.value = []
+    /** Échecs de cet envoi : un libellé lisible par fichier refusé. */
+    const failures: string[] = []
 
     for (const task of tasks) {
       current.value = basename(task.rel)
@@ -116,14 +94,39 @@ export function useUpload() {
         // (« chemin réservé : … ») : on le reprend tel quel.
         const message: string =
           err?.data?.message || err?.data?.statusMessage || err?.message || String(err)
-        failures.value.push(`${task.file.name} : ${message}`)
+        failures.push(`${task.file.name} : ${message}`)
       }
     }
 
     current.value = ''
-    state.value = failures.value.length ? 'failed' : 'done'
-    scheduleReset()
+    const added = done.value
+    running.value = false
+
+    // Le bilan part en notification ; l'avancement, lui, reste dans la barre
+    // d'outils (une notification qui se met à jour à chaque fichier serait
+    // illisible).
+    if (failures.length) {
+      toast.add({
+        title: t('upload.failed', { count: failures.length }, failures.length),
+        // Le détail plutôt que le seul compteur : « 2 échecs » sans les noms
+        // oblige à deviner lequel des fichiers pose problème et pourquoi.
+        description: [...failures.slice(0, 3), failures.length > 3 ? '…' : '']
+          .filter(Boolean)
+          .join(' • '),
+        color: 'error',
+        icon: 'i-lucide-triangle-alert',
+        duration: RESULT_MS * 2,
+      })
+      return
+    }
+
+    toast.add({
+      title: t('upload.done', { count: added }, added),
+      color: 'success',
+      icon: 'i-lucide-check',
+      duration: RESULT_MS,
+    })
   }
 
-  return { state, total, done, current, failures, running, upload }
+  return { running, total, done, current, upload }
 }
