@@ -1,0 +1,14 @@
+services:
+  easy3d:
+    image: ghcr.io/remi-petit/easy3d:latest
+    container_name: easy3d
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # interface web : catalogue, aperçu 3D, notes
+      - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
+    volumes:
+      - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
+      - easy3d-config:/config # configuration, réécrite par la page /admin
+
+volumes:
+  easy3d-config:
