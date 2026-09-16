@@ -4,6 +4,9 @@ test('accueil : dossiers et fichiers racine listés', async ({ page }) => {
   await page.goto('/')
   // Titre de la page catalogue, rendu par l'en-tête.
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
+  // La grille attend les données du backend : sur un serveur de dev à froid, la
+  // page est servie avant que le catalogue soit chargé.
+  await expect(page.locator('.file-grid').first()).toBeVisible()
   // Au moins un dossier (DemaAuto / Maison) est affiché.
   await expect(page.locator('a[href*="/dossiers/"]').first()).toBeVisible()
   // Au moins un fichier racine est listé.

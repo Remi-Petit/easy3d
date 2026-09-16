@@ -32,12 +32,14 @@
     "add": "Hinzufügen",
     "files": "Dateien…",
     "folder": "Ordner…",
+    "or": "oder",
     "into": "Nach „{folder}“",
     "running": "Senden {done}/{total} · {name}",
     "done": "{count} Datei hinzugefügt | {count} Dateien hinzugefügt",
     "failed": "{count} Fehler | {count} Fehler",
     "empty": "Keine versendbare Datei in der Auswahl.",
-    "dropHere": "Dateien hier ablegen",
+    "dropHere": "Dateien oder Ordner hier ablegen",
+    "accepts": "Dateien und Ordner werden akzeptiert",
     "atRoot": "im Katalogstammverzeichnis"
   },
   "filter": {
