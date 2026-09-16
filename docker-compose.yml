@@ -1,10 +1,22 @@
 services:
   easy3d:
-    image: ghcr.io/remi-petit/easy3d:latest
+    # Image construite **localement** depuis les sources du dépôt, jamais tirée
+    # d'un registre (le `Dockerfile` racine compile backend Rust + frontend Nuxt,
+    # les deux tournent dans le même conteneur).
+    #
+    #   docker compose up --build     # recompile après une modif de code
+    #
+    # `pull_policy: build` rend la règle explicite : Compose construit et ne
+    # cherche jamais `easy3d:dev` sur un registre.
+    build:
+      context: . # le Dockerfile copie backend/, frontend/ et scripts/
+      dockerfile: Dockerfile
+    image: easy3d:dev
+    pull_policy: build
     container_name: easy3d
     restart: unless-stopped
     ports:
-      - "3000:3000" # interface web : catalogue, aperçu 3D, notes
+      - "3100:3000" # interface web : catalogue, aperçu 3D, notes
       - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
     volumes:
       - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
