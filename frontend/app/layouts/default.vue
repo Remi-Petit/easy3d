@@ -23,6 +23,10 @@ const version = useRuntimeConfig().public.version
 const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
   useFilter()
 
+// Envoi de fichiers : le dépôt (voir plus bas) et la barre d'outils partagent le
+// même état, donc le même avancement (voir `useUpload`).
+const { upload } = useUpload()
+
 /** `true` sur la page d'administration : section distincte du catalogue. */
 const isAdmin = computed(() => route.path.startsWith('/admin'))
 
@@ -37,6 +41,57 @@ const title = computed(() => {
 const isHome = computed(() => route.path === '/')
 /** Barre de recherche du catalogue : ni sur la vue fichier, ni sur l'admin. */
 const showFilter = computed(() => !route.params.rel && !isAdmin.value)
+
+/**
+ * Dossier d'accueil d'un envoi de fichiers : celui de la page courante quand on
+ * est dans un dossier, sinon la racine du catalogue.
+ */
+const uploadFolder = computed(() =>
+  route.params.name ? decodeURIComponent(String(route.params.name)) : null,
+)
+
+/**
+ * Dépôt de fichiers sur le catalogue.
+ *
+ * `dragenter`/`dragleave` se déclenchent aussi pour chaque élément survolé :
+ * un compteur évite que le voile clignote au passage d'un enfant à l'autre.
+ */
+const dragging = ref(false)
+let dragDepth = 0
+
+/** Seuls les fichiers nous intéressent (pas un texte ni un lien glissé). */
+function droppingFiles(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files')
+}
+
+function onDragEnter(event: DragEvent) {
+  if (!droppingFiles(event)) return
+  dragDepth += 1
+  dragging.value = true
+}
+
+function onDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (!dragDepth) dragging.value = false
+}
+
+function onDragOver(event: DragEvent) {
+  // Sans `preventDefault`, le navigateur refuse le dépôt — et ouvrirait le
+  // fichier déposé à la place.
+  if (droppingFiles(event)) event.preventDefault()
+}
+
+async function onDrop(event: DragEvent) {
+  event.preventDefault()
+  dragDepth = 0
+  dragging.value = false
+
+  const data = event.dataTransfer
+  if (!data) return
+  // `dropPicks` lit les entrées du `DataTransfer` avant son premier `await` :
+  // elles ne sont valides que le temps de l'événement.
+  void upload(await dropPicks(data), uploadFolder.value ?? '')
+}
 
 const placeholder = computed(() =>
   route.params.name ? t('filter.placeholderFolder') : t('filter.placeholder'),
@@ -166,7 +221,20 @@ const navUi = {
       </template>
     </UDashboardSidebar>
 
-    <UDashboardPanel id="catalog" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
+    <!--
+      Zone de dépôt : tout le panneau de contenu. Les écouteurs sont posés sur
+      le panneau — `UDashboardPanel` transmet ses attributs à son élément racine
+      — et le voile est rendu dans le corps, donc sous l'en-tête.
+    -->
+    <UDashboardPanel
+      id="catalog"
+      class="drop"
+      :ui="{ body: 'p-0 sm:p-0 gap-0' }"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <!--
         En-tête : titre de la page courante. Sur les pages de détail, il est
         complété par le contexte (nombre de fichiers, type et date) ; sur
@@ -202,6 +270,10 @@ const navUi = {
               <span class="sort__icon">{{ sortIcon }}</span>
               <span class="sort__label">{{ $t('filter.date') }}</span>
             </button>
+
+            <!-- Ajout de fichiers/dossiers dans le catalogue (le dossier
+                 courant sert d'accueil quand on est dans un dossier). -->
+            <UploadButton :folder="uploadFolder" />
           </div>
 
           <!-- Filtre par type : formats détectés dans la vue courante. -->
@@ -226,6 +298,15 @@ const navUi = {
 
         <div class="page">
           <slot />
+        </div>
+
+        <!-- Voile de dépôt : `pointer-events: none`, sinon il intercepterait
+             les `dragover`/`drop` et le dépôt n'aboutirait jamais. -->
+        <div v-if="dragging" class="drop__veil">
+          <p class="drop__hint">{{ $t('upload.dropHere') }}</p>
+          <p class="drop__where">
+            {{ uploadFolder ? $t('upload.into', { folder: uploadFolder }) : $t('upload.atRoot') }}
+          </p>
         </div>
       </template>
     </UDashboardPanel>

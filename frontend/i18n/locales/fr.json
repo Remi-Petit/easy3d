@@ -28,6 +28,18 @@
     "label": "Langue",
     "choose": "Choisir la langue"
   },
+  "upload": {
+    "add": "Ajouter",
+    "files": "Fichiers…",
+    "folder": "Dossier…",
+    "into": "Vers « {folder} »",
+    "running": "Envoi {done}/{total} · {name}",
+    "done": "{count} fichier ajouté | {count} fichiers ajoutés",
+    "failed": "{count} échec | {count} échecs",
+    "empty": "Aucun fichier envoyable dans la sélection.",
+    "dropHere": "Déposez les fichiers ici",
+    "atRoot": "à la racine du catalogue"
+  },
   "filter": {
     "placeholder": "Filtrer par nom de fichier ou de dossier…",
     "placeholderFolder": "Filtrer par nom de fichier…",
