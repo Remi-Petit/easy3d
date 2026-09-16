@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3000" # interface web : catalogue, aperçu 3D, notes
-      - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
+      - "3101:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
     volumes:
       - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
       - easy3d-config:/config # configuration, réécrite par la page /admin
