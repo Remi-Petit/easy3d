@@ -10,6 +10,11 @@ export interface FileInfo {
   modified: number | null
   /** Image d'aperçu associée (même nom, même dossier), si présente. */
   image?: string | null
+  /**
+   * Version de cette image (opaque, fournie par le backend). À recopier dans
+   * `fileUrl()` : elle rend l'URL de l'aperçu cacheable « pour toujours ».
+   */
+  image_version?: string | null
   /** Note explicative (Markdown) associée, si présente. */
   note?: string | null
 }

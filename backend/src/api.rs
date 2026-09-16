@@ -5,7 +5,7 @@ use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -351,27 +351,80 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     }
 }
 
-/// Query param de `/file` : chemin relatif au dossier des modèles.
+/// Query params de `/file` : chemin relatif au dossier des modèles, et version
+/// attendue du fichier (facultative).
 #[derive(Deserialize)]
 struct FileQuery {
     path: String,
+    /// Version annoncée par le scan (voir [`scanner::version_token`]), recopiée
+    /// par le frontend dans l'URL de l'aperçu (`?v=`).
+    #[serde(default)]
+    v: Option<String>,
 }
 
 /// Sert le contenu binaire d'un fichier du répertoire modèles.
 ///
 /// `path` est relatif à `state.root` (ex : `DemaAuto/boitier.stl`).
 /// Sécurisé contre la traversée de dossier (`..`, absolu).
-async fn get_file(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Response {
+///
+/// Politique de cache, pour que le navigateur ne retélécharge pas les aperçus à
+/// chaque chargement de page :
+///
+/// - `?v=<version>` **à jour** → `immutable` : cette URL ne changera jamais de
+///   contenu (un fichier réécrit change de version, donc d'URL) ;
+/// - sinon → `no-cache` : le navigateur peut stocker, mais doit revalider ;
+/// - dans les deux cas un `ETag` (la version du fichier) permet de répondre
+///   `304`, sans corps.
+async fn get_file(
+    State(state): State<AppState>,
+    Query(q): Query<FileQuery>,
+    headers: HeaderMap,
+) -> Response {
     let root = state.root();
     let Some(relative) = safe_join(&root, &q.path) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
 
+    let Ok(meta) = tokio::fs::metadata(&relative).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !meta.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(version) = scanner::version_token(&meta) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let cache = if q.v.as_deref() == Some(version.as_str()) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    let etag = format!("\"{version}\"");
+    let validators = [
+        (header::ETAG, etag.clone()),
+        (header::CACHE_CONTROL, cache.to_string()),
+    ];
+
+    // Le client a déjà cette version : `304`, en-têtes seuls, aucun octet relu.
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        && inm.split(',').any(|t| {
+            let t = t.trim();
+            t == "*" || t.trim_start_matches("W/") == etag
+        })
+    {
+        return (validators, StatusCode::NOT_MODIFIED).into_response();
+    }
+
     match tokio::fs::read(&relative).await {
-        Ok(bytes) => {
-            let ct = formats::content_type(&q.path);
-            ([(header::CONTENT_TYPE, ct)], bytes).into_response()
-        }
+        Ok(bytes) => (
+            validators,
+            [(header::CONTENT_TYPE, formats::content_type(&q.path))],
+            bytes,
+        )
+            .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -620,6 +673,92 @@ mod tests {
         assert_eq!(ct, "model/stl");
         let body = res.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], b"solid x");
+    }
+
+    /// Sans `?v=`, la réponse n'est pas immuable mais reste revalidable :
+    /// le second appel avec le même `ETag` ne renvoie aucun octet.
+    #[tokio::test]
+    async fn file_repond_304_si_etag_identique() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.stl"), b"solid x").unwrap();
+
+        let app = test_app(dir.path().to_str().unwrap());
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/file?path=model.stl")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers().get("cache-control").unwrap(), "no-cache");
+        let etag = first
+            .headers()
+            .get("etag")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/file?path=model.stl")
+                    .header("if-none-match", &etag)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::NOT_MODIFIED);
+        let body = second.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.is_empty(), "un 304 ne porte pas de corps");
+    }
+
+    /// La version annoncée par le scan, recopiée dans l'URL, rend la réponse
+    /// cacheable « pour toujours » ; une version périmée retombe en `no-cache`.
+    #[tokio::test]
+    async fn file_immuable_quand_la_version_correspond() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("piece.gcode"), "G1 X0").unwrap();
+        std::fs::write(dir.path().join("piece.png"), b"faux png").unwrap();
+
+        let files = scanner::scan_files(dir.path());
+        let piece = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
+        let version = piece.image_version.clone().expect("version de l'aperçu");
+
+        let app = test_app(dir.path().to_str().unwrap());
+        let fresh = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/file?path=piece.png&v={version}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+        assert_eq!(
+            fresh.headers().get("cache-control").unwrap(),
+            "public, max-age=31536000, immutable"
+        );
+        assert!(fresh.headers().get("etag").is_some());
+
+        let stale = app
+            .oneshot(
+                Request::builder()
+                    .uri("/file?path=piece.png&v=0-0")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::OK);
+        assert_eq!(stale.headers().get("cache-control").unwrap(), "no-cache");
     }
 
     #[tokio::test]

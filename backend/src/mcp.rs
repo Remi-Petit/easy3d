@@ -123,6 +123,7 @@ impl Easy3dMcp {
                     created: None,
                     modified: folder.modified,
                     image: None,
+                    image_version: None,
                     note: folder.note.clone(),
                 },
             ));

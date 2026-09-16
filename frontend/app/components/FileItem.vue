@@ -43,7 +43,7 @@ watch(
       <div class="model-card__preview">
         <img
           v-if="showImage && !imageFailed"
-          :src="fileUrl(file.image!)"
+          :src="fileUrl(file.image!, file.image_version)"
           :alt="name"
           class="model-card__img"
           loading="lazy"
