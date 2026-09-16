@@ -74,7 +74,10 @@
     "meta": "{count} Datei · {when} | {count} Dateien · {when}",
     "empty": "Leerer Ordner",
     "noMatch": "Keine Datei entspricht dem Filter.",
-    "hasNote": "Dieser Ordner hat eine Notiz"
+    "hasNote": "Dieser Ordner hat eine Notiz",
+    "subfolders": "Unterordner ({count})",
+    "files": "Dateien ({count})",
+    "notFound": "Ordner nicht gefunden."
   },
   "file": {
     "subtitle": "{type} · {when}",

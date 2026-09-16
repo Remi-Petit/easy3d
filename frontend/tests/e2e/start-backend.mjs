@@ -50,9 +50,12 @@ const stl = (nom) =>
 // Arborescence connue à chaque exécution : les tests s'appuient sur ces deux
 // fichiers et sur ce dossier.
 rmSync(modelsRoot, { recursive: true, force: true })
-mkdirSync(join(modelsRoot, 'DemaAuto'), { recursive: true })
+mkdirSync(join(modelsRoot, 'DemaAuto', 'sous-structure'), { recursive: true })
 writeFileSync(join(modelsRoot, 'piece.stl'), stl('piece'))
 writeFileSync(join(modelsRoot, 'DemaAuto', 'boitier.stl'), stl('boitier'))
+// Un sous-dossier, pour que la page d'un dossier ait des dossiers **et** des
+// fichiers à distinguer.
+writeFileSync(join(modelsRoot, 'DemaAuto', 'sous-structure', 'vis.stl'), stl('vis'))
 
 rmSync(configDir, { recursive: true, force: true })
 mkdirSync(configDir, { recursive: true })

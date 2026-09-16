@@ -3,12 +3,15 @@ import type { DisplayMode, FileInfo, FolderInfo } from '~/composables/useModels'
 import { useNow } from '~/composables/useNow'
 
 const props = withDefaults(
-  defineProps<{ folder: FolderInfo; displayMode?: DisplayMode }>(),
-  { displayMode: '3d' },
+  defineProps<{ folder: FolderInfo; displayMode?: DisplayMode; to?: string | null }>(),
+  { displayMode: '3d', to: null },
 )
 
-/** Nom du dossier encodé -> URL `/dossiers/[name]`. */
-const href = computed(() => `/dossiers/${encodeURIComponent(props.folder.name)}`)
+/**
+ * Destination : l'accueil pointe le dossier de premier niveau ; la page d'un
+ * dossier réutilise la même carte pour ses sous-dossiers (chemin complet).
+ */
+const href = computed(() => props.to ?? folderHref(props.folder.name))
 
 const now = useNow()
 /** Dernier changement du dossier (ajout, suppression, renommage…). */

@@ -45,3 +45,21 @@ test('fichier : le modèle est téléchargeable', async ({ page }) => {
   const [download] = await Promise.all([page.waitForEvent('download'), dl.click()])
   expect(download.suggestedFilename()).toBe(name)
 })
+
+test('dossier : sous-dossiers et fichiers sont distingués', async ({ page }) => {
+  await page.goto('/dossiers/DemaAuto')
+
+  // Deux sections : les sous-dossiers d'abord, puis les fichiers du dossier.
+  await expect(page.getByText('Sous-dossiers (1)')).toBeVisible()
+  await expect(page.getByText('Fichiers (1)')).toBeVisible()
+  // Le fichier rangé dans le sous-dossier n'est **pas** mélangé à ceux du
+  // dossier : c'est exactement ce que la page doit distinguer.
+  await expect(page.locator('.model-card__name', { hasText: 'vis' })).toHaveCount(0)
+
+  // La carte du sous-dossier mène à sa propre page.
+  await page.locator('a[href*="/dossiers/"]', { hasText: 'sous-structure' }).click()
+  await expect(page.locator('h1')).toHaveText('sous-structure')
+  await expect(page.locator('.model-card__name', { hasText: 'vis' })).toBeVisible()
+  // Aucun sous-dossier à ce niveau : pas de section « Sous-dossiers ».
+  await expect(page.getByText('Sous-dossiers')).toHaveCount(0)
+})

@@ -28,6 +28,9 @@ pub struct FileInfo {
 }
 
 /// Contenu d'un sous-dossier du répertoire surveillé.
+///
+/// `files` est **récursif** : il contient aussi les fichiers rangés dans les
+/// sous-dossiers (voir [`SubFolderInfo`], qui les décrit à part).
 #[derive(Serialize)]
 pub struct FolderInfo {
     pub name: String,
@@ -40,7 +43,31 @@ pub struct FolderInfo {
     /// fois que quelque chose a changé dans ce dossier.
     pub modified: Option<u64>,
     pub files: Vec<FileInfo>,
+    /// Sous-dossiers, à plat (vide s'il n'y en a aucun).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subfolders: Vec<SubFolderInfo>,
     /// Note explicative (Markdown) du dossier, si présente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Sous-dossier d'un dossier de premier niveau.
+///
+/// Les sous-dossiers arrivent **à plat** (tous les descendants, pas seulement
+/// les enfants directs) : le frontend reconstitue la hiérarchie à partir des
+/// `rel`, exactement comme il le fait pour les fichiers. Le JSON ne dépend donc
+/// pas de la profondeur de l'arborescence.
+#[derive(Serialize)]
+pub struct SubFolderInfo {
+    /// Chemin relatif à la racine des modèles (`Maison/sous`).
+    pub rel: String,
+    /// Nom du dossier seul (dernier segment du chemin).
+    pub name: String,
+    /// Nombre de fichiers contenus, **récursivement**.
+    pub count: usize,
+    /// Dernière modification (même calcul que [`FolderInfo::modified`]).
+    pub modified: Option<u64>,
+    /// Note explicative (Markdown) du sous-dossier, si présente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -98,6 +125,8 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let modified = folder_modified(&path, &files);
+            let mut subfolders = Vec::new();
+            scan_subfolders(&path, root, &files, &mut subfolders);
             scan.folders.insert(
                 name.clone(),
                 FolderInfo {
@@ -106,6 +135,7 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                     count: files.len(),
                     modified,
                     files,
+                    subfolders,
                 },
             );
         } else if path.is_file()
@@ -149,6 +179,40 @@ fn is_hidden(name: &str) -> bool {
     name.starts_with('.')
 }
 
+/// Décrit les sous-dossiers d'un dossier, à plat : tous les descendants, chacun
+/// avec le nombre de fichiers qu'il contient.
+///
+/// Le compte et la date se calculent à partir des fichiers **déjà** collectés par
+/// [`scan_dir_recursive`] (filtre sur préfixe de chemin) : aucun second parcours
+/// du disque, et donc le même compte que celui affiché pour le dossier parent.
+fn scan_subfolders(dir: &Path, root: &Path, files: &[FileInfo], out: &mut Vec<SubFolderInfo>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || is_hidden(entry.file_name().to_str().unwrap_or("")) {
+            continue;
+        }
+
+        let rel = rel_path(root, &path);
+        let prefix = format!("{rel}/");
+        let inside = || files.iter().filter(|f| f.rel.starts_with(&prefix));
+
+        out.push(SubFolderInfo {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            count: inside().count(),
+            modified: max_modified(&path, inside().map(|f| f.modified)),
+            note: notes::read(root, &rel),
+            rel,
+        });
+
+        // Descendants : listés à la suite, le frontend filtrant par parent.
+        scan_subfolders(&path, root, files, out);
+    }
+}
+
 /// Chemin relatif à `root`, normalisé en séparateurs `/`.
 fn rel_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
@@ -165,11 +229,16 @@ fn rel_path(root: &Path, path: &Path) -> String {
 /// entrée) et celui des fichiers qu'il contient (édition de contenu, qui ne
 /// touche pas le répertoire). `None` seulement si rien n'est lisible.
 fn folder_modified(dir: &Path, files: &[FileInfo]) -> Option<u64> {
+    max_modified(dir, files.iter().map(|f| f.modified))
+}
+
+/// Le plus récent entre le `mtime` d'un dossier et celui des fichiers donnés.
+fn max_modified(dir: &Path, files: impl Iterator<Item = Option<u64>>) -> Option<u64> {
     let dir_mtime = std::fs::metadata(dir)
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(to_unix_secs);
-    let files_mtime = files.iter().filter_map(|f| f.modified).max();
+    let files_mtime = files.max().flatten();
 
     match (dir_mtime, files_mtime) {
         (Some(dir), Some(file)) => Some(dir.max(file)),
@@ -447,5 +516,73 @@ mod tests {
         let files = scan_files(root);
         let gcode = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
         assert_eq!(gcode.image.as_deref(), Some(".easy3d-thumbs/piece.png"));
+    }
+
+    #[test]
+    fn sous_dossiers_decrits_a_plat() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("Maison/sous")).unwrap();
+        fs::create_dir_all(root.join(".easy3d-notes/Maison")).unwrap();
+        // Dossier interne au backend : jamais un sous-dossier du catalogue.
+        fs::create_dir_all(root.join("Maison/.easy3d-thumbs")).unwrap();
+        fs::write(root.join("Maison/a.stl"), "x").unwrap();
+        fs::write(root.join("Maison/sous/b.stl"), "y").unwrap();
+        fs::write(root.join(".easy3d-notes/Maison/sous.md"), "# Note du sous-dossier").unwrap();
+
+        let scan = scan_models(root);
+        let maison = &scan.folders["Maison"];
+
+        // Les fichiers restent listés à plat, sous-dossier compris…
+        assert_eq!(maison.count, 2);
+        // …et les sous-dossiers sont décrits à part.
+        let rels: Vec<&str> = maison.subfolders.iter().map(|s| s.rel.as_str()).collect();
+        assert_eq!(rels, vec!["Maison/sous"]);
+
+        let sous = &maison.subfolders[0];
+        assert_eq!(sous.name, "sous");
+        assert_eq!(sous.count, 1);
+        assert!(sous.modified.is_some());
+        assert_eq!(sous.note.as_deref(), Some("# Note du sous-dossier"));
+    }
+
+    #[test]
+    fn sous_dossiers_imbriques_et_vide() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("Maison/sous/encore")).unwrap();
+        fs::create_dir_all(root.join("Maison/vide")).unwrap();
+        fs::write(root.join("Maison/sous/encore/x.stl"), "x").unwrap();
+
+        let scan = scan_models(root);
+        // Tous les descendants sont listés à la suite : c'est le frontend qui
+        // reconstitue la hiérarchie, en filtrant sur le dossier parent.
+        let mut rels: Vec<&str> = scan.folders["Maison"]
+            .subfolders
+            .iter()
+            .map(|s| s.rel.as_str())
+            .collect();
+        rels.sort();
+        assert_eq!(rels, vec!["Maison/sous", "Maison/sous/encore", "Maison/vide"]);
+
+        // Un sous-dossier vide est décrit lui aussi : l'interface doit pouvoir
+        // distinguer « vide » de « absent ».
+        let vide = scan.folders["Maison"]
+            .subfolders
+            .iter()
+            .find(|s| s.rel == "Maison/vide")
+            .unwrap();
+        assert_eq!(vide.count, 0);
+    }
+
+    #[test]
+    fn dossier_sans_sous_dossier() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("DemaAuto")).unwrap();
+        fs::write(root.join("DemaAuto/a.stl"), "x").unwrap();
+
+        let scan = scan_models(root);
+        assert!(scan.folders["DemaAuto"].subfolders.is_empty());
     }
 }

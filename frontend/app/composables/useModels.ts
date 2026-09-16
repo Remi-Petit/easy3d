@@ -28,8 +28,30 @@ export interface FolderInfo {
    * l'édition d'un fichier existant.
    */
   modified: number | null
+  /**
+   * Fichiers du dossier **et de ses sous-dossiers** (le scan est récursif) :
+   * `subfolders` dit lesquels sont rangés où.
+   */
   files: FileInfo[]
+  /**
+   * Sous-dossiers, à plat (tous les descendants, pas seulement les enfants
+   * directs). Absent quand le dossier n'en a aucun.
+   */
+  subfolders?: SubFolderInfo[]
   /** Note explicative (Markdown) du dossier, si présente. */
+  note?: string | null
+}
+
+/** Sous-dossier d'un dossier du catalogue. */
+export interface SubFolderInfo {
+  /** Chemin relatif à la racine (`Maison/sous`) : sert aussi d'identifiant. */
+  rel: string
+  /** Nom du dossier seul (dernier segment du chemin). */
+  name: string
+  /** Nombre de fichiers contenus, récursivement. */
+  count: number
+  modified: number | null
+  /** Note explicative (Markdown) du sous-dossier, si présente. */
   note?: string | null
 }
 

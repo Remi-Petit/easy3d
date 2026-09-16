@@ -74,7 +74,10 @@
     "meta": "{count} file · {when} | {count} files · {when}",
     "empty": "Empty folder",
     "noMatch": "No file matches the filter.",
-    "hasNote": "This folder has a note"
+    "hasNote": "This folder has a note",
+    "subfolders": "Subfolders ({count})",
+    "files": "Files ({count})",
+    "notFound": "Folder not found."
   },
   "file": {
     "subtitle": "{type} · {when}",
