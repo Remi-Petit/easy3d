@@ -528,7 +528,11 @@ mod tests {
         fs::create_dir_all(root.join("Maison/.easy3d-thumbs")).unwrap();
         fs::write(root.join("Maison/a.stl"), "x").unwrap();
         fs::write(root.join("Maison/sous/b.stl"), "y").unwrap();
-        fs::write(root.join(".easy3d-notes/Maison/sous.md"), "# Note du sous-dossier").unwrap();
+        fs::write(
+            root.join(".easy3d-notes/Maison/sous.md"),
+            "# Note du sous-dossier",
+        )
+        .unwrap();
 
         let scan = scan_models(root);
         let maison = &scan.folders["Maison"];
@@ -563,7 +567,10 @@ mod tests {
             .map(|s| s.rel.as_str())
             .collect();
         rels.sort();
-        assert_eq!(rels, vec!["Maison/sous", "Maison/sous/encore", "Maison/vide"]);
+        assert_eq!(
+            rels,
+            vec!["Maison/sous", "Maison/sous/encore", "Maison/vide"]
+        );
 
         // Un sous-dossier vide est décrit lui aussi : l'interface doit pouvoir
         // distinguer « vide » de « absent ».

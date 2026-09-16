@@ -2,7 +2,7 @@ use easy3d::{api, config, formats, thumbnail, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -135,15 +135,41 @@ fn watch_dir(
         );
     }
 
-    for result in rx {
+    // Re-scan périodique, si demandé : le filet de sécurité des systèmes de
+    // fichiers qui ne remontent pas d'événements (voir `config::watch_poll_interval`).
+    let poll = config::watch_poll_interval();
+    if let Some(d) = poll {
+        println!(
+            "Re-scan périodique toutes les {} s : rattrape les changements qu'aucun \
+             événement ne signale.",
+            d.as_secs()
+        );
+    }
+
+    loop {
+        // Sans période configurée, `recv` bloque jusqu'au prochain lot ; avec
+        // `EASY3D_WATCH_POLL`, le `recv_timeout` rend la main à intervalles
+        // réguliers : c'est là qu'on rattrape ce qu'inotify n'a pas signalé.
+        let result = match poll {
+            Some(d) => rx.recv_timeout(d),
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+
         let events = match result {
-            Ok(events) => events,
-            Err(errors) => {
+            Ok(Ok(events)) => events,
+            Ok(Err(errors)) => {
                 for error in errors {
                     eprintln!("Erreur : {error}");
                 }
                 continue;
             }
+            Err(RecvTimeoutError::Timeout) => {
+                if api::refresh_if_changed(&state) {
+                    println!("Re-scan périodique : le catalogue a changé, liste rediffusée.");
+                }
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
         };
 
         let mut models_changed = false;

@@ -15,11 +15,27 @@ services:
     pull_policy: build
     container_name: easy3d
     restart: unless-stopped
+    environment:
+      # Filet de sécurité pour les partages de fichiers virtualisés (Docker
+      # Desktop sous Windows/macOS) : ils ne remontent **aucun** événement
+      # inotify — ni pour un fichier écrit depuis l'hôte, ni pour quoi que ce
+      # soit dans un sous-dossier. Sans ce re-scan, un modèle déposé dans
+      # `models/` hors de l'interface (ou via l'interface, dont l'API rediffuse
+      # elle-même) n'y apparaîtrait qu'après redémarrage. `0` désactive.
+      EASY3D_WATCH_POLL: "5"
     ports:
       - "3100:3000" # interface web : catalogue, aperçu 3D, notes
       - "3101:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
     volumes:
-      - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
+      # Tes modèles : lus, et écrits (aperçus + notes).
+      #
+      # Attention : sous Docker Desktop (Windows/macOS), le partage de fichiers
+      # ne remonte les événements inotify que pour la **racine** du montage. Le
+      # backend ne s'appuie donc pas dessus pour ses propres écritures : `/upload`
+      # rediffuse lui-même la liste (voir `post_upload`). Seules les
+      # modifications faites hors de l'interface, dans un sous-dossier, ne sont
+      # pas détectées à chaud.
+      - ./models:/models
       - easy3d-config:/config # configuration, réécrite par la page /admin
 
 volumes:

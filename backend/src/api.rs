@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
+use crate::thumbnail;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -37,6 +38,12 @@ pub struct AppState {
     pub ws: broadcast::Sender<String>,
     /// Documents collaboratifs ouverts (édition temps réel des notes).
     pub collab: Arc<collab::Rooms>,
+    /// Dernière liste diffusée aux clients WS (JSON).
+    ///
+    /// Référence du **re-scan périodique** ([`refresh_if_changed`]) : sans elle,
+    /// chaque tic rediffuserait un contenu identique et le frontend, qui
+    /// remplace son état à chaque message, se re-rendrait pour rien.
+    pub last_snapshot: Arc<RwLock<String>>,
 }
 
 impl AppState {
@@ -48,6 +55,7 @@ impl AppState {
             config_path: Arc::new(Config::config_path()),
             ws,
             collab: Arc::new(collab::Rooms::new()),
+            last_snapshot: Arc::new(RwLock::new(String::new())),
         }
     }
 
@@ -125,7 +133,10 @@ pub fn routes(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/config", get(get_config).put(put_config))
         .route("/file", get(get_file))
-        .route("/upload", post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)))
+        .route(
+            "/upload",
+            post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)),
+        )
         .route("/note", get(get_note))
         .route("/health", get(health))
         .route("/ws", get(ws_models))
@@ -509,7 +520,9 @@ async fn post_upload(
     // commence par un point.
     if q.path.contains('\\')
         || q.path.ends_with('/')
-        || q.path.split('/').any(|part| part.is_empty() || part.starts_with('.'))
+        || q.path
+            .split('/')
+            .any(|part| part.is_empty() || part.starts_with('.'))
     {
         return Err(refuse(format!("chemin réservé : « {} »", q.path)));
     }
@@ -517,26 +530,47 @@ async fn post_upload(
         return Err(refuse(format!("fichier vide : « {} »", q.path)));
     }
     if relative.is_dir() {
-        return Err(refuse(format!("un dossier porte déjà ce nom : « {} »", q.path)));
+        return Err(refuse(format!(
+            "un dossier porte déjà ce nom : « {} »",
+            q.path
+        )));
     }
 
     // Les dossiers manquants sont créés : un envoi de dossier arrive fichier par
     // fichier, dans un ordre qui n'est pas garanti.
     if let Some(dir) = relative.parent() {
-        tokio::fs::create_dir_all(dir).await.map_err(internal_error)?;
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(internal_error)?;
     }
 
     let tmp = temp_path(&relative);
-    tokio::fs::write(&tmp, &body).await.map_err(internal_error)?;
+    tokio::fs::write(&tmp, &body)
+        .await
+        .map_err(internal_error)?;
     // Sous Windows, `rename` refuse d'écraser : on efface la destination d'abord.
     // Le contenu complet est déjà dans le temporaire, la fenêtre est minuscule.
     if relative.exists() {
-        tokio::fs::remove_file(&relative).await.map_err(internal_error)?;
+        tokio::fs::remove_file(&relative)
+            .await
+            .map_err(internal_error)?;
     }
     if let Err(e) = tokio::fs::rename(&tmp, &relative).await {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(internal_error(e));
     }
+
+    // L'écriture vient de l'API elle-même : on ne peut pas se reposer sur le
+    // watcher pour l'annoncer. Sous Docker Desktop, le partage de fichiers ne
+    // remonte que les événements de la **racine** du montage : un modèle déposé
+    // dans un sous-dossier n'en produit aucun, et l'interface resterait figée
+    // (dossier affiché vide) jusqu'au rechargement de la page.
+    //
+    // L'aperçu est donc généré ici (le watcher ne le fera pas non plus), puis
+    // la liste est rediffusée à tous les clients WebSocket.
+    let root = state.root();
+    thumbnail::ensure_for_changed(&root, &root.join(thumbnail::THUMB_DIR), &relative);
+    broadcast_snapshot(&state);
 
     Ok(Json(UploadResponse {
         rel: q.path,
@@ -583,11 +617,35 @@ async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> 
 }
 
 /// Rescanne l'état courant et diffuse la liste des modèles aux clients WS.
+///
+/// Diffuse **toujours** (l'appelant sait qu'il a quelque chose à annoncer) :
+/// c'est le re-scan périodique, lui, qui filtre les contenus inchangés.
 pub fn broadcast_snapshot(state: &AppState) {
-    let payload = ModelsResponse::from_scan(scanner::scan_models(&state.root()), &state.config());
-    if let Ok(json) = serde_json::to_string(&payload) {
-        let _ = state.ws.send(json);
+    let payload = snapshot(state);
+    *state.last_snapshot.write().unwrap() = payload.clone();
+    let _ = state.ws.send(payload);
+}
+
+/// Re-scanne le catalogue et ne rediffuse **que si le contenu a changé**.
+///
+/// Appelé à intervalle régulier quand `EASY3D_WATCH_POLL` est armé (voir
+/// `main.rs`) : les systèmes de fichiers virtualisés (partages de fichiers
+/// Docker Desktop, montages réseau) ne remontent aucun événement, donc un
+/// dossier ajouté hors de l'interface n'annoncerait rien. Les aperçus manquants
+/// sont générés au passage — le watcher, lui, les régénère au fil de ses
+/// événements.
+///
+/// Retourne `true` si une liste a été diffusée.
+pub fn refresh_if_changed(state: &AppState) -> bool {
+    let unchanged = snapshot(state) == *state.last_snapshot.read().unwrap();
+    if unchanged {
+        return false;
     }
+
+    let root = state.root();
+    thumbnail::generate_all(&root, &root.join(thumbnail::THUMB_DIR));
+    broadcast_snapshot(state);
+    true
 }
 
 #[cfg(test)]
@@ -952,12 +1010,12 @@ mod tests {
         let app = test_app(dir.path().to_str().unwrap());
 
         for rel in [
-            "..%2Fsecret.stl",      // hors de la racine
-            "%2Fabsolu.stl",        // chemin absolu
-            "a%5Cb.stl",            // contre-oblique (séparateur Windows)
-            "sous%2F",              // se termine par un séparateur
+            "..%2Fsecret.stl",        // hors de la racine
+            "%2Fabsolu.stl",          // chemin absolu
+            "a%5Cb.stl",              // contre-oblique (séparateur Windows)
+            "sous%2F",                // se termine par un séparateur
             ".easy3d-thumbs%2Fx.png", // dossier interne du backend
-            "DemaAuto",             // un dossier porte déjà ce nom
+            "DemaAuto",               // un dossier porte déjà ce nom
         ] {
             let res = app
                 .clone()
@@ -970,8 +1028,108 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "devrait refuser {rel}");
+            assert_eq!(
+                res.status(),
+                StatusCode::BAD_REQUEST,
+                "devrait refuser {rel}"
+            );
         }
+    }
+
+    /// Un envoi rediffuse **immédiatement** la liste, sans attendre le watcher.
+    ///
+    /// C'est ce qui fait apparaître un sous-dossier fraîchement créé : le
+    /// watcher ne peut pas s'en charger (sous Docker Desktop, le partage de
+    /// fichiers ne remonte que les événements de la racine du montage).
+    #[tokio::test]
+    async fn upload_rediffuse_la_liste_sans_le_watcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+
+        let res = routes(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/upload?path=Maison%2FToit%2Fpiece.stl")
+                    .body(Body::from("solid x\nendsolid x\n"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Au moins une rediffusion, dont le contenu voit déjà le fichier : c'est
+        // la condition pour que le dossier n'apparaisse pas « vide ».
+        let payload = updates
+            .try_recv()
+            .expect("aucune rediffusion après l'envoi");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v["folders"]["Maison"]["subfolders"][0]["count"], 1);
+        assert_eq!(
+            v["folders"]["Maison"]["subfolders"][0]["rel"],
+            "Maison/Toit"
+        );
+    }
+
+    /// Le re-scan périodique rattrape ce qu'aucun événement n'a signalé : un
+    /// dossier ajouté **hors de l'interface**, comme dans le partage de fichiers
+    /// d'un conteneur Docker Desktop (qui ne remonte rien du tout).
+    #[tokio::test]
+    async fn rescan_periodique_rediffuse_un_ajout_hors_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+
+        // Premier tic : rien à comparer, la liste (vide) est publiée une fois.
+        assert!(refresh_if_changed(&state));
+        let _ = updates.try_recv().unwrap();
+
+        // Rien n'a bougé → aucune rediffusion : le frontend remplace son état à
+        // chaque message, un tic ne doit pas provoquer de re-rendu.
+        assert!(!refresh_if_changed(&state));
+        assert!(updates.try_recv().is_err(), "rediffusion inutile");
+
+        // L'ajout, fait « à la main » : aucun événement n'entre en jeu ici.
+        std::fs::create_dir_all(dir.path().join("Maison/Toit")).unwrap();
+        std::fs::write(
+            dir.path().join("Maison/Toit/piece.stl"),
+            "solid piece\n\
+             facet normal 0 0 1\n\
+             outer loop\n\
+             vertex 0 0 0\n\
+             vertex 1 0 0\n\
+             vertex 0 1 0\n\
+             endloop\n\
+             endfacet\n\
+             endsolid piece\n",
+        )
+        .unwrap();
+
+        assert!(refresh_if_changed(&state));
+        let payload = updates
+            .try_recv()
+            .expect("aucune rediffusion après l'ajout");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v["folders"]["Maison"]["subfolders"][0]["count"], 1);
+        // Aperçu généré au passage : la carte a une vignette, comme après un
+        // envoi par l'interface.
+        assert!(
+            v["folders"]["Maison"]["files"][0]["image"].is_string(),
+            "aperçu manquant : {v}"
+        );
+        // Stabilisé : plus rien à annoncer tant que rien ne bouge.
+        assert!(!refresh_if_changed(&state));
     }
 
     #[tokio::test]
