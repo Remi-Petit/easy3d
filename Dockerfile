@@ -5,8 +5,12 @@
 # `scripts/docker-entrypoint.sh` — voir ce fichier pour le pourquoi.
 #
 #   docker compose -f docker-compose.yml up --build
-#   → interface : http://localhost:3000
-#   → API + MCP : http://localhost:8090   (MCP sur /mcp)
+#   → interface : http://localhost:3100
+#   → API + MCP : http://localhost:3101   (MCP sur /mcp)
+#
+# Les ports **publiés** sont choisis par `docker-compose.yml` (3100 et 3101) pour
+# laisser 3000 et 8090 à un poste de développement local : un `bun run dev` et un
+# `cargo run` sur l'hôte ne se marchent donc pas dessus.
 
 # ── 1. Backend (Rust) ──────────────────────────────────────────────────────
 FROM rust:1.98-slim-bookworm AS backend
