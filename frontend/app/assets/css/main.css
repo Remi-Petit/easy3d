@@ -85,6 +85,40 @@ body {
   width: 13rem;
 }
 
+/* Zone de dépôt de fichiers (voir le layout `default`) : elle n'existe
+   visuellement qu'au survol d'un fichier glissé, pour ne rien changer au
+   reste du temps. */
+.drop {
+  position: relative;
+}
+
+.drop__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(10, 14, 22, 0.85);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.drop__hint {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.drop__where {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 /* Nom de l'app dans la sidebar (volontairement pas un titre : le <h1> du
    document est celui de la page, rendu par l'en-tête). */
 .brand__name {
@@ -342,6 +376,74 @@ body {
 
 .sort:not(.sort--none) .sort__icon {
   color: var(--accent-2);
+}
+
+/* Bouton d'ajout de fichiers (voir `UploadButton`) : même facture que le tri. */
+.add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.add:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.add__icon {
+  color: var(--muted);
+}
+
+/* Sélections masquées : seules les entrées du menu les ouvrent. */
+.add__input {
+  display: none;
+}
+
+/* Avancement puis bilan de l'envoi : sur sa propre ligne, sous la barre. */
+.add__status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.add__status--ok {
+  color: var(--ok);
+}
+
+.add__status--err {
+  color: var(--err);
+}
+
+.add__count {
+  margin: 0;
+}
+
+/* Détail des fichiers refusés : le nom et le motif, un par ligne. */
+.add__failures {
+  margin: 2px 0 0;
+  padding-left: 18px;
 }
 
 /* Puces de filtre par type : même vocabulaire que les `.pill` de l'en-tête. */

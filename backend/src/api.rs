@@ -3,11 +3,12 @@ use crate::config::Config;
 use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -124,6 +125,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/models", get(list_models))
         .route("/config", get(get_config).put(put_config))
         .route("/file", get(get_file))
+        .route("/upload", post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)))
         .route("/note", get(get_note))
         .route("/health", get(health))
         .route("/ws", get(ws_models))
@@ -445,6 +447,115 @@ fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
         return None;
     }
     Some(root.join(rel))
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Envoi de fichiers
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Taille maximale acceptée par `POST /upload`.
+///
+/// axum plafonne à 2 Mo par défaut : le moindre G-code dépasserait la limite
+/// avant même d'atteindre le handler.
+const UPLOAD_MAX_BYTES: usize = 1024 * 1024 * 1024;
+
+/// Query param de `/upload` : chemin relatif du fichier à écrire.
+#[derive(Deserialize)]
+struct UploadQuery {
+    path: String,
+}
+
+/// Réponse d'un envoi réussi.
+#[derive(Serialize)]
+struct UploadResponse {
+    /// Chemin relatif écrit, tel qu'il apparaîtra dans le catalogue.
+    rel: String,
+    /// Nombre d'octets écrits.
+    bytes: u64,
+}
+
+/// Écrit un fichier dans le dossier des modèles (`POST /upload?path=<rel>`).
+///
+/// Le corps de la requête **est** le contenu du fichier : ni `multipart`, ni
+/// dépendance supplémentaire, et le navigateur peut envoyer un `File` tel quel
+/// (`fetch(url, { method: 'POST', body: file })`). Un envoi de dossier se fait
+/// donc fichier par fichier, le client recopiant l'arborescence dans `path`.
+///
+/// Écriture **atomique** : le contenu part dans un fichier temporaire caché du
+/// même dossier (donc invisible du scan), puis est renommé sur sa destination.
+/// Sans ça, le watcher pourrait scanner — et un aperçu être généré à partir de —
+/// un fichier à moitié écrit.
+///
+/// Écraser est permis : réenvoyer un modèle corrigé est un besoin courant, et
+/// c'est sans danger pour les caches (la version du fichier change, donc son
+/// `ETag`, l'URL de son aperçu, et l'aperçu lui-même est régénéré).
+async fn post_upload(
+    State(state): State<AppState>,
+    Query(q): Query<UploadQuery>,
+    body: Bytes,
+) -> Result<Json<UploadResponse>, (StatusCode, String)> {
+    let refuse = |msg: String| (StatusCode::BAD_REQUEST, msg);
+
+    // `path` vient du client : mêmes garde-fous que la lecture (voir `safe_join`).
+    let Some(relative) = safe_join(&state.root(), &q.path) else {
+        return Err(refuse(format!("chemin invalide : « {} »", q.path)));
+    };
+    // L'API sépare les composants par `/` : une contre-oblique serait un nom de
+    // fichier littéral sous Linux mais un séparateur sous Windows. Refusée des
+    // deux côtés, pour que le chemin écrit soit celui qui sera relu.
+    //
+    // Ni dossier, ni élément caché : `.easy3d-thumbs` et `.easy3d-notes`
+    // appartiennent au backend, et le scan ignore de toute façon tout ce qui
+    // commence par un point.
+    if q.path.contains('\\')
+        || q.path.ends_with('/')
+        || q.path.split('/').any(|part| part.is_empty() || part.starts_with('.'))
+    {
+        return Err(refuse(format!("chemin réservé : « {} »", q.path)));
+    }
+    if body.is_empty() {
+        return Err(refuse(format!("fichier vide : « {} »", q.path)));
+    }
+    if relative.is_dir() {
+        return Err(refuse(format!("un dossier porte déjà ce nom : « {} »", q.path)));
+    }
+
+    // Les dossiers manquants sont créés : un envoi de dossier arrive fichier par
+    // fichier, dans un ordre qui n'est pas garanti.
+    if let Some(dir) = relative.parent() {
+        tokio::fs::create_dir_all(dir).await.map_err(internal_error)?;
+    }
+
+    let tmp = temp_path(&relative);
+    tokio::fs::write(&tmp, &body).await.map_err(internal_error)?;
+    // Sous Windows, `rename` refuse d'écraser : on efface la destination d'abord.
+    // Le contenu complet est déjà dans le temporaire, la fenêtre est minuscule.
+    if relative.exists() {
+        tokio::fs::remove_file(&relative).await.map_err(internal_error)?;
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, &relative).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(internal_error(e));
+    }
+
+    Ok(Json(UploadResponse {
+        rel: q.path,
+        bytes: body.len() as u64,
+    }))
+}
+
+/// Chemin du fichier temporaire d'écriture : **caché** (le scan et le
+/// générateur d'aperçus l'ignorent), dans le dossier de destination — un
+/// `rename` ne traverse pas les systèmes de fichiers.
+fn temp_path(target: &Path) -> PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let name = format!(".easy3d-part-{}-{unique}", std::process::id());
+    target
+        .parent()
+        .map_or_else(|| PathBuf::from(&name), |dir| dir.join(&name))
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -778,6 +889,107 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn upload_ecrit_le_fichier_et_cree_les_dossiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/upload?path=sous%2Fnouveau.stl")
+                    .body(Body::from("solid x"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = res.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(json["rel"], "sous/nouveau.stl");
+        assert_eq!(json["bytes"], 7);
+
+        let written = std::fs::read_to_string(dir.path().join("sous/nouveau.stl")).unwrap();
+        assert_eq!(written, "solid x");
+        // Aucun temporaire laissé derrière (il est caché, donc jamais scanné).
+        let leftovers = std::fs::read_dir(dir.path().join("sous"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".easy3d-part"))
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[tokio::test]
+    async fn upload_remplace_le_fichier_existant() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.stl"), "ancien").unwrap();
+
+        let app = test_app(dir.path().to_str().unwrap());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/upload?path=model.stl")
+                    .body(Body::from("nouveau"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let written = std::fs::read_to_string(dir.path().join("model.stl")).unwrap();
+        assert_eq!(written, "nouveau");
+    }
+
+    /// Chemins que l'écriture doit refuser : hors racine, réservés, ou visant un
+    /// dossier.
+    #[tokio::test]
+    async fn upload_refuse_les_chemins_invalides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("DemaAuto")).unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+
+        for rel in [
+            "..%2Fsecret.stl",      // hors de la racine
+            "%2Fabsolu.stl",        // chemin absolu
+            "a%5Cb.stl",            // contre-oblique (séparateur Windows)
+            "sous%2F",              // se termine par un séparateur
+            ".easy3d-thumbs%2Fx.png", // dossier interne du backend
+            "DemaAuto",             // un dossier porte déjà ce nom
+        ] {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/upload?path={rel}"))
+                        .body(Body::from("x"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "devrait refuser {rel}");
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_refuse_un_fichier_vide() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path().to_str().unwrap());
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/upload?path=vide.stl")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(!dir.path().join("vide.stl").exists());
     }
 
     /// Intégration WebSocket : connexion réelle → snapshot initial, puis

@@ -28,6 +28,18 @@
     "label": "Language",
     "choose": "Choose language"
   },
+  "upload": {
+    "add": "Add",
+    "files": "Files…",
+    "folder": "Folder…",
+    "into": "Into “{folder}”",
+    "running": "Uploading {done}/{total} · {name}",
+    "done": "{count} file added | {count} files added",
+    "failed": "{count} failure | {count} failures",
+    "empty": "Nothing to send in this selection.",
+    "dropHere": "Drop files here",
+    "atRoot": "at the catalogue root"
+  },
   "filter": {
     "placeholder": "Filter by file or folder name…",
     "placeholderFolder": "Filter by file name…",

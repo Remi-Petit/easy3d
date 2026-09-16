@@ -28,6 +28,18 @@
     "label": "Sprache",
     "choose": "Sprache wählen"
   },
+  "upload": {
+    "add": "Hinzufügen",
+    "files": "Dateien…",
+    "folder": "Ordner…",
+    "into": "Nach „{folder}“",
+    "running": "Senden {done}/{total} · {name}",
+    "done": "{count} Datei hinzugefügt | {count} Dateien hinzugefügt",
+    "failed": "{count} Fehler | {count} Fehler",
+    "empty": "Keine versendbare Datei in der Auswahl.",
+    "dropHere": "Dateien hier ablegen",
+    "atRoot": "im Katalogstammverzeichnis"
+  },
   "filter": {
     "placeholder": "Nach Datei- oder Ordnernamen filtern…",
     "placeholderFolder": "Nach Dateinamen filtern…",
