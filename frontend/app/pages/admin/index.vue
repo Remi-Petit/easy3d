@@ -86,6 +86,16 @@ function useRecommended() {
   persist()
 }
 
+/**
+ * Retire la valeur choisie : retour à « automatique », où c'est la
+ * recommandation du backend qui décide. Le champ vide *est* ce mode, mais il
+ * faut pouvoir y revenir après avoir saisi un nombre.
+ */
+function resetToAuto() {
+  pollSeconds.value = null
+  persist()
+}
+
 /** Enregistrement en cours / dernière valeur demandée (voir `persist`). */
 let inFlight = false
 let queued = false
@@ -282,6 +292,15 @@ usePageHeader(() => ({
             @click="useRecommended"
           >
             {{ $t('admin.watchUse', { seconds: watchInfo.recommended }) }}
+          </button>
+          <!-- Non affiché en mode automatique : il n'y aurait rien à retirer. -->
+          <button
+            v-if="pollValue !== null"
+            type="button"
+            class="admin__action"
+            @click="resetToAuto"
+          >
+            {{ $t('admin.watchAutoAction') }}
           </button>
         </div>
         <p class="admin__hint">{{ $t('admin.watchHint') }}</p>

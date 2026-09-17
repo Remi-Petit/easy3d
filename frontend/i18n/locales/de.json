@@ -179,6 +179,7 @@
     "watchAuto": "auto",
     "watchHint": "Nützlich, wenn das Dateisystem Dateien nicht meldet, die außerhalb der Oberfläche abgelegt werden (freigegebener Ordner, Netzwerk-Mount): leer = automatisch, 0 = deaktiviert.",
     "watchUse": "{seconds} s verwenden",
+    "watchAutoAction": "Automatisch",
     "watchApplied": "Überwachung",
     "watchOff": "kein Neuscanning (Echtzeit)",
     "watchEvery": "Neuscanning alle {seconds} s",

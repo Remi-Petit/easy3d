@@ -38,9 +38,14 @@ test('réglages : le re-scan périodique se règle, s’applique et se garde', a
   await expect(page.getByPlaceholder('auto')).toHaveValue('15')
   await expect(page.getByText('re-scan toutes les 15 s')).toBeVisible()
 
-  // Champ vidé → « automatique » : plus aucune valeur imposée, la
-  // recommandation reprend la main.
-  await page.getByPlaceholder('auto').fill('')
-  await page.getByPlaceholder('auto').press('Tab')
+  // Une valeur choisie se retire par un bouton : le champ vide *est* le mode
+  // automatique, il faut donc pouvoir y revenir sans le savoir.
+  const auto = page.getByRole('button', { name: 'Automatique' })
+  await expect(auto).toBeVisible()
+
+  await auto.click()
+  await expect(page.getByPlaceholder('auto')).toHaveValue('')
   await expect(page.getByText('aucun re-scan (temps réel)')).toBeVisible()
+  // En automatique, il n'y a plus rien à retirer : le bouton disparaît.
+  await expect(auto).toHaveCount(0)
 })
