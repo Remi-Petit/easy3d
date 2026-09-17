@@ -179,6 +179,7 @@
     "watchAuto": "auto",
     "watchHint": "Useful when the filesystem does not report files dropped outside the interface (shared folder, network mount): empty = automatic, 0 = disabled.",
     "watchUse": "Use {seconds} s",
+    "watchAutoAction": "Automatic",
     "watchApplied": "Watching",
     "watchOff": "no re-scan (real time)",
     "watchEvery": "re-scan every {seconds} s",

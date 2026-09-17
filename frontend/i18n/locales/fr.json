@@ -179,6 +179,7 @@
     "watchAuto": "auto",
     "watchHint": "Utile quand le système de fichiers ne signale pas les fichiers déposés hors de l'interface (dossier partagé, montage réseau) : vide = automatique, 0 = désactivé.",
     "watchUse": "Utiliser {seconds} s",
+    "watchAutoAction": "Automatique",
     "watchApplied": "Surveillance",
     "watchOff": "aucun re-scan (temps réel)",
     "watchEvery": "re-scan toutes les {seconds} s",

@@ -179,6 +179,7 @@
     "watchAuto": "auto",
     "watchHint": "Útil cuando el sistema de archivos no informa de los archivos depositados fuera de la interfaz (carpeta compartida, montaje de red): vacío = automático, 0 = desactivado.",
     "watchUse": "Usar {seconds} s",
+    "watchAutoAction": "Automático",
     "watchApplied": "Vigilancia",
     "watchOff": "sin re-escaneo (tiempo real)",
     "watchEvery": "re-escaneo cada {seconds} s",
