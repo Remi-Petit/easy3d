@@ -2,42 +2,38 @@
 
 [![release](https://img.shields.io/github/v/release/Remi-Petit/easy3d?sort=semver&label=release)](https://github.com/Remi-Petit/easy3d/releases/latest)
 [![CI](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml/badge.svg)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/Remi-Petit/easy3d)](LICENSE)
 
-Catalogue de modèles 3D **auto-hébergé** : un dossier de fichiers (STL, OBJ, 3MF,
-G-code), une interface pour le parcourir, et un serveur MCP pour qu'un agent IA
-puisse le lire — et le documenter.
+Une solution pour gérer ses modèles 3D de manière **auto-hébergé**.
 
-## À quoi ça sert
+## Contexte
 
-easy3d affiche le contenu d'un dossier de modèles 3D : vignettes, métadonnées,
-recherche et filtre par format, aperçu 3D interactif dans le navigateur. Chaque
-fichier — et chaque dossier — peut porter une **note Markdown**, éditable dans
-l'interface et **en temps réel** à plusieurs.
+Il existe déjà plusieurs projets open source permettant de gérer les modèles 3D. 
+Avant de faire celui-ci, j'ai notamment utilisé [GyroidVault](https://github.com/TeeCodeDev/GyroidVault) et [STLVault](https://github.com/moddroid94/STLVault).
 
-Le serveur surveille le dossier : déposer un fichier le fait apparaître, le
-modifier met à jour son aperçu, le renommer emmène sa note. Rien à relancer.
+Il en existe d'autres, dont [Manyfold](https://github.com/manyfold3d/manyfold), mais je n'étais pas totalement satisfait de ces outils. Je voulais quelque chose de simple, qui ne consomme pas trop de ressources et s'intègre facilement à mon espace de travail.
+
+J'ai vibecodé cet outil en faisant bien attention aux tests pour éviter les régressions. Je fais aussi attention à l'architecture du projet pour pouvoir ajouter des fonctionnalités sans trop de soucis. Je prévois de gérer pas mal de langues.
+
+A l'heure actuelle, mon [Beszel](https://github.com/henrygd/beszel) affiche une consommation de 0.02% du CPU et 76.8 Mo de RAM.
 
 ## Ce qui le distingue
 
 - **Un seul conteneur, une seule commande** : l'API Rust et l'interface Nuxt
   tiennent dans la même image, en deux process supervisés.
-- **Pas de base de données.** Tes modèles restent des fichiers et tes notes des
-  `.md` rangés à côté (`models/.easy3d-notes/`) : la source de vérité est ton
-  dossier, lisible et modifiable sans l'outil.
+- **Pas de base de données.** Tout est gérer via des fichiers markdown. Le backend détecte les modifications provenant du dossier `models/` et met à jour l'app automatiquement. Il n'est donc pas obligatoire d'ajouter les fichiers depuis l'interface web, on peut très bien n'utiliser que le dossier en question.
+Ce n'est pas un système de polling, ça utilise la librairie notify de rust permettant de récupérer l'information en temps réel.
+L'avantage, c'est que vous ne dépendez pas de l'outil, c'est l'outil qui s'adapte à vous.
 - **Aperçus générés par le serveur, sans GPU** : STL / OBJ / 3MF rasterisés en
   CPU, vignette embarquée extraite des G-code. La grille reste légère même avec
   des centaines de fichiers.
-- **Notes collaboratives** (CRDT Yjs) : deux personnes — ou une personne et un
-  agent — écrivent la même note sans s'écraser.
-- **Ajouter un format = un fichier** : `backend/src/formats/` isole chaque format
-  (extensions, type MIME, aperçu, visionneuse) dans son module, et l'API annonce
-  la liste au frontend, qui n'a aucune extension codée en dur.
+- **Notes collaboratives** (CRDT Yjs) : Les utilisateurs peuvent ajouter des notes sur des dossiers / fichiers. Tout est stocké en markdown, pas de base de donnée. Ça a été conçu pour pouvoir fonctionner en temps réel. Via le serveur MCP, l'IA peut lire / ajouter / modifier des notes.
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
-  consulte et modifie la configuration — par le même chemin que l'interface, donc
+  consulte et modifie la configuration par le même chemin que l'interface, donc
   sans jamais écraser une édition en cours.
-- <!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 133 clés, traduites à 100 %.<!-- langues:end -->
+- **4 langues** : Français, English, Deutsch, Español, traduites à 100 %. D'autres sont à prévoir.
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
-  tests unitaires du frontend, tests de bout en bout Playwright — et une CI qui
+  tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
 
 ## Démarrage
@@ -102,14 +98,19 @@ agent s'authentifie (le portail web, lui, attend un login navigateur).
 L'API n'a pas d'authentification : garde-la sur `localhost`, ou ajoute un jeton
 avant de l'exposer.
 
-## IA
+## Précisions
 
-Ce projet a été développé **en binôme avec une IA** (GitHub Copilot, dans VS Code) :
-l'architecture, le backend Rust, le frontend Nuxt, les tests, l'image Docker, la
-CI et la chaîne de release ont été écrits au fil de la conversation. Les choix
-ont été tranchés côté humain, et chaque étape validée par l'exécution réelle —
-tests, conteneur lancé, workflows vérifiés — y compris les bugs que seul le
-lancement révélait.
+Vous vous demandez peut-être où sont stockés les informations (images générées, notes markdown) vu qu'il n'y a pas de base de donnée. Tout est ajouté via des dossiers cachés à la racine de vos modèles. Ça ne touche donc jamais directement à vos modèles et ce n'est pas visible directement.
+
+| Contenu | Emplacement |
+| --- | --- |
+| Images | `models/.easy3d-thumbs` |
+| Notes | `models/.easy3d-notes` |
+
+
+## Développement
+
+Le projet est toujours en cours de développement et est récent. Si vous voyez des bugs ou autre, n'hésitez pas à créer une issue. Il s'agit de mon premier projet open source, soyez indulgent s'il vous plaît :p.
 
 Pour développer : `cargo run` dans `backend/` et `bun run dev` dans `frontend/`
 (tests : `cargo test`, `bun run test`, `bun run test:e2e`).
