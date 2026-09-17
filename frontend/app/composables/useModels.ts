@@ -62,6 +62,29 @@ export interface AppConfig {
   display?: {
     mode?: DisplayMode
   }
+  /**
+   * Surveillance du dossier des modèles. `poll_seconds` absent = automatique
+   * (la recommandation du backend décide), `0` = aucun re-scan.
+   */
+  watch?: {
+    poll_seconds?: number | null
+  }
+}
+
+/** Ce que `/api/config` expose sur le re-scan périodique. */
+export interface WatchInfo {
+  /** Intervalle recommandé pour cette installation, en secondes (`0` = aucun). */
+  recommended: number
+  /** Intervalle réellement appliqué par le backend (`0` = aucun re-scan). */
+  effective: number
+  /** Type du système de fichiers portant `models/` (renseigné sous Linux). */
+  filesystem?: string | null
+}
+
+export interface ConfigResponse {
+  config: AppConfig
+  models_root: string
+  watch: WatchInfo
 }
 
 export interface ModelsResponse {

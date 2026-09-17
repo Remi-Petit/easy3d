@@ -24,7 +24,7 @@ A l'heure actuelle, mon [Beszel](https://github.com/henrygd/beszel) affiche une 
 - **Pas de base de données.** Tout est gérer via des fichiers markdown. Le backend détecte les modifications provenant du dossier `models/` et met à jour l'app automatiquement. Il n'est donc pas obligatoire d'ajouter les fichiers depuis l'interface web, on peut très bien n'utiliser que le dossier en question.
 Ce n'est pas un système de polling, ça utilise la librairie notify de rust permettant de récupérer l'information en temps réel.
 L'avantage, c'est que vous ne dépendez pas de l'outil, c'est l'outil qui s'adapte à vous.
-Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Windows/macOS) ne remontent **aucun** événement. Le conteneur y ajoute donc un re-scan périodique (`EASY3D_WATCH_POLL`, 5 s dans le `docker-compose.yml` fourni), qui ne rediffuse que si le catalogue a réellement changé.
+Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Windows/macOS, montages réseau) ne remontent **aucun** événement. Le dossier est alors re-scanné de temps en temps — la page d'administration propose 5 s par défaut dans ce cas, et laisse la main (voir « Re-scan périodique »).
 - **Aperçus générés par le serveur, sans GPU** : STL / OBJ / 3MF rasterisés en
   CPU, vignette embarquée extraite des G-code. La grille reste légère même avec
   des centaines de fichiers.
@@ -32,7 +32,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
   consulte et modifie la configuration par le même chemin que l'interface, donc
   sans jamais écraser une édition en cours.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 148 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 159 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -47,12 +47,6 @@ services:
     image: ghcr.io/remi-petit/easy3d:latest
     container_name: easy3d
     restart: unless-stopped
-    environment:
-      # Les partages de fichiers Docker Desktop ne remontent aucun événement :
-      # ce re-scan rattrape les modèles ajoutés dans ./models sans passer par
-      # l'interface. Sur un hôte Linux, les événements suffisent : mettre "0"
-      # (le dossier monté y est un vrai système de fichiers).
-      EASY3D_WATCH_POLL: "5"
     ports:
       - "3000:3000" # interface web : catalogue, aperçu 3D, notes
       - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)

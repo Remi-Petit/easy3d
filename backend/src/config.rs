@@ -34,6 +34,28 @@ pub struct Display {
     pub mode: DisplayMode,
 }
 
+/// Surveillance du dossier des modèles.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Watch {
+    /// **Re-scan périodique**, en secondes.
+    ///
+    /// - absent (`None`) : automatique — voir [`watch_poll_recommendation`] ;
+    /// - `0` : désactivé ;
+    /// - `n` : re-scan toutes les `n` secondes.
+    ///
+    /// `None` et `0` ne veulent donc pas dire la même chose : « je ne me
+    /// prononce pas » d'un côté, « surtout pas » de l'autre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll_seconds: Option<u64>,
+}
+
+impl Watch {
+    /// `true` si rien n'est fixé : `save` laisse alors le YAML sans ce bloc.
+    fn is_auto(&self) -> bool {
+        self.poll_seconds.is_none()
+    }
+}
+
 /// Configuration de l'application.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -43,6 +65,9 @@ pub struct Config {
     /// Options d'affichage côté frontend.
     #[serde(default)]
     pub display: Display,
+    /// Surveillance du dossier des modèles.
+    #[serde(default, skip_serializing_if = "Watch::is_auto")]
+    pub watch: Watch,
 }
 
 impl Config {
@@ -126,27 +151,111 @@ impl Config {
     }
 }
 
-/// Intervalle du **re-scan périodique**, lu dans `EASY3D_WATCH_POLL` (secondes).
+/// Intervalle recommandé quand le système de fichiers ne peut pas remonter
+/// d'événements fiables.
+pub const RECOMMENDED_POLL_SECONDS: u64 = 5;
+
+/// `true` si ce type de système de fichiers cache les événements du noyau.
 ///
-/// Filet de sécurité pour les systèmes de fichiers qui ne remontent pas
-/// d'événements : partages de fichiers Docker Desktop (Windows/macOS), montages
-/// réseau. Sans lui, un dossier ajouté **hors de l'interface** n'apparaîtrait
-/// qu'après un redémarrage. `0` ou absent → `None` : désactivé, puisque les
-/// événements suffisent sur un disque local.
-///
-/// Vit ici, et non dans `main.rs`, pour être testable : `main.rs` est un
-/// binaire, aucune de ses fonctions n'est atteignable par un test.
-pub fn watch_poll_interval() -> Option<Duration> {
-    parse_poll_interval(&std::env::var("EASY3D_WATCH_POLL").unwrap_or_default())
+/// Deux familles sont concernées : les montages **virtualisés** (partages de
+/// fichiers Docker Desktop : `virtiofs`, `grpcfuse`…) et les montages **réseau**
+/// (`nfs`, `cifs`…). Dans les deux cas le noyau n'assiste pas aux écritures —
+/// celles qui viennent de l'explorateur de l'hôte, surtout — donc `inotify` n'a
+/// rien à signaler, ni à la racine ni dans les sous-dossiers.
+fn is_event_poor(fstype: &str) -> bool {
+    fstype.starts_with("fuse.")
+        || matches!(
+            fstype,
+            // Virtualisés : Docker Desktop (9p/drvfs), WSL (drvfs), Colima…
+            "virtiofs" | "9p" | "drvfs" |
+                // Réseau.
+                "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs"
+        )
 }
 
-/// Lecture tolérante d'une durée en secondes : `"7"` → 7 s ; vide, `"0"` ou
-/// valeur non numérique → désactivé (on ne devine pas une intention).
-fn parse_poll_interval(raw: &str) -> Option<Duration> {
-    match raw.trim().parse::<u64>() {
-        Ok(secs) if secs > 0 => Some(Duration::from_secs(secs)),
-        _ => None,
+/// Type du système de fichiers portant `path`, d'après un contenu de
+/// `/proc/mounts` (voir [`filesystem_type`]).
+///
+/// On retient le point de montage **le plus précis** qui contient le chemin, en
+/// comparant des **composants** de chemin : `/modelsX` n'est pas dans `/models`.
+fn filesystem_type_in(mounts: &str, path: &Path) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+
+    for line in mounts.lines() {
+        // « périphérique point-de-montage type options 0 0 »
+        let mut fields = line.split_whitespace();
+        let (Some(_device), Some(mount_point), Some(fstype)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+
+        let mount_point = PathBuf::from(unescape_mount(mount_point));
+        if !path.starts_with(&mount_point) {
+            continue;
+        }
+
+        let depth = mount_point.components().count();
+        if best.as_ref().is_none_or(|(known, _)| depth > *known) {
+            best = Some((depth, fstype.to_string()));
+        }
     }
+
+    best.map(|(_, fstype)| fstype)
+}
+
+/// Dé-échappe un champ de `/proc/mounts` (les espaces y sont écrits `\040`).
+fn unescape_mount(field: &str) -> String {
+    field
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+}
+
+/// Type du système de fichiers portant `path`.
+///
+/// `None` hors Linux (Windows, macOS) : le backend y tourne directement sur le
+/// disque, sans montage virtuel — la question ne se pose pas.
+fn filesystem_type(path: &Path) -> Option<String> {
+    filesystem_type_in(&std::fs::read_to_string("/proc/mounts").ok()?, path)
+}
+
+/// Intervalle **recommandé** pour cette installation, et le type de système de
+/// fichiers qui le justifie (pour l'expliquer dans l'interface).
+///
+/// `0` quand les événements suffisent (disque local),
+/// [`RECOMMENDED_POLL_SECONDS`] quand le dossier passe par un montage virtualisé
+/// ou réseau. Détecter le système de fichiers, et non l'OS, est indispensable :
+/// dans un conteneur Docker Desktop le backend tourne sous **Linux** alors que le
+/// dossier vient de Windows.
+pub fn watch_poll_recommendation(root: &Path) -> (u64, Option<String>) {
+    let fstype = filesystem_type(root);
+    let event_poor = fstype.as_deref().is_some_and(is_event_poor);
+
+    (
+        if event_poor {
+            RECOMMENDED_POLL_SECONDS
+        } else {
+            0
+        },
+        fstype,
+    )
+}
+
+/// Intervalle à appliquer : la valeur choisie, sinon la recommandation.
+pub fn effective_interval(configured: Option<u64>, recommended: u64) -> Option<Duration> {
+    let seconds = configured.unwrap_or(recommended);
+    (seconds > 0).then(|| Duration::from_secs(seconds))
+}
+
+/// Intervalle du re-scan périodique tel que le watcher doit l'appliquer
+/// (`None` = aucun re-scan : les événements suffisent).
+///
+/// Vit ici, et non dans `main.rs`, pour être testable : `main.rs` est un binaire,
+/// aucune de ses fonctions n'est atteignable par un test.
+pub fn watch_poll_interval(config: &Config, root: &Path) -> Option<Duration> {
+    let (recommended, _) = watch_poll_recommendation(root);
+    effective_interval(config.watch.poll_seconds, recommended)
 }
 
 #[cfg(test)]
@@ -214,18 +323,86 @@ mod tests {
     }
 
     #[test]
-    fn re_scan_periodique_absent_ou_invalide_desactive() {
-        assert_eq!(parse_poll_interval(""), None);
-        assert_eq!(parse_poll_interval("   "), None);
-        assert_eq!(parse_poll_interval("0"), None);
-        // Valeur non numérique ou négative : on désactive plutôt que de deviner.
-        assert_eq!(parse_poll_interval("vite"), None);
-        assert_eq!(parse_poll_interval("-5"), None);
+    fn re_scan_automatique_ou_choisi_a_la_main() {
+        // Absent → recommandation de l'installation (« je ne me prononce pas »).
+        assert_eq!(effective_interval(None, 5), Some(Duration::from_secs(5)));
+        assert_eq!(effective_interval(None, 0), None);
+        // Désactivé explicitement : la recommandation ne s'applique pas.
+        assert_eq!(effective_interval(Some(0), 5), None);
+        // Valeur choisie dans l'interface.
+        assert_eq!(
+            effective_interval(Some(15), 5),
+            Some(Duration::from_secs(15))
+        );
     }
 
     #[test]
-    fn re_scan_periodique_lu_en_secondes() {
-        assert_eq!(parse_poll_interval("5"), Some(Duration::from_secs(5)));
-        assert_eq!(parse_poll_interval(" 30 "), Some(Duration::from_secs(30)));
+    fn les_systemes_de_fichiers_virtualises_sont_reconnus() {
+        for poor in [
+            "virtiofs",
+            "9p",
+            "fuse.grpcfuse",
+            "fuse.sshfs",
+            "nfs4",
+            "cifs",
+        ] {
+            assert!(is_event_poor(poor), "{poor} devrait recommander un re-scan");
+        }
+        for fine in ["ext4", "xfs", "btrfs", "ntfs", "apfs", "overlay", "tmpfs"] {
+            assert!(!is_event_poor(fine), "{fine} remonte ses événements");
+        }
+    }
+
+    #[test]
+    fn le_point_de_montage_le_plus_precis_gagne() {
+        let mounts = "\
+/dev/sda1 / ext4 rw,relatime 0 0
+\
+models /models virtiofs rw,relatime 0 0
+\
+/dev/sdb1 /models/partage ext4 rw,relatime 0 0
+";
+
+        // Le montage virtuel du dossier : le cas des partages Docker Desktop.
+        assert_eq!(
+            filesystem_type_in(mounts, Path::new("/models/Maison")).as_deref(),
+            Some("virtiofs")
+        );
+        // Un montage plus profond à l'intérieur gagne.
+        assert_eq!(
+            filesystem_type_in(mounts, Path::new("/models/partage/x.stl")).as_deref(),
+            Some("ext4")
+        );
+        // Ailleurs : la racine.
+        assert_eq!(
+            filesystem_type_in(mounts, Path::new("/home/moi")).as_deref(),
+            Some("ext4")
+        );
+        // `/modelsX` n'est pas dans `/models` (comparaison par composants).
+        assert_eq!(
+            filesystem_type_in(mounts, Path::new("/modelsX/y.stl")).as_deref(),
+            Some("ext4")
+        );
+        // Point de montage contenant un espace (`\040` dans /proc/mounts).
+        let espaces = "/dev/sdc1 /media/disque\\040externe vfat rw 0 0\n";
+        assert_eq!(
+            filesystem_type_in(espaces, Path::new("/media/disque externe/x")).as_deref(),
+            Some("vfat")
+        );
+
+        assert_eq!(filesystem_type_in("", Path::new("/models")), None);
+    }
+
+    #[test]
+    fn le_re_scan_se_lit_dans_le_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yml");
+        std::fs::write(&file, "watch:\n  poll_seconds: 15\n").unwrap();
+        assert_eq!(Config::load_from(&file).watch.poll_seconds, Some(15));
+
+        // Absent : automatique, et le YAML réécrit reste sans ce bloc.
+        let cfg = Config::default();
+        assert_eq!(cfg.watch.poll_seconds, None);
+        assert!(!serde_yaml::to_string(&cfg).unwrap().contains("watch"));
     }
 }

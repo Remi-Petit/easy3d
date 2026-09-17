@@ -1083,6 +1083,47 @@ body {
   border-color: var(--accent);
 }
 
+/* Réglage numérique (re-scan périodique) : champ court, unité, action. */
+.admin__input--short {
+  width: 96px;
+}
+
+.admin__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin__unit {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.admin__action {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.admin__action:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Recommandation du backend : une phrase, pas un réglage. */
+.admin__hint--rec {
+  color: var(--text);
+  opacity: 0.72;
+  font-style: italic;
+}
+
 .admin__hint {
   margin: 0;
   color: var(--muted);

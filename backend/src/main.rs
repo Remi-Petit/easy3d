@@ -135,21 +135,30 @@ fn watch_dir(
         );
     }
 
-    // Re-scan périodique, si demandé : le filet de sécurité des systèmes de
-    // fichiers qui ne remontent pas d'événements (voir `config::watch_poll_interval`).
-    let poll = config::watch_poll_interval();
-    if let Some(d) = poll {
-        println!(
-            "Re-scan périodique toutes les {} s : rattrape les changements qu'aucun \
-             événement ne signale.",
-            d.as_secs()
-        );
-    }
+    // Re-scan périodique : le filet de sécurité des systèmes de fichiers qui ne
+    // remontent pas d'événements (voir `config::watch_poll_recommendation`).
+    // Relu **à chaque tour** : un changement dans /admin s'applique sans
+    // redémarrer, et le journal dit ce qui est réellement en place.
+    let mut logged_poll = None;
 
     loop {
-        // Sans période configurée, `recv` bloque jusqu'au prochain lot ; avec
-        // `EASY3D_WATCH_POLL`, le `recv_timeout` rend la main à intervalles
-        // réguliers : c'est là qu'on rattrape ce qu'inotify n'a pas signalé.
+        let poll = config::watch_poll_interval(&state.config(), &state.root());
+        let seconds = poll.map_or(0, |d| d.as_secs());
+        if logged_poll != Some(seconds) {
+            logged_poll = Some(seconds);
+            if seconds > 0 {
+                println!("Re-scan périodique du catalogue toutes les {seconds} s.");
+            } else {
+                println!(
+                    "Aucun re-scan périodique : les événements du système de fichiers \
+                     suffisent sur ce dossier."
+                );
+            }
+        }
+
+        // Sans période, `recv` bloque jusqu'au prochain lot ; avec un re-scan, le
+        // `recv_timeout` rend la main à intervalles réguliers : c'est là qu'on
+        // rattrape ce qu'inotify n'a pas signalé.
         let result = match poll {
             Some(d) => rx.recv_timeout(d),
             None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),

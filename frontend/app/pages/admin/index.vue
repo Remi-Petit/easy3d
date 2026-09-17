@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DisplayMode, FileInfo } from '~/composables/useModels'
+import type { DisplayMode, FileInfo, ConfigResponse, WatchInfo } from '~/composables/useModels'
 
 // Page d'administration : réglages de l'application (écrits dans `config.yml`
 // via `PUT /api/config`) et gestion des notes.
@@ -18,26 +18,73 @@ const mode = ref<DisplayMode>('3d')
 const saveState = ref<'idle' | 'saving' | 'ok' | 'error'>('idle')
 const saveMessage = ref('')
 
+// Re-scan périodique : `null` (champ vide) = automatique, `0` = désactivé.
+const pollSeconds = ref<number | string | null>(null)
+const watchInfo = ref<WatchInfo | null>(null)
+
 /** Mode **appliqué** par le backend : la référence, pas notre sélection. */
 const appliedMode = computed(() => data.value?.config?.display?.mode ?? '3d')
+
+/**
+ * Valeur à enregistrer : le champ vidé veut dire « automatique », pas `0`
+ * (qui, lui, désactive le re-scan — l'utilisateur se prononce).
+ */
+const pollValue = computed<number | null>(() => {
+  const raw = pollSeconds.value
+  if (raw === null || raw === undefined || raw === '') return null
+  const seconds = Number(raw)
+  return Number.isFinite(seconds) ? Math.max(0, Math.trunc(seconds)) : null
+})
 
 /**
  * Dossier réellement lu. Il n'est plus modifiable ici — il se change dans
  * `backend/config.yml` — mais l'afficher évite de se demander d'où viennent les
  * fichiers (`models_root` peut être vide, ou relatif à `backend/`).
+ *
+ * Le même appel rapporte la recommandation de re-scan : c'est le backend qui
+ * connaît le système de fichiers de `models/`, donc lui qui sait si les
+ * événements suffisent (voir `config::watch_poll_recommendation`).
  */
 const resolvedRoot = ref('')
 
 async function loadResolvedRoot() {
   try {
-    const res = await $fetch<{ models_root: string }>('/api/config')
+    const res = await $fetch<ConfigResponse>('/api/config')
     resolvedRoot.value = res.models_root
+    watchInfo.value = res.watch
   } catch {
     resolvedRoot.value = ''
+    watchInfo.value = null
   }
 }
 
 onMounted(loadResolvedRoot)
+
+/** Phrase expliquant la recommandation, construite depuis les faits du backend. */
+const recommendation = computed(() => {
+  const info = watchInfo.value
+  if (!info) return ''
+
+  if (!info.filesystem) return t('admin.watchUnknown')
+  return info.recommended > 0
+    ? t('admin.watchVirtual', { fs: info.filesystem, seconds: info.recommended })
+    : t('admin.watchLocal', { fs: info.filesystem })
+})
+
+/** Ce que le backend applique **maintenant** (après rechargement à chaud). */
+const appliedWatch = computed(() => {
+  const effective = watchInfo.value?.effective ?? 0
+  return effective > 0
+    ? t('admin.watchEvery', { seconds: effective })
+    : t('admin.watchOff')
+})
+
+/** Applique la valeur recommandée (et l'enregistre si elle diffère). */
+function useRecommended() {
+  if (!watchInfo.value) return
+  pollSeconds.value = watchInfo.value.recommended
+  persist()
+}
 
 /** Enregistrement en cours / dernière valeur demandée (voir `persist`). */
 let inFlight = false
@@ -51,6 +98,17 @@ watch(
   (serverMode) => {
     if (!serverMode || inFlight) return
     mode.value = serverMode
+  },
+  { immediate: true },
+)
+
+// Même principe pour le re-scan : la valeur **appliquée** fait foi, donc un
+// changement venu d'ailleurs (fichier modifié à la main) réaligne le champ.
+watch(
+  () => data.value?.config?.watch?.poll_seconds,
+  (serverValue) => {
+    if (inFlight) return
+    pollSeconds.value = serverValue ?? null
   },
   { immediate: true },
 )
@@ -79,6 +137,7 @@ async function persist() {
           body: {
             models_root: data.value?.config?.models_root ?? null,
             display: { mode: mode.value },
+            watch: { poll_seconds: pollValue.value },
           },
         })
         saveState.value = 'ok'
@@ -201,10 +260,42 @@ usePageHeader(() => ({
         </p>
       </div>
 
+      <!-- Re-scan périodique : nécessaire seulement là où le système de fichiers
+           ne signale pas les dépôts faits hors de l'interface (montages
+           virtualisés ou réseau). Le backend dit ce qu'il en est ici. -->
+      <div class="admin__field">
+        <span class="admin__label">{{ $t('admin.watch') }}</span>
+        <div class="admin__row">
+          <input
+            v-model="pollSeconds"
+            class="admin__input admin__input--short"
+            type="number"
+            min="0"
+            :placeholder="$t('admin.watchAuto')"
+            @change="persist"
+          />
+          <span class="admin__unit">{{ $t('admin.watchUnit') }}</span>
+          <button
+            v-if="watchInfo && watchInfo.recommended !== (watchInfo.effective ?? 0)"
+            type="button"
+            class="admin__action"
+            @click="useRecommended"
+          >
+            {{ $t('admin.watchUse', { seconds: watchInfo.recommended }) }}
+          </button>
+        </div>
+        <p class="admin__hint">{{ $t('admin.watchHint') }}</p>
+        <p v-if="recommendation" class="admin__hint admin__hint--rec">{{ recommendation }}</p>
+      </div>
+
       <dl class="admin__applied">
         <div>
           <dt>{{ $t('admin.applied') }}</dt>
           <dd>{{ $t(appliedMode === 'image' ? 'admin.modeImage' : 'admin.mode3d') }}</dd>
+        </div>
+        <div>
+          <dt>{{ $t('admin.watchApplied') }}</dt>
+          <dd>{{ appliedWatch }}</dd>
         </div>
         <div>
           <dt>{{ $t('admin.rootRead') }}</dt>
