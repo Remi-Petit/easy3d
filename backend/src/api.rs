@@ -1,5 +1,5 @@
 use crate::collab;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
@@ -195,6 +195,23 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
 pub struct ConfigResponse {
     pub config: Config,
     pub models_root: String,
+    /// Surveillance du dossier : de quoi expliquer, dans l'interface, *pourquoi*
+    /// la valeur recommandée est celle-là.
+    pub watch: WatchInfo,
+}
+
+/// Ce que l'interface doit savoir sur le re-scan périodique.
+///
+/// Les phrases sont construites côté frontend (i18n) : ici, uniquement des faits.
+#[derive(Serialize)]
+pub struct WatchInfo {
+    /// Intervalle **recommandé** pour cette installation, en secondes.
+    pub recommended: u64,
+    /// Intervalle réellement appliqué par le backend (`0` = aucun re-scan).
+    pub effective: u64,
+    /// Type du système de fichiers portant `models/` (renseigné sous Linux),
+    /// ex : `ext4`, `virtiofs` — c'est lui qui décide de la recommandation.
+    pub filesystem: Option<String>,
 }
 
 impl ConfigResponse {
@@ -204,9 +221,21 @@ impl ConfigResponse {
         let path = config.resolve_models_root();
         let models_root = std::fs::canonicalize(&path).unwrap_or(path);
 
+        // Recommandation pour **ce** dossier : c'est le système de fichiers qui
+        // décide, pas l'OS. Dans un conteneur Docker Desktop, le backend tourne
+        // sous Linux alors que le dossier vient de Windows.
+        let (recommended, filesystem) = config::watch_poll_recommendation(&models_root);
+        let effective =
+            config::watch_poll_interval(&config, &models_root).map_or(0, |d| d.as_secs());
+
         Self {
             config,
             models_root: tidy_path(&models_root),
+            watch: WatchInfo {
+                recommended,
+                effective,
+                filesystem,
+            },
         }
     }
 }
@@ -628,12 +657,12 @@ pub fn broadcast_snapshot(state: &AppState) {
 
 /// Re-scanne le catalogue et ne rediffuse **que si le contenu a changé**.
 ///
-/// Appelé à intervalle régulier quand `EASY3D_WATCH_POLL` est armé (voir
-/// `main.rs`) : les systèmes de fichiers virtualisés (partages de fichiers
-/// Docker Desktop, montages réseau) ne remontent aucun événement, donc un
-/// dossier ajouté hors de l'interface n'annoncerait rien. Les aperçus manquants
-/// sont générés au passage — le watcher, lui, les régénère au fil de ses
-/// événements.
+/// Appelé à intervalle régulier quand un re-scan est configuré ou recommandé
+/// (`watch.poll_seconds`, voir `main.rs`) : les systèmes de fichiers virtualisés
+/// ou réseau (partages de fichiers Docker Desktop, montages `nfs`…) ne remontent
+/// aucun événement, donc un dossier ajouté hors de l'interface n'annoncerait
+/// rien. Les aperçus manquants sont générés au passage — le watcher, lui, les
+/// régénère au fil de ses événements.
 ///
 /// Retourne `true` si une liste a été diffusée.
 pub fn refresh_if_changed(state: &AppState) -> bool {
@@ -726,6 +755,81 @@ mod tests {
             reloaded.models_root.as_deref(),
             Some(models.to_string_lossy().as_ref())
         );
+    }
+
+    /// Le re-scan périodique se règle depuis l'interface : sa valeur est écrite
+    /// dans le YAML (donc relue par le watcher et conservée au redémarrage).
+    #[tokio::test]
+    async fn put_config_enregistre_le_re_scan_periodique() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.yml");
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let app = routes(AppState::new(".", ws, Config::default()).with_config_path(&config_path));
+
+        let body = serde_json::json!({
+            "models_root": models.to_string_lossy(),
+            "display": { "mode": "3d" },
+            "watch": { "poll_seconds": 15 }
+        })
+        .to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/config")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // La réponse dit ce qui est appliqué, en secondes.
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["watch"]["effective"], 15);
+        assert_eq!(Config::load_from(&config_path).watch.poll_seconds, Some(15));
+
+        // `0` — désactivé — est une valeur choisie, pas « automatique ».
+        assert_eq!(Config::default().watch.poll_seconds, None);
+    }
+
+    /// `/config` expose de quoi expliquer la recommandation dans l'interface :
+    /// l'intervalle effectif, l'intervalle recommandé, et le système de fichiers
+    /// qui les décide.
+    #[tokio::test]
+    async fn config_expose_la_recommandation_de_re_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(models.clone(), ws, Config::default());
+        let app = routes(state);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Un dossier temporaire est sur un disque local : aucun re-scan n'est
+        // recommandé, et rien n'est appliqué tant que l'utilisateur n'a rien dit.
+        assert_eq!(v["watch"]["recommended"], 0);
+        assert_eq!(v["watch"]["effective"], 0);
     }
 
     #[tokio::test]
