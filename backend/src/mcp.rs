@@ -25,7 +25,7 @@ use crate::notes;
 use crate::scanner::{self, FileInfo};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,8 +141,8 @@ impl Easy3dMcp {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Easy3dMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("easy3d", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Catalogue de modèles 3D easy3d (STL, OBJ, 3MF, G-code) et ses notes Markdown.\n\
