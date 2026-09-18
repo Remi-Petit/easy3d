@@ -31,7 +31,7 @@ L'avantage, c'est que vous ne dépendez pas de l'outil, c'est l'outil qui s'adap
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
   consulte et modifie la configuration par le même chemin que l'interface, donc
   sans jamais écraser une édition en cours.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 143 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 145 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
