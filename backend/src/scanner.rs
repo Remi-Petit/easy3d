@@ -511,11 +511,35 @@ mod tests {
         let root = dir.path();
         fs::write(root.join("piece.gcode"), "G1 X0").unwrap();
         fs::create_dir_all(root.join(".easy3d-thumbs")).unwrap();
-        fs::write(root.join(".easy3d-thumbs/piece.png"), "faux png").unwrap();
+        fs::write(root.join(".easy3d-thumbs/piece.gcode.png"), "faux png").unwrap();
 
         let files = scan_files(root);
         let gcode = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
-        assert_eq!(gcode.image.as_deref(), Some(".easy3d-thumbs/piece.png"));
+        assert_eq!(
+            gcode.image.as_deref(),
+            Some(".easy3d-thumbs/piece.gcode.png")
+        );
+    }
+
+    /// Deux modèles de même nom mais de formats différents reçoivent **chacun**
+    /// leur aperçu : l'export slicer dépose `piece.stl` et `piece.gcode` à côté,
+    /// et l'un ne doit pas afficher l'image de l'autre.
+    #[test]
+    fn apercus_distincts_pour_des_modeles_homonymes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("piece.stl"), "x").unwrap();
+        fs::write(root.join("piece.gcode"), "G1 X0").unwrap();
+        fs::create_dir_all(root.join(".easy3d-thumbs")).unwrap();
+        fs::write(root.join(".easy3d-thumbs/piece.stl.png"), "aperçu du stl").unwrap();
+
+        let files = scan_files(root);
+        let stl = files.iter().find(|f| f.rel == "piece.stl").unwrap();
+        let gcode = files.iter().find(|f| f.rel == "piece.gcode").unwrap();
+
+        assert_eq!(stl.image.as_deref(), Some(".easy3d-thumbs/piece.stl.png"));
+        // Faute d'aperçu propre, le G-code n'hérite pas de celui du maillage.
+        assert_eq!(gcode.image, None);
     }
 
     #[test]
