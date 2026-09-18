@@ -17,6 +17,56 @@ use std::path::{Path, PathBuf};
 /// Nom du dossier caché (dans `models/`) qui regroupe les aperçus générés.
 pub const THUMB_DIR: &str = ".easy3d-thumbs";
 
+/// Version du **rendu** des aperçus.
+///
+/// À incrémenter dès que leur apparence change (palette, cadrage, mise au style
+/// des vignettes de slicer) : le cache est alors vidé au démarrage, et tout est
+/// régénéré avec le nouveau style. Sans ce marqueur, les aperçus déjà en cache
+/// garderaient l'ancienne allure — [`is_fresh`] ne compare que les horodatages,
+/// il n'a aucun moyen de savoir que le *rendu* a changé.
+const STYLE_VERSION: u32 = 2;
+
+/// Fichier qui retient la version du style, dans le dossier des aperçus.
+const STYLE_FILE: &str = ".style";
+
+/// Vide le cache des aperçus quand le **style** du rendu a changé.
+///
+/// Appelé au démarrage, avant [`generate_all`]. Retourne `true` si un cache d'un
+/// style précédent a été vidé (les aperçus sont des artefacts : ils se
+/// régénèrent juste après).
+pub fn apply_style(thumbs_root: &Path) -> bool {
+    let marker = thumbs_root.join(STYLE_FILE);
+    let known = fs::read_to_string(&marker)
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok());
+
+    if known == Some(STYLE_VERSION) {
+        return false;
+    }
+
+    // Marqueur absent alors que le cache est déjà rempli : aperçus d'avant le
+    // marqueur, donc d'un autre style. Même traitement qu'un changement de
+    // version. Un dossier vide, lui, n'a rien à vider.
+    let outdated = fs::read_dir(thumbs_root)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+
+    if outdated && let Ok(entries) = fs::read_dir(thumbs_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
+    }
+
+    fs::create_dir_all(thumbs_root).ok();
+    let _ = fs::write(&marker, STYLE_VERSION.to_string());
+    outdated
+}
+
 /// Chemin (relatif à la racine des modèles) de l'aperçu d'un fichier donné.
 ///
 /// `models/chainsaw-man/Chainsaw_Man.stl` →
@@ -417,6 +467,36 @@ mod tests {
 
         assert!(!thumbs.join("Maison/Toit").exists());
         assert!(thumbs.join("Maison/garde.stl.png").is_file());
+    }
+
+    #[test]
+    fn apply_style_regenere_les_apercus_d_un_style_precedent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let thumbs = root.join(THUMB_DIR);
+        fs::create_dir_all(thumbs.join("Maison")).unwrap();
+        fs::write(thumbs.join("Maison/x.stl.png"), "aperçu").unwrap();
+
+        // Cache sans marqueur : aperçus d'avant la version de style, tout part.
+        assert!(apply_style(&thumbs));
+        assert!(!thumbs.join("Maison").exists());
+        assert!(thumbs.is_dir(), "le dossier des aperçus reste en place");
+
+        // Marqueur à jour : un cache neuf (ou regénéré) n'est plus touché.
+        assert!(!apply_style(&thumbs));
+        fs::create_dir_all(thumbs.join("Maison")).unwrap();
+        fs::write(thumbs.join("Maison/x.stl.png"), "aperçu").unwrap();
+        assert!(!apply_style(&thumbs));
+        assert!(thumbs.join("Maison/x.stl.png").is_file());
+
+        // Version périmée : même traitement.
+        fs::write(thumbs.join(STYLE_FILE), "0").unwrap();
+        assert!(apply_style(&thumbs));
+        assert!(!thumbs.join("Maison").exists());
+        assert_eq!(
+            fs::read_to_string(thumbs.join(STYLE_FILE)).unwrap().trim(),
+            STYLE_VERSION.to_string()
+        );
     }
 
     /// Les aperçus sans modèle sont retirés : ceux d'un ancien nommage

@@ -26,8 +26,9 @@ Ce n'est pas un système de polling, ça utilise la librairie notify de rust per
 L'avantage, c'est que vous ne dépendez pas de l'outil, c'est l'outil qui s'adapte à vous.
 Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Windows/macOS, montages réseau) ne remontent **aucun** événement. Le dossier est alors re-scanné de temps en temps — la page d'administration propose 5 s par défaut dans ce cas, et laisse la main (voir « Re-scan périodique »).
 - **Aperçus générés par le serveur, sans GPU** : STL / OBJ / 3MF rasterisés en
-  CPU, vignette embarquée extraite des G-code. La grille reste légère même avec
-  des centaines de fichiers.
+  CPU, vignette embarquée extraite des G-code — et ramenée au style de la maison
+  (matière claire sur fond sombre), comme les rendus de maillage. La grille reste
+  légère même avec des centaines de fichiers.
 - **Notes collaboratives** (CRDT Yjs) : Les utilisateurs peuvent ajouter des notes sur des dossiers / fichiers. Tout est stocké en markdown, pas de base de donnée. Ça a été conçu pour pouvoir fonctionner en temps réel. Via le serveur MCP, l'IA peut lire / ajouter / modifier des notes.
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
   consulte et modifie la configuration par le même chemin que l'interface, donc

@@ -32,6 +32,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Dossier des aperçus générés par le backend (`<models_root>/.easy3d-thumbs`).
     let thumbs_root = root.join(thumbnail::THUMB_DIR);
 
+    // Un changement de **style** de rendu vide le cache : les aperçus sont des
+    // artefacts, ils se régénèrent juste après.
+    if thumbnail::apply_style(&thumbs_root) {
+        println!("Nouveau style d'aperçus : cache vidé, tout est régénéré.");
+    }
+
     // Génère un aperçu PNG pour chaque modèle déjà présent, avant de démarrer.
     // (Garde un aperçu à jour ; coût une fois au lancement.)
     thumbnail::generate_all(&root, &thumbs_root);
@@ -219,11 +225,10 @@ fn watch_dir(
                     let _ = debouncer.unwatch(&current_root);
                     match debouncer.watch(&new_root, RecursiveMode::Recursive) {
                         Ok(()) => {
-                            thumbnail::generate_all(
-                                &new_root,
-                                &new_root.join(thumbnail::THUMB_DIR),
-                            );
-                            thumbnail::prune(&new_root, &new_root.join(thumbnail::THUMB_DIR));
+                            let thumbs = new_root.join(thumbnail::THUMB_DIR);
+                            thumbnail::apply_style(&thumbs);
+                            thumbnail::generate_all(&new_root, &thumbs);
+                            thumbnail::prune(&new_root, &thumbs);
                             current_root = new_root;
                         }
                         Err(e) => {

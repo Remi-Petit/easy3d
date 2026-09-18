@@ -5,15 +5,15 @@
 //! couleur de fond assortie au thème sombre du frontend. Plus léger à afficher
 //! qu'un rendu 3D navigateur pour de grandes grilles.
 
-use super::{THUMB_H, THUMB_W};
+use super::{THUMB_BASE, THUMB_BG, THUMB_H, THUMB_W};
 use std::fs;
 use std::path::Path;
 
 /// Couleur de fond (assortie au thème sombre du frontend).
-const BG: [u8; 3] = [0x16, 0x16, 0x25];
+const BG: [u8; 3] = THUMB_BG;
 
 /// Couleur de base des faces (bleu cyan, comme le rendu 3D du frontend).
-const BASE: [f32; 3] = [0.70, 0.82, 0.96];
+const BASE: [f32; 3] = THUMB_BASE;
 
 /// Direction de la lumière (normalisée à la volée).
 const LIGHT: [f32; 3] = [0.45, 0.85, 0.70];
