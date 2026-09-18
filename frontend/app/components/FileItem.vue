@@ -48,15 +48,20 @@ function openMenu(event: MouseEvent) {
   menu.y = event.clientY
 }
 
-const menuItems = computed(() => [{ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' }])
+const menuItems = computed(() => [
+  { key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' },
+  { key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true },
+])
 
 const { start: startRename } = useRename()
+const { start: startDelete } = useDelete()
 
 function onMenuSelect(key: string) {
   menu.open = false
-  if (key === 'rename') {
-    startRename({ rel: props.file.rel, label: name.value, kind: 'file' })
-  }
+  const cible = { rel: props.file.rel, label: name.value, kind: 'file' as const }
+
+  if (key === 'rename') startRename(cible)
+  if (key === 'delete') startDelete(cible)
 }
 </script>
 
