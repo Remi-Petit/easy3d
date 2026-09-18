@@ -76,15 +76,22 @@ fn try_extract_thumbnail(model_path: &Path, out: &Path) -> Option<()> {
     entry.read_to_end(&mut bytes).ok()?;
 
     // Décode (PNG/JPEG), redimensionne et ré-encode en PNG pour homogénéité.
+    //
+    // Puis mise au style de la maison : ces vignettes sont des **rendus de
+    // plateau** (modèle coloré, plateau et grille neutres) qui jurent à côté des
+    // rendus de maillage. Le décor — fond, plateau, grille — prend la couleur de
+    // l'application, le modèle la matière claire. Sans modèle identifiable
+    // (filament blanc ou gris), `restyle` laisse l'image telle quelle.
     let img = image::load_from_memory(&bytes).ok()?;
-    if img.width() > 512 || img.height() > 512 {
+    let scaled = if img.width() > 512 || img.height() > 512 {
         img.thumbnail(img.width().clamp(1, 512), img.height().clamp(1, 512))
-            .to_rgba8()
-            .save(out)
-            .ok()?;
     } else {
-        img.to_rgba8().save(out).ok()?;
-    }
+        img
+    };
+    let mut styled = scaled.to_rgba8();
+    super::thumb_style::restyle(&mut styled);
+    styled.save(out).ok()?;
+
     Some(())
 }
 

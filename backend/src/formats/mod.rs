@@ -28,6 +28,7 @@ mod mesh;
 mod obj;
 mod stl;
 mod three_mf;
+mod thumb_style;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
 
@@ -41,6 +42,19 @@ use std::path::Path;
 /// embarquée (G-code, 3MF) : au-delà, elle est réduite à cette échelle.
 pub(crate) const THUMB_W: usize = 480;
 pub(crate) const THUMB_H: usize = 366;
+
+/// Fond des aperçus : le bleu nuit du thème sombre du frontend.
+///
+/// Partagé par le rasteriseur de maillage et la mise au style des vignettes de
+/// slicer ([`thumb_style`]) : c'est ce qui fait que deux modèles voisins, quel
+/// que soit leur format, se ressemblent dans la grille.
+pub(crate) const THUMB_BG: [u8; 3] = [0x16, 0x16, 0x25];
+
+/// Teinte de la matière (bleu cyan clair, comme le rendu 3D du frontend).
+///
+/// C'est la couleur **de base** : chaque face est ensuite éclairée par le
+/// rasteriseur, et les vignettes de slicer sont ramenées dans ce même registre.
+pub(crate) const THUMB_BASE: [f32; 3] = [0.70, 0.82, 0.96];
 
 /// Comment le contenu d'un format est destiné à être affiché.
 ///
