@@ -1402,7 +1402,7 @@ mod tests {
         std::fs::write(
             dir.path()
                 .join(thumbnail::THUMB_DIR)
-                .join("Maison/piece.png"),
+                .join("Maison/piece.stl.png"),
             "png",
         )
         .unwrap();
@@ -1449,7 +1449,7 @@ mod tests {
             std::fs::read_to_string(
                 dir.path()
                     .join(thumbnail::THUMB_DIR)
-                    .join("Maison/toit.png")
+                    .join("Maison/toit.stl.png")
             )
             .unwrap(),
             "png"
@@ -1471,7 +1471,7 @@ mod tests {
         std::fs::write(dir.path().join("Maison/Toit/piece.stl"), STL).unwrap();
         notes::write(dir.path(), "Maison/Toit", "## le toit").unwrap();
         notes::write(dir.path(), "Maison/Toit/piece.stl", "# la pièce").unwrap();
-        for rel in ["Maison/Toit/piece.png", "Maison/piece.png"] {
+        for rel in ["Maison/Toit/piece.stl.png", "Maison/piece.stl.png"] {
             let path = dir.path().join(thumbnail::THUMB_DIR).join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, "png").unwrap();
@@ -1512,13 +1512,13 @@ mod tests {
         assert!(
             dir.path()
                 .join(thumbnail::THUMB_DIR)
-                .join("Maison/Toiture/piece.png")
+                .join("Maison/Toiture/piece.stl.png")
                 .is_file()
         );
         assert!(
             dir.path()
                 .join(thumbnail::THUMB_DIR)
-                .join("Maison/piece.png")
+                .join("Maison/piece.stl.png")
                 .is_file()
         );
     }

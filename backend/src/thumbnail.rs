@@ -6,9 +6,9 @@
 //!
 //! Pour chaque fichier reconnu dans `models/`, on produit un PNG dans
 //! `<models_root>/.easy3d-thumbs/`, en reproduisant l'arborescence
-//! (`chainsaw-man/x.stl` → `.easy3d-thumbs/chainsaw-man/x.png`). Cette image sert
-//! d'aperçu sur le site — plus léger qu'un rendu 3D navigateur pour les grandes
-//! grilles.
+//! (`chainsaw-man/x.stl` → `.easy3d-thumbs/chainsaw-man/x.stl.png`). Cette image
+//! sert d'aperçu sur le site — plus léger qu'un rendu 3D navigateur pour les
+//! grandes grilles.
 
 use crate::formats;
 use std::fs;
@@ -19,10 +19,16 @@ pub const THUMB_DIR: &str = ".easy3d-thumbs";
 
 /// Chemin (relatif à la racine des modèles) de l'aperçu d'un fichier donné.
 ///
-/// `models/chainsaw-man/Chainsaw_Man.stl` → `.easy3d-thumbs/chainsaw-man/Chainsaw_Man.png`
+/// `models/chainsaw-man/Chainsaw_Man.stl` →
+/// `.easy3d-thumbs/chainsaw-man/Chainsaw_Man.stl.png`
+///
+/// Le nom du modèle est repris **entier**, extension comprise. Deux modèles qui
+/// ne diffèrent que par leur format (`pieces.stl`, `pieces.gcode` — le cas de
+/// tous les exports slicer) sont deux fichiers distincts pour le catalogue :
+/// sans l'extension, ils se partageraient un unique `.png`, et régénérer l'un
+/// écraserait l'aperçu de l'autre.
 pub fn thumb_rel_path(model_rel: &str) -> String {
-    let stem = Path::new(model_rel).with_extension("png");
-    format!("{THUMB_DIR}/{}", stem.display())
+    format!("{THUMB_DIR}/{model_rel}.png")
 }
 
 /// Génère (ou réutilise) l'aperçu d'un fichier de modèle.
@@ -41,7 +47,7 @@ pub fn ensure_thumbnail(model_path: &Path, model_rel: &str, thumbs_root: &Path) 
         return None;
     }
 
-    let out_abs = thumbs_root.join(Path::new(model_rel).with_extension("png"));
+    let out_abs = thumbs_root.join(format!("{model_rel}.png"));
     // Assure l'existence du sous-dossier (ex : `.easy3d-thumbs/chainsaw-man/`).
     if let Some(parent) = out_abs.parent() {
         fs::create_dir_all(parent).ok();
@@ -57,7 +63,7 @@ pub fn ensure_thumbnail(model_path: &Path, model_rel: &str, thumbs_root: &Path) 
 ///
 /// `root` est la **racine des modèles** : elle sert de base pour calculer les
 /// chemins relatifs, afin que les aperçus respectent la structure des
-/// sous-dossiers (`.easy3d-thumbs/chainsaw-man/x.png`).
+/// sous-dossiers (`.easy3d-thumbs/chainsaw-man/x.stl.png`).
 pub fn generate_all(root: &Path, thumbs_root: &Path) {
     generate_dir(root, root, thumbs_root);
 }
@@ -92,13 +98,18 @@ pub fn ensure_for_changed(root: &Path, thumbs_root: &Path, abs_path: &Path) {
 }
 
 /// Supprime l'aperçu mis en cache d'un fichier (appelé par le watcher lorsqu'un
-/// fichier est supprimé). Aucun effet si aucun aperçu n'existe.
+/// fichier est supprimé, et par les tests). Aucun effet si aucun aperçu
+/// n'existe.
+///
+/// Le chemin est reconstruit depuis `thumbs_root` : [`thumb_rel_path`] inclut
+/// déjà `THUMB_DIR`, l'y joindre à nouveau viserait
+/// `<root>/.easy3d-thumbs/.easy3d-thumbs/…` — un aperçu qui n'était donc jamais
+/// supprimé.
 pub fn remove_for_path(root: &Path, thumbs_root: &Path, abs_path: &Path) {
     let Some(rel) = rel_of(root, abs_path) else {
         return;
     };
-    let thumb = thumbs_root.join(thumb_rel_path(&rel));
-    let _ = fs::remove_file(&thumb);
+    let _ = fs::remove_file(thumbs_root.join(format!("{rel}.png")));
 }
 
 /// Fait suivre les aperçus d'un élément **renommé ou déplacé**.
@@ -117,15 +128,13 @@ pub fn move_for_path(root: &Path, thumbs_root: &Path, from: &Path, to: &Path) {
         return;
     };
 
-    // `ensure_thumbnail` range l'aperçu d'un fichier à côté de ses frères
-    // (`.easy3d-thumbs/Maison/x.png`), celui d'un dossier dans son propre
-    // sous-dossier (`.easy3d-thumbs/Maison/Toit/`).
-    let file_thumb = thumbs_root.join(Path::new(&from_rel).with_extension("png"));
+    // Un aperçu de **fichier** porte le nom complet du modèle (`piece.stl.png`),
+    // celui d'un **dossier** est le dossier du même nom
+    // (`.easy3d-thumbs/Maison/Toit/`) : c'est cette forme, présente sur le
+    // disque, qui décide — pas le type de l'élément.
+    let file_thumb = thumbs_root.join(format!("{from_rel}.png"));
     let (old, new) = if file_thumb.exists() {
-        (
-            file_thumb,
-            thumbs_root.join(Path::new(&to_rel).with_extension("png")),
-        )
+        (file_thumb, thumbs_root.join(format!("{to_rel}.png")))
     } else {
         (thumbs_root.join(&from_rel), thumbs_root.join(&to_rel))
     };
@@ -163,6 +172,61 @@ fn rel_of(root: &Path, path: &Path) -> Option<String> {
     )
 }
 
+/// Supprime les aperçus qui n'ont plus de modèle.
+///
+/// Deux cas, tous deux sans modèle correspondant : les `.png` laissés par un
+/// ancien nommage (l'aperçu s'appelait `piece.png` pour `piece.stl`, ce qui
+/// faisait collision entre formats) et ceux d'un modèle supprimé hors de
+/// l'interface (le watcher, lui, les enlève au fil de l'eau, mais il ne voit
+/// rien d'un montage virtualisé).
+///
+/// Les dossiers devenus **vides** par ce nettoyage partent aussi : supprimer un
+/// dossier de modèles laissait sinon son arborescence d'aperçus derrière lui.
+/// `remove_dir` échoue sur un dossier non vide, il n'y a donc rien à craindre en
+/// le tentant, du plus profond au moins profond.
+///
+/// Appelé au démarrage, après [`generate_all`] : à ce stade, tout aperçu
+/// légitime vient d'être écrit. Retourne le nombre de **fichiers** supprimés.
+pub fn prune(root: &Path, thumbs_root: &Path) -> usize {
+    let mut removed = 0;
+    let mut pending = vec![thumbs_root.to_path_buf()];
+    let mut visited: Vec<PathBuf> = Vec::new();
+
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        visited.push(dir);
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+
+            // `<rel>.png` → `<rel>` : le modèle doit encore exister sur disque.
+            let Some(model) = rel_of(thumbs_root, &path)
+                .and_then(|rel| rel.strip_suffix(".png").map(str::to_string))
+            else {
+                continue;
+            };
+            if !root.join(&model).is_file() && fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+
+    visited.sort_by_key(|dir| std::cmp::Reverse(dir.components().count()));
+    for dir in visited {
+        if dir != thumbs_root {
+            let _ = fs::remove_dir(&dir);
+        }
+    }
+
+    removed
+}
+
 /// `true` si l'aperçu existe et date d'après le modèle (donc à jour).
 fn is_fresh(out: &Path, model: &Path) -> bool {
     match (fs::metadata(out), fs::metadata(model)) {
@@ -174,16 +238,41 @@ fn is_fresh(out: &Path, model: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    /// STL ASCII minimal mais valide : une facette, que le backend rastérise.
+    const STL: &str = "solid piece\n\
+         facet normal 0 0 1\n\
+         outer loop\n\
+         vertex 0 0 0\n\
+         vertex 1 0 0\n\
+         vertex 0 1 0\n\
+         endloop\n\
+         endfacet\n\
+         endsolid piece\n";
+
+    /// OBJ minimal, **d'une autre forme** (un carré au lieu d'un triangle) :
+    /// deux aperçus visuellement différents, ce dont dépendent les tests.
+    const OBJ_CARRE: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
+
+    /// Même chose qu'un triangle : le rendu d'un OBJ qui devient identique au
+    /// STL, aperçu dans un **autre** fichier.
+    const OBJ_TRIANGLE: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
 
     #[test]
     fn chemin_relatif_de_l_apercu() {
         // Le cache des aperçus reproduit l'arborescence des modèles.
         assert_eq!(
             thumb_rel_path("DemaAuto/boitier.stl"),
-            ".easy3d-thumbs/DemaAuto/boitier.png"
+            ".easy3d-thumbs/DemaAuto/boitier.stl.png"
         );
-        // Un G-code produit bien un `.png` (et non `.gcode.png`).
-        assert_eq!(thumb_rel_path("piece.gcode"), ".easy3d-thumbs/piece.png");
+        // Le nom du modèle est repris **entier**, extension comprise : sans ça,
+        // un `.stl` et un `.gcode` homonymes se partageraient un unique `.png`.
+        assert_eq!(thumb_rel_path("piece.stl"), ".easy3d-thumbs/piece.stl.png");
+        assert_eq!(
+            thumb_rel_path("piece.gcode"),
+            ".easy3d-thumbs/piece.gcode.png"
+        );
     }
 
     #[test]
@@ -210,8 +299,121 @@ mod tests {
         let gcode = root.join("piece.gcode");
         fs::write(&gcode, "; generated by Cura\nG1 X10 Y10 E1\n").unwrap();
 
-        let out = root.join(THUMB_DIR).join("piece.png");
+        let out = root.join(THUMB_DIR).join("piece.gcode.png");
         assert!(ensure_thumbnail(&gcode, "piece.gcode", &root.join(THUMB_DIR)).is_none());
         assert!(!out.exists());
+    }
+
+    /// Le cas signalé : deux formats homonymes (l'export d'un slicer) doivent
+    /// garder chacun leur aperçu. Avant, tous deux visaient
+    /// `.easy3d-thumbs/piece.png` : régénérer l'un écrasait l'image de l'autre —
+    /// et le sens de l'écrasement dépendait de l'ordre des modifications.
+    #[test]
+    fn deux_modeles_homonymes_gardent_leur_apercu() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let thumbs = root.join(THUMB_DIR);
+
+        let stl = root.join("piece.stl");
+        let obj = root.join("piece.obj");
+        fs::write(&stl, STL).unwrap();
+        fs::write(&obj, OBJ_CARRE).unwrap();
+
+        let stl_out = ensure_thumbnail(&stl, "piece.stl", &thumbs).unwrap();
+        let obj_out = ensure_thumbnail(&obj, "piece.obj", &thumbs).unwrap();
+        assert_ne!(stl_out, obj_out, "un aperçu pour deux modèles");
+        assert!(stl_out.is_file() && obj_out.is_file());
+
+        let stl_bytes = fs::read(&stl_out).unwrap();
+        let obj_bytes = fs::read(&obj_out).unwrap();
+        // Prémisse : les deux formes donnent deux images différentes. Sans ça,
+        // « l'aperçu du STL n'a pas bougé » ne prouverait rien.
+        assert_ne!(
+            stl_bytes, obj_bytes,
+            "aperçus identiques : le test ne prouverait rien"
+        );
+
+        // Le modèle homonyme est modifié (donc plus récent que son aperçu) : son
+        // aperçu est refait, celui du STL reste intact — même si le nouveau rendu
+        // est pixel pour pixel celui du STL.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(&obj, OBJ_TRIANGLE).unwrap();
+        ensure_thumbnail(&obj, "piece.obj", &thumbs).unwrap();
+
+        assert_eq!(
+            fs::read(&stl_out).unwrap(),
+            stl_bytes,
+            "l'aperçu du STL a été écrasé par celui de l'OBJ"
+        );
+        assert_ne!(
+            fs::read(&obj_out).unwrap(),
+            obj_bytes,
+            "l'aperçu de l'OBJ n'a pas été refait"
+        );
+    }
+
+    /// Renommer ou supprimer un modèle ne touche pas l'aperçu de son homonyme.
+    #[test]
+    fn renommer_ou_supprimer_ne_touche_pas_l_homonyme() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let thumbs = root.join(THUMB_DIR);
+
+        let stl = root.join("piece.stl");
+        let obj = root.join("piece.obj");
+        fs::write(&stl, STL).unwrap();
+        fs::write(&obj, OBJ_CARRE).unwrap();
+        ensure_thumbnail(&stl, "piece.stl", &thumbs).unwrap();
+        ensure_thumbnail(&obj, "piece.obj", &thumbs).unwrap();
+
+        // Renommage : l'aperçu suit **son** modèle, pas celui du même nom racine.
+        let to = root.join("toit.stl");
+        fs::rename(&stl, &to).unwrap();
+        move_for_path(root, &thumbs, &stl, &to);
+        assert!(thumbs.join("toit.stl.png").is_file());
+        assert!(!thumbs.join("piece.stl.png").exists());
+        assert!(
+            thumbs.join("piece.obj.png").is_file(),
+            "l'aperçu de l'OBJ a suivi le renommage du STL"
+        );
+
+        // Suppression : seul l'aperçu du fichier supprimé s'en va.
+        remove_for_path(root, &thumbs, &to);
+        assert!(!thumbs.join("toit.stl.png").exists());
+        assert!(thumbs.join("piece.obj.png").is_file());
+    }
+
+    /// Les aperçus sans modèle sont retirés : ceux d'un ancien nommage
+    /// (`piece.png` pour `piece.stl`) et ceux d'un modèle disparu.
+    #[test]
+    fn prune_supprime_les_apercus_orphelins() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let thumbs = root.join(THUMB_DIR);
+        fs::create_dir_all(root.join("Maison")).unwrap();
+        fs::create_dir_all(thumbs.join("Maison")).unwrap();
+        fs::write(root.join("piece.stl"), STL).unwrap();
+        fs::write(root.join("Maison/piece.stl"), STL).unwrap();
+
+        // Deux légitimes (leurs modèles existent), deux orphelins — et un
+        // dossier vidé par le nettoyage.
+        fs::write(thumbs.join("piece.stl.png"), "png").unwrap();
+        fs::write(thumbs.join("Maison/piece.stl.png"), "png").unwrap();
+        fs::write(thumbs.join("piece.png"), "ancien nommage").unwrap();
+        fs::create_dir_all(thumbs.join("Maison/parti")).unwrap();
+        fs::write(thumbs.join("Maison/parti.stl.png"), "modèle supprimé").unwrap();
+        fs::write(thumbs.join("Maison/parti/piece.stl.png"), "idem").unwrap();
+
+        assert_eq!(prune(root, &thumbs), 3);
+        assert!(thumbs.join("piece.stl.png").is_file());
+        assert!(thumbs.join("Maison/piece.stl.png").is_file());
+        assert!(!thumbs.join("piece.png").exists());
+        assert!(!thumbs.join("Maison/parti.stl.png").exists());
+        // Le dossier vidé part avec ; un dossier qui garde un aperçu légitime
+        // reste en place.
+        assert!(!thumbs.join("Maison/parti").exists());
+        assert!(thumbs.join("Maison").is_dir());
+        // Sans orphelin, plus rien à faire.
+        assert_eq!(prune(root, &thumbs), 0);
     }
 }

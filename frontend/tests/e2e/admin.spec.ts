@@ -16,7 +16,10 @@ test('réglages : le re-scan périodique se règle, s’applique et se garde', a
   await expect(page.locator('h1')).toHaveText('Administration')
 
   const champ = page.getByPlaceholder('auto')
-  await expect(champ).toBeVisible()
+  // `/admin` n'est visitée par aucun autre test : sa première visite la fait
+  // compiler par le serveur de dev, ce qui peut dépasser le délai d'assertion
+  // courant (même parade que `upload.spec.ts`).
+  await expect(champ).toBeVisible({ timeout: 30_000 })
 
   // Le backend explique sa recommandation : ici un dossier temporaire, sur un
   // disque local, donc aucun re-scan nécessaire.

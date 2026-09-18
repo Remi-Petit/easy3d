@@ -36,6 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (Garde un aperçu à jour ; coût une fois au lancement.)
     thumbnail::generate_all(&root, &thumbs_root);
 
+    // Puis retire les aperçus qui n'ont plus de modèle : ceux de l'ancien
+    // nommage (`piece.png` pour `piece.stl`, qui faisait collision entre deux
+    // formats homonymes) et ceux d'un fichier supprimé hors de l'interface.
+    let pruned = thumbnail::prune(&root, &thumbs_root);
+    if pruned > 0 {
+        println!("{pruned} aperçu(s) obsolète(s) supprimé(s).");
+    }
+
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
 
@@ -215,6 +223,7 @@ fn watch_dir(
                                 &new_root,
                                 &new_root.join(thumbnail::THUMB_DIR),
                             );
+                            thumbnail::prune(&new_root, &new_root.join(thumbnail::THUMB_DIR));
                             current_root = new_root;
                         }
                         Err(e) => {
