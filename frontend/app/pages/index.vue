@@ -105,7 +105,13 @@ usePageHeader(() => ({
     <template v-else>
       <p class="section-label">{{ $t('catalog.folders') }}</p>
       <div v-if="allFolders.length" class="file-grid">
-        <FolderCard v-for="f in allFolders" :key="f.name" :folder="f" :display-mode="displayMode" />
+        <FolderCard
+          v-for="f in allFolders"
+          :key="f.name"
+          :folder="f"
+          :rel="f.name"
+          :display-mode="displayMode"
+        />
       </div>
       <div v-else class="empty">{{ $t('catalog.noFolder') }}</div>
 

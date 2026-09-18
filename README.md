@@ -32,7 +32,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
 - **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
   consulte et modifie la configuration par le même chemin que l'interface, donc
   sans jamais écraser une édition en cours.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 160 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 166 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.

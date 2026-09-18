@@ -313,4 +313,8 @@ const navUi = {
       </template>
     </UDashboardPanel>
   </UDashboardGroup>
+
+  <!-- Renommage : une seule fenêtre pour toutes les cartes (voir `useRename`),
+       déclenchée par le menu contextuel d'un fichier ou d'un dossier. -->
+  <RenameDialog />
 </template>

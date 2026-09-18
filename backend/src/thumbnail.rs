@@ -101,6 +101,53 @@ pub fn remove_for_path(root: &Path, thumbs_root: &Path, abs_path: &Path) {
     let _ = fs::remove_file(&thumb);
 }
 
+/// Fait suivre les aperçus d'un élément **renommé ou déplacé**.
+///
+/// `from` et `to` sont des chemins absolus. Un fichier a un `.png` unique ; un
+/// dossier a tout un sous-arbre d'aperçus (les siens et ceux de ses
+/// descendants), qu'on déplace d'un bloc : les régénérer coûterait le prix d'un
+/// premier import, alors que l'arborescence des aperçus est le miroir de celle
+/// des modèles.
+///
+/// C'est la forme d'aperçu **présente sur le disque** qui décide, pas le type de
+/// l'élément : ainsi l'ordre des opérations (renommer le modèle avant ou après
+/// ses aperçus) n'a pas d'importance.
+pub fn move_for_path(root: &Path, thumbs_root: &Path, from: &Path, to: &Path) {
+    let (Some(from_rel), Some(to_rel)) = (rel_of(root, from), rel_of(root, to)) else {
+        return;
+    };
+
+    // `ensure_thumbnail` range l'aperçu d'un fichier à côté de ses frères
+    // (`.easy3d-thumbs/Maison/x.png`), celui d'un dossier dans son propre
+    // sous-dossier (`.easy3d-thumbs/Maison/Toit/`).
+    let file_thumb = thumbs_root.join(Path::new(&from_rel).with_extension("png"));
+    let (old, new) = if file_thumb.exists() {
+        (
+            file_thumb,
+            thumbs_root.join(Path::new(&to_rel).with_extension("png")),
+        )
+    } else {
+        (thumbs_root.join(&from_rel), thumbs_root.join(&to_rel))
+    };
+
+    if !old.exists() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    // La destination peut exister (aperçu d'un ancien fichier du même nom) : il
+    // sera de toute façon régénéré s'il manque, donc on ne le garde pas deux fois.
+    if new.exists() {
+        let _ = if new.is_dir() {
+            fs::remove_dir_all(&new)
+        } else {
+            fs::remove_file(&new)
+        };
+    }
+    let _ = fs::rename(&old, &new);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Utilitaires de chemin
 // ─────────────────────────────────────────────────────────────────────────

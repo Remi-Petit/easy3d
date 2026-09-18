@@ -98,6 +98,7 @@ function cardOf(sub: SubFolderInfo): FolderInfo {
           v-for="sub in subfolders"
           :key="sub.rel"
           :folder="cardOf(sub)"
+          :rel="sub.rel"
           :display-mode="displayMode"
           :to="folderHref(sub.rel)"
         />

@@ -192,6 +192,14 @@
     "whereRoot": "racine",
     "hasNote": "A une note"
   },
+  "rename": {
+    "title": "Renommer",
+    "field": "Nouveau nom",
+    "cancel": "Annuler",
+    "confirm": "Renommer",
+    "done": "« {name} » renommé.",
+    "failed": "Renommage impossible."
+  },
   "time": {
     "now": "à l’instant",
     "seconds": "il y a {count}s",

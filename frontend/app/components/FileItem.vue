@@ -8,6 +8,7 @@ const props = withDefaults(
 )
 
 const now = useNow()
+const { t } = useI18n()
 const { viewerOf, showsViewer } = useFormats()
 const name = computed(() => basename(props.file.path))
 const type = computed(() => ext(props.file.path) || '?')
@@ -35,10 +36,36 @@ watch(
   () => props.file.image,
   () => (imageFailed.value = false),
 )
+
+// ── Menu contextuel (clic droit) ────────────────────────────────────────────
+// La position est celle du curseur : c'est la carte qui la retient, le menu ne
+// fait que s'y poser (voir `CardMenu`).
+const menu = reactive({ open: false, x: 0, y: 0 })
+
+function openMenu(event: MouseEvent) {
+  menu.open = true
+  menu.x = event.clientX
+  menu.y = event.clientY
+}
+
+const menuItems = computed(() => [{ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' }])
+
+const { start: startRename } = useRename()
+
+function onMenuSelect(key: string) {
+  menu.open = false
+  if (key === 'rename') {
+    startRename({ rel: props.file.rel, label: name.value, kind: 'file' })
+  }
+}
 </script>
 
 <template>
-  <article class="model-card" :class="{ 'model-card--file': viewer === 'none' }">
+  <article
+    class="model-card"
+    :class="{ 'model-card--file': viewer === 'none' }"
+    @contextmenu.prevent="openMenu"
+  >
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img
@@ -67,5 +94,15 @@ watch(
         </span>
       </div>
     </NuxtLink>
+
+    <CardMenu
+      :open="menu.open"
+      :x="menu.x"
+      :y="menu.y"
+      :items="menuItems"
+      :label="name"
+      @select="onMenuSelect"
+      @close="menu.open = false"
+    />
   </article>
 </template>

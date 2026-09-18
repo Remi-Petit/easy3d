@@ -3,9 +3,22 @@ import type { DisplayMode, FileInfo, FolderInfo } from '~/composables/useModels'
 import { useNow } from '~/composables/useNow'
 
 const props = withDefaults(
-  defineProps<{ folder: FolderInfo; displayMode?: DisplayMode; to?: string | null }>(),
-  { displayMode: '3d', to: null },
+  defineProps<{
+    folder: FolderInfo
+    displayMode?: DisplayMode
+    to?: string | null
+    /**
+     * Chemin relatif du dossier dans le catalogue (`Maison/Toit`). Les
+     * sous-dossiers d'une page n'ont que leur nom dans `folder.name` : c'est
+     * l'appelant qui sait où ils sont rangés.
+     */
+    rel?: string | null
+  }>(),
+  { displayMode: '3d', to: null, rel: null },
 )
+
+/** Chemin relatif : le nom du dossier, sauf quand on connaît mieux. */
+const folderRel = computed(() => props.rel ?? props.folder.name)
 
 /**
  * Destination : l'accueil pointe le dossier de premier niveau ; la page d'un
@@ -50,10 +63,31 @@ watch(
   () => preview.value?.image,
   () => (imageFailed.value = false),
 )
+
+// ── Menu contextuel (clic droit) ────────────────────────────────────────────
+const { t } = useI18n()
+const menu = reactive({ open: false, x: 0, y: 0 })
+
+function openMenu(event: MouseEvent) {
+  menu.open = true
+  menu.x = event.clientX
+  menu.y = event.clientY
+}
+
+const menuItems = computed(() => [{ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' }])
+
+const { start: startRename } = useRename()
+
+function onMenuSelect(key: string) {
+  menu.open = false
+  if (key === 'rename') {
+    startRename({ rel: folderRel.value, label: props.folder.name, kind: 'folder' })
+  }
+}
 </script>
 
 <template>
-  <article class="model-card model-card--file">
+  <article class="model-card model-card--file" @contextmenu.prevent="openMenu">
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img
@@ -78,5 +112,15 @@ watch(
         </span>
       </div>
     </NuxtLink>
+
+    <CardMenu
+      :open="menu.open"
+      :x="menu.x"
+      :y="menu.y"
+      :items="menuItems"
+      :label="folder.name"
+      @select="onMenuSelect"
+      @close="menu.open = false"
+    />
   </article>
 </template>

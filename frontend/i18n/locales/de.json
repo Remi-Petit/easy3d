@@ -192,6 +192,14 @@
     "whereRoot": "Wurzel",
     "hasNote": "Hat eine Notiz"
   },
+  "rename": {
+    "title": "Umbenennen",
+    "field": "Neuer Name",
+    "cancel": "Abbrechen",
+    "confirm": "Umbenennen",
+    "done": "„{name}“ umbenannt.",
+    "failed": "Umbenennen fehlgeschlagen."
+  },
   "time": {
     "now": "gerade eben",
     "seconds": "vor {count}s",
