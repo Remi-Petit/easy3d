@@ -137,6 +137,7 @@ pub fn routes(state: AppState) -> Router {
             "/upload",
             post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)),
         )
+        .route("/rename", post(post_rename))
         .route("/note", get(get_note))
         .route("/health", get(health))
         .route("/ws", get(ws_models))
@@ -547,12 +548,7 @@ async fn post_upload(
     // Ni dossier, ni élément caché : `.easy3d-thumbs` et `.easy3d-notes`
     // appartiennent au backend, et le scan ignore de toute façon tout ce qui
     // commence par un point.
-    if q.path.contains('\\')
-        || q.path.ends_with('/')
-        || q.path
-            .split('/')
-            .any(|part| part.is_empty() || part.starts_with('.'))
-    {
+    if !valid_rel(&q.path) {
         return Err(refuse(format!("chemin réservé : « {} »", q.path)));
     }
     if body.is_empty() {
@@ -619,6 +615,133 @@ fn temp_path(target: &Path) -> PathBuf {
     target
         .parent()
         .map_or_else(|| PathBuf::from(&name), |dir| dir.join(&name))
+}
+
+/// `true` si un chemin relatif venu du client est acceptable (envoi, renommage).
+///
+/// L'API sépare les composants par `/` : une contre-oblique serait un nom de
+/// fichier littéral sous Linux mais un séparateur sous Windows. Refusée des deux
+/// côtés, pour que le chemin écrit soit celui qui sera relu. Ni dossier (pas de
+/// `/` final), ni élément caché : `.easy3d-thumbs` et `.easy3d-notes`
+/// appartiennent au backend, et le scan ignore de toute façon tout ce qui
+/// commence par un point.
+fn valid_rel(rel: &str) -> bool {
+    !rel.contains('\\')
+        && !rel.ends_with('/')
+        && !rel
+            .split('/')
+            .any(|part| part.is_empty() || part.starts_with('.'))
+}
+
+/// `true` si `name` peut servir de **nom** (dernier segment d'un chemin).
+///
+/// Un renommage ne déplace rien : seul le dernier composant change, donc aucun
+/// séparateur. Sont refusés aussi `.`/`..`, les noms cachés, les caractères de
+/// contrôle et ceux que Windows interdit ou tronque — le même binaire tourne des
+/// deux côtés, et un nom impossible à écrire là-bas ne doit pas être accepté
+/// ici.
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && !name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|'])
+        && !name.chars().any(char::is_control)
+        && !name.starts_with('.')
+        && !name.ends_with([' ', '.'])
+}
+
+/// Corps de `POST /rename`.
+#[derive(Deserialize)]
+struct RenameRequest {
+    /// Chemin relatif de l'élément à renommer (fichier ou dossier).
+    path: String,
+    /// Nouveau nom : le **dernier** segment du chemin, sans `/`.
+    name: String,
+}
+
+/// Réponse d'un renommage réussi : le nouveau chemin relatif.
+#[derive(Serialize)]
+struct RenameResponse {
+    rel: String,
+}
+
+/// Renomme un fichier ou un dossier (`POST /rename {path, name}`).
+///
+/// Un renommage ne change que le **dernier** segment : l'élément reste à sa
+/// place. C'est le pendant de l'explorateur de fichiers, et le pendant du
+/// `rename` de l'upload — atomique du point de vue du catalogue.
+///
+/// La note (`.easy3d-notes`) et les aperçus (`.easy3d-thumbs`) suivent : sous
+/// Docker Desktop, le watcher ne verrait rien de cette opération (aucun
+/// événement pour un montage virtualisé), donc c'est ici que tout se fait, y
+/// compris la rediffusion de la liste.
+async fn post_rename(
+    State(state): State<AppState>,
+    Json(request): Json<RenameRequest>,
+) -> Result<Json<RenameResponse>, (StatusCode, String)> {
+    let root = state.root();
+
+    let Some(from) = safe_join(&root, &request.path) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("chemin invalide : « {} »", request.path),
+        ));
+    };
+    if !valid_rel(&request.path) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("chemin réservé : « {} »", request.path),
+        ));
+    }
+    if !valid_name(&request.name) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("nom invalide : « {} »", request.name),
+        ));
+    }
+    if !from.exists() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("introuvable : « {} »", request.path),
+        ));
+    }
+
+    // Dernier segment remplacé, le reste du chemin est conservé.
+    let to = from.with_file_name(&request.name);
+    let to_rel = match request.path.rsplit_once('/') {
+        Some((parent, _)) => format!("{parent}/{}", request.name),
+        None => request.name.clone(),
+    };
+    // Renommer sur soi-même (même nom, à la casse près) : rien à faire, et
+    // surtout pas « la destination existe déjà ».
+    if to == from {
+        return Ok(Json(RenameResponse { rel: request.path }));
+    }
+    if to.exists() {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("« {} » existe déjà", request.name),
+        ));
+    }
+
+    // 1. Le modèle lui-même : si ça échoue, rien d'autre n'a bougé.
+    tokio::fs::rename(&from, &to)
+        .await
+        .map_err(internal_error)?;
+
+    // 2. Ce qui l'accompagne, en signalant les échecs sans faire échouer
+    //    l'opération : le catalogue, lui, est déjà à jour.
+    if let Err(e) = notes::move_for_path(&root, &from, &to) {
+        eprintln!(
+            "⚠️  Notes non déplacées ({} → {}) : {e}",
+            request.path, to_rel
+        );
+    }
+    thumbnail::move_for_path(&root, &root.join(thumbnail::THUMB_DIR), &from, &to);
+
+    // 3. Les clients : la liste complète, comme après un envoi.
+    broadcast_snapshot(&state);
+
+    Ok(Json(RenameResponse { rel: to_rel }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1252,6 +1375,219 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
         assert!(!dir.path().join("vide.stl").exists());
+    }
+
+    /// STL minimal mais valide (une facette) : l'aperçu doit pouvoir le lire.
+    const STL: &str = "solid piece\n\
+         facet normal 0 0 1\n\
+         outer loop\n\
+         vertex 0 0 0\n\
+         vertex 1 0 0\n\
+         vertex 0 1 0\n\
+         endloop\n\
+         endfacet\n\
+         endsolid piece\n";
+
+    /// Renommage d'un fichier : le fichier, sa note et son aperçu suivent, et la
+    /// liste est rediffusée — le watcher ne verrait rien de tout ça sous Docker
+    /// Desktop (montage virtualisé, aucun événement).
+    #[tokio::test]
+    async fn rename_deplace_fichier_note_et_apercu() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+        std::fs::write(dir.path().join("Maison/piece.stl"), STL).unwrap();
+        notes::write(dir.path(), "Maison/piece.stl", "# ma note").unwrap();
+        // Un aperçu déjà généré, à l'ancien emplacement.
+        std::fs::create_dir_all(dir.path().join(thumbnail::THUMB_DIR).join("Maison")).unwrap();
+        std::fs::write(
+            dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/piece.png"),
+            "png",
+        )
+        .unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+
+        let res = routes(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/rename")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"path":"Maison/piece.stl","name":"toit.stl"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["rel"], "Maison/toit.stl");
+
+        assert!(!dir.path().join("Maison/piece.stl").exists());
+        assert!(dir.path().join("Maison/toit.stl").is_file());
+
+        // La note a suivi son fichier, l'ancienne place est libre.
+        assert_eq!(
+            notes::read(dir.path(), "Maison/toit.stl").as_deref(),
+            Some("# ma note")
+        );
+        assert!(notes::read(dir.path(), "Maison/piece.stl").is_none());
+
+        // L'aperçu a été **déplacé**, pas régénéré : l'octet d'origine est là.
+        assert_eq!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join(thumbnail::THUMB_DIR)
+                    .join("Maison/toit.png")
+            )
+            .unwrap(),
+            "png"
+        );
+
+        // Diffusion immédiate : le client voit le nouveau nom sans recharger.
+        let payload = updates
+            .try_recv()
+            .expect("aucune rediffusion après le renommage");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v["folders"]["Maison"]["files"][0]["rel"], "Maison/toit.stl");
+    }
+
+    /// Renommer un dossier emporte tout son sous-arbre : notes et aperçus.
+    #[tokio::test]
+    async fn rename_de_dossier_emporte_le_sous_arbre() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison/Toit")).unwrap();
+        std::fs::write(dir.path().join("Maison/Toit/piece.stl"), STL).unwrap();
+        notes::write(dir.path(), "Maison/Toit", "## le toit").unwrap();
+        notes::write(dir.path(), "Maison/Toit/piece.stl", "# la pièce").unwrap();
+        for rel in ["Maison/Toit/piece.png", "Maison/piece.png"] {
+            let path = dir.path().join(thumbnail::THUMB_DIR).join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "png").unwrap();
+        }
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+
+        let res = routes(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/rename")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Maison/Toit","name":"Toiture"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        assert!(dir.path().join("Maison/Toiture/piece.stl").is_file());
+        // Les notes du dossier **et** de ses descendants.
+        assert_eq!(
+            notes::read(dir.path(), "Maison/Toiture").as_deref(),
+            Some("## le toit")
+        );
+        assert_eq!(
+            notes::read(dir.path(), "Maison/Toiture/piece.stl").as_deref(),
+            Some("# la pièce")
+        );
+        // Les aperçus du sous-arbre, en bloc (l'aperçu du dossier parent, lui,
+        // n'a pas bougé).
+        assert!(
+            dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/Toiture/piece.png")
+                .is_file()
+        );
+        assert!(
+            dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/piece.png")
+                .is_file()
+        );
+    }
+
+    /// Garde-fous du renommage : ce que l'API doit refuser, et pourquoi.
+    #[tokio::test]
+    async fn rename_refuse_les_cas_invalides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+        std::fs::write(dir.path().join("Maison/piece.stl"), STL).unwrap();
+        std::fs::write(dir.path().join("Maison/vis.stl"), STL).unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let app = routes(state);
+
+        for (path, name, attendu) in [
+            // Un renommage ne déplace pas : pas de séparateur dans le nom.
+            ("Maison/piece.stl", "sous/toit.stl", StatusCode::BAD_REQUEST),
+            // Ni remontée, ni nom caché, ni nom vide.
+            ("Maison/piece.stl", "..", StatusCode::BAD_REQUEST),
+            ("Maison/piece.stl", ".cache", StatusCode::BAD_REQUEST),
+            ("Maison/piece.stl", "", StatusCode::BAD_REQUEST),
+            // Caractères refusés sous Windows (le même binaire y tourne).
+            ("Maison/piece.stl", "toit?.stl", StatusCode::BAD_REQUEST),
+            // Hors de la racine des modèles.
+            ("../secret.stl", "x.stl", StatusCode::BAD_REQUEST),
+            // La destination est déjà prise.
+            ("Maison/piece.stl", "vis.stl", StatusCode::CONFLICT),
+            // La source n'existe pas.
+            ("Maison/absent.stl", "toit.stl", StatusCode::NOT_FOUND),
+        ] {
+            let body = serde_json::json!({ "path": path, "name": name }).to_string();
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/rename")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), attendu, "« {path} » → « {name} »");
+        }
+
+        // Renommer sur soi-même est sans effet (et sans erreur) : le client peut
+        // valider sans avoir rien changé.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/rename")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"path":"Maison/piece.stl","name":"piece.stl"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(dir.path().join("Maison/piece.stl").is_file());
     }
 
     /// Intégration WebSocket : connexion réelle → snapshot initial, puis

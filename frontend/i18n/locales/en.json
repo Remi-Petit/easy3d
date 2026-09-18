@@ -192,6 +192,14 @@
     "whereRoot": "root",
     "hasNote": "Has a note"
   },
+  "rename": {
+    "title": "Rename",
+    "field": "New name",
+    "cancel": "Cancel",
+    "confirm": "Rename",
+    "done": "“{name}” renamed.",
+    "failed": "Rename failed."
+  },
   "time": {
     "now": "just now",
     "seconds": "{count}s ago",

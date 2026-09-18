@@ -1371,3 +1371,98 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ── Menu contextuel des cartes ─────────────────────────────────────────────
+   Posé au curseur et téléporté dans le `body` (voir `CardMenu`) : z-index haut
+   pour passer au-dessus des cartes, des volets et de la barre d'outils. */
+.card-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
+}
+
+.card-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-menu__item:hover,
+.card-menu__item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.card-menu__icon {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+/* ── Renommage ────────────────────────────────────────────────────────────── */
+.rename__input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.rename__input:focus {
+  border-color: var(--accent);
+}
+
+/* Un refus du backend reste affiché sous le champ : on corrige et on réessaie. */
+.rename__error {
+  margin: 9px 0 0;
+  color: var(--err);
+  font-size: 12.5px;
+}
+
+.rename__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rename__cancel,
+.rename__confirm {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rename__confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.rename__cancel:disabled,
+.rename__confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
