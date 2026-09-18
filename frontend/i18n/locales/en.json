@@ -200,6 +200,15 @@
     "done": "“{name}” renamed.",
     "failed": "Rename failed."
   },
+  "delete": {
+    "title": "Delete",
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "whatFile": "“{name}” will be permanently deleted.",
+    "whatFolder": "“{name}” and its {count} file will be permanently deleted. | “{name}” and its {count} files will be permanently deleted.",
+    "done": "“{name}” deleted.",
+    "failed": "Delete failed."
+  },
   "time": {
     "now": "just now",
     "seconds": "{count}s ago",

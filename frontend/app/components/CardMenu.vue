@@ -15,6 +15,8 @@ export interface CardMenuItem {
   label: string
   /** Icône Lucide, ex : `i-lucide-pencil`. */
   icon?: string
+  /** Action destructive (supprimer) : mise en avant rouge. */
+  danger?: boolean
 }
 
 const props = defineProps<{
@@ -108,6 +110,7 @@ onBeforeUnmount(detach)
         type="button"
         role="menuitem"
         class="card-menu__item"
+        :class="{ 'card-menu__item--danger': item.danger }"
         @click="emit('select', item.key)"
       >
         <UIcon v-if="item.icon" :name="item.icon" class="card-menu__icon" />

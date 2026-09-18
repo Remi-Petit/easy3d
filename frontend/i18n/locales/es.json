@@ -200,6 +200,15 @@
     "done": "«{name}» renombrado.",
     "failed": "No se pudo renombrar."
   },
+  "delete": {
+    "title": "Eliminar",
+    "cancel": "Cancelar",
+    "confirm": "Eliminar",
+    "whatFile": "«{name}» se eliminará definitivamente.",
+    "whatFolder": "Se eliminarán definitivamente «{name}» y su {count} archivo. | Se eliminarán definitivamente «{name}» y sus {count} archivos.",
+    "done": "«{name}» eliminado.",
+    "failed": "No se pudo eliminar."
+  },
   "time": {
     "now": "ahora mismo",
     "seconds": "hace {count}s",

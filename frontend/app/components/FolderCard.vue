@@ -74,15 +74,26 @@ function openMenu(event: MouseEvent) {
   menu.y = event.clientY
 }
 
-const menuItems = computed(() => [{ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' }])
+const menuItems = computed(() => [
+  { key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' },
+  { key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true },
+])
 
 const { start: startRename } = useRename()
+const { start: startDelete } = useDelete()
 
 function onMenuSelect(key: string) {
   menu.open = false
-  if (key === 'rename') {
-    startRename({ rel: folderRel.value, label: props.folder.name, kind: 'folder' })
+  // `count` : ce que la suppression emporte, annoncé avant de confirmer.
+  const cible = {
+    rel: folderRel.value,
+    label: props.folder.name,
+    kind: 'folder' as const,
+    count: props.folder.count,
   }
+
+  if (key === 'rename') startRename(cible)
+  if (key === 'delete') startDelete(cible)
 }
 </script>
 

@@ -317,4 +317,7 @@ const navUi = {
   <!-- Renommage : une seule fenêtre pour toutes les cartes (voir `useRename`),
        déclenchée par le menu contextuel d'un fichier ou d'un dossier. -->
   <RenameDialog />
+
+  <!-- Suppression : même principe, avec confirmation (voir `useDelete`). -->
+  <DeleteDialog />
 </template>

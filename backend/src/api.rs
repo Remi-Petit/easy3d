@@ -138,6 +138,7 @@ pub fn routes(state: AppState) -> Router {
             post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)),
         )
         .route("/rename", post(post_rename))
+        .route("/delete", post(post_delete))
         .route("/note", get(get_note))
         .route("/health", get(health))
         .route("/ws", get(ws_models))
@@ -742,6 +743,81 @@ async fn post_rename(
     broadcast_snapshot(&state);
 
     Ok(Json(RenameResponse { rel: to_rel }))
+}
+
+/// Corps de `POST /delete`.
+#[derive(Deserialize)]
+struct DeleteRequest {
+    /// Chemin relatif de l'élément à supprimer (fichier ou dossier).
+    path: String,
+}
+
+/// Réponse d'une suppression réussie.
+#[derive(Serialize)]
+struct DeleteResponse {
+    rel: String,
+}
+
+/// Supprime un fichier ou un dossier (`POST /delete {path}`).
+///
+/// Un dossier part avec **tout son contenu** — c'est ce que fait un explorateur
+/// de fichiers, et l'interface prévient avant (nombre de fichiers).
+///
+/// Ce qui l'accompagne part aussi : la note (`.easy3d-notes`, sous-arbre
+/// compris) et les aperçus (`.easy3d-thumbs`). Comme pour le renommage, tout se
+/// fait **ici** : sous Docker Desktop, le watcher ne verrait rien de l'opération.
+///
+/// Les documents collaboratifs encore ouverts sont oubliés au passage : sans
+/// ça, une note restée ouverte dans un onglet se réécrirait toute seule sur
+/// disque, sous un modèle qui n'existe plus.
+async fn post_delete(
+    State(state): State<AppState>,
+    Json(request): Json<DeleteRequest>,
+) -> Result<Json<DeleteResponse>, (StatusCode, String)> {
+    let root = state.root();
+
+    let Some(path) = safe_join(&root, &request.path) else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("chemin invalide : « {} »", request.path),
+        ));
+    };
+    // Refuse aussi la racine elle-même : un chemin vide n'est pas un chemin.
+    if !valid_rel(&request.path) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("chemin réservé : « {} »", request.path),
+        ));
+    }
+    if !path.exists() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("introuvable : « {} »", request.path),
+        ));
+    }
+
+    // Les documents collaboratifs d'abord : vidés et retirés du registre, ils ne
+    // pourront plus réécrire la note après coup.
+    collab::Rooms::forget(&state, &request.path);
+
+    // 1. Le modèle — et tout son contenu, si c'est un dossier. Si ça échoue,
+    //    rien d'autre n'a bougé.
+    let removed = if path.is_dir() {
+        tokio::fs::remove_dir_all(&path).await
+    } else {
+        tokio::fs::remove_file(&path).await
+    };
+    removed.map_err(internal_error)?;
+
+    // 2. Ce qui l'accompagnait, en signalant les échecs sans faire échouer
+    //    l'opération : le catalogue, lui, est déjà à jour.
+    notes::remove_for_path(&root, &request.path);
+    thumbnail::remove_for_path(&root, &root.join(thumbnail::THUMB_DIR), &path);
+
+    // 3. Les clients : la liste complète, comme après un envoi.
+    broadcast_snapshot(&state);
+
+    Ok(Json(DeleteResponse { rel: request.path }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1588,6 +1664,225 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert!(dir.path().join("Maison/piece.stl").is_file());
+    }
+
+    /// Suppression d'un fichier : le fichier, sa note et son aperçu partent, et
+    /// la liste est rediffusée — le watcher ne verrait rien de tout ça sous
+    /// Docker Desktop.
+    #[tokio::test]
+    async fn delete_supprime_fichier_note_et_apercu() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+        std::fs::write(dir.path().join("Maison/piece.stl"), STL).unwrap();
+        std::fs::write(dir.path().join("Maison/garde.stl"), STL).unwrap();
+        notes::write(dir.path(), "Maison/piece.stl", "# à jeter").unwrap();
+        notes::write(dir.path(), "Maison/garde.stl", "# à garder").unwrap();
+        for rel in ["Maison/piece.stl.png", "Maison/garde.stl.png"] {
+            let path = dir.path().join(thumbnail::THUMB_DIR).join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "png").unwrap();
+        }
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+
+        let res = routes(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/delete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Maison/piece.stl"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        assert!(!dir.path().join("Maison/piece.stl").exists());
+        assert!(notes::read(dir.path(), "Maison/piece.stl").is_none());
+        assert!(
+            !dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/piece.stl.png")
+                .exists()
+        );
+
+        // Le voisin est intact : ni son fichier, ni sa note, ni son aperçu.
+        assert!(dir.path().join("Maison/garde.stl").is_file());
+        assert_eq!(
+            notes::read(dir.path(), "Maison/garde.stl").as_deref(),
+            Some("# à garder")
+        );
+        assert!(
+            dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/garde.stl.png")
+                .is_file()
+        );
+
+        let payload = updates
+            .try_recv()
+            .expect("aucune rediffusion après la suppression");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v["folders"]["Maison"]["files"].as_array().unwrap().len(), 1);
+    }
+
+    /// Un dossier part avec **tout** son contenu : modèles, notes et aperçus du
+    /// sous-arbre. Ceux d'à côté restent.
+    #[tokio::test]
+    async fn delete_de_dossier_emporte_le_sous_arbre() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison/Toit")).unwrap();
+        std::fs::write(dir.path().join("Maison/Toit/piece.stl"), STL).unwrap();
+        std::fs::write(dir.path().join("Maison/garde.stl"), STL).unwrap();
+        notes::write(dir.path(), "Maison/Toit", "## le toit").unwrap();
+        notes::write(dir.path(), "Maison/Toit/piece.stl", "# la pièce").unwrap();
+        notes::write(dir.path(), "Maison/garde.stl", "# à garder").unwrap();
+        for rel in ["Maison/Toit/piece.stl.png", "Maison/garde.stl.png"] {
+            let path = dir.path().join(thumbnail::THUMB_DIR).join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "png").unwrap();
+        }
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+
+        let res = routes(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/delete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Maison/Toit"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        assert!(!dir.path().join("Maison/Toit").exists());
+        assert!(notes::read(dir.path(), "Maison/Toit").is_none());
+        assert!(notes::read(dir.path(), "Maison/Toit/piece.stl").is_none());
+        assert!(
+            !dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/Toit")
+                .exists()
+        );
+
+        // Le reste du dossier, lui, n'a pas bougé.
+        assert!(dir.path().join("Maison/garde.stl").is_file());
+        assert_eq!(
+            notes::read(dir.path(), "Maison/garde.stl").as_deref(),
+            Some("# à garder")
+        );
+        assert!(
+            dir.path()
+                .join(thumbnail::THUMB_DIR)
+                .join("Maison/garde.stl.png")
+                .is_file()
+        );
+    }
+
+    /// Une note **encore ouverte** dans un onglet ne ressuscite pas après la
+    /// suppression de son fichier : le document collaboratif est oublié avec.
+    #[tokio::test]
+    async fn delete_oublie_les_documents_collaboratifs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("piece.stl"), STL).unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+
+        // Une note ouverte : son document vit en mémoire, comme dans un onglet
+        // resté connecté.
+        collab::Rooms::set_text(&state, "piece.stl", "# note ouverte").unwrap();
+        assert_eq!(
+            collab::Rooms::live_text(&state, "piece.stl").as_deref(),
+            Some("# note ouverte")
+        );
+
+        let res = routes(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/delete")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"piece.stl"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Le document est oublié : il ne réécrira pas la note du fichier
+        // supprimé.
+        assert!(collab::Rooms::live_text(&state, "piece.stl").is_none());
+        assert!(notes::read(dir.path(), "piece.stl").is_none());
+        assert!(!dir.path().join("piece.stl").exists());
+    }
+
+    /// Garde-fous de la suppression : ce que l'API doit refuser.
+    #[tokio::test]
+    async fn delete_refuse_les_chemins_invalides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+        std::fs::create_dir_all(dir.path().join(thumbnail::THUMB_DIR)).unwrap();
+        std::fs::write(dir.path().join("Maison/piece.stl"), STL).unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let app = routes(state);
+
+        for (path, attendu) in [
+            // La racine des modèles n'est pas un élément du catalogue.
+            ("", StatusCode::BAD_REQUEST),
+            ("/", StatusCode::BAD_REQUEST),
+            // Ni un dossier interne du backend, ni un chemin caché.
+            (".easy3d-thumbs", StatusCode::BAD_REQUEST),
+            ("Maison/.cache", StatusCode::BAD_REQUEST),
+            // Hors de la racine.
+            ("../secret.stl", StatusCode::BAD_REQUEST),
+            // Déjà absent.
+            ("Maison/absent.stl", StatusCode::NOT_FOUND),
+        ] {
+            let body = serde_json::json!({ "path": path }).to_string();
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/delete")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), attendu, "chemin « {path} »");
+        }
+
+        // Rien n'a été touché au passage.
+        assert!(dir.path().join("Maison/piece.stl").is_file());
+        assert!(dir.path().join(thumbnail::THUMB_DIR).is_dir());
     }
 
     /// Intégration WebSocket : connexion réelle → snapshot initial, puis

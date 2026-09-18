@@ -170,6 +170,49 @@ pub fn move_for_path(root: &Path, from: &Path, to: &Path) -> std::io::Result<boo
     Ok(moved)
 }
 
+/// Supprime la note d'un élément **retiré** du catalogue.
+///
+/// `rel` désigne un fichier (`DemaAuto/boitier.stl`) ou un dossier
+/// (`DemaAuto`) : dans ce cas tout le sous-arbre de notes part avec lui, sinon
+/// un dossier recréé plus tard hériterait des notes de l'ancien.
+///
+/// Le Markdown et l'**état CRDT** (`.ydoc`) sont traités ensemble : sans le
+/// second, un redémarrage ressusciterait le texte depuis le document Yjs.
+///
+/// Retourne `true` si au moins un fichier a été supprimé.
+pub fn remove_for_path(root: &Path, rel: &str) -> bool {
+    let notes_root = root.join(NOTES_DIR);
+    let mut removed = false;
+
+    // La note de l'élément et son état CRDT.
+    for path in [note_path(root, rel), state_path(root, rel)]
+        .into_iter()
+        .flatten()
+    {
+        if fs::remove_file(&path).is_ok() {
+            removed = true;
+        }
+    }
+
+    // Le sous-arbre, si c'est un dossier (`.easy3d-notes/<rel>/…`).
+    let subtree = notes_root.join(rel);
+    if subtree.is_dir() && fs::remove_dir_all(&subtree).is_ok() {
+        removed = true;
+    }
+
+    // Les dossiers vidés par la suppression partent aussi — `remove_dir` refuse
+    // un dossier non vide, on s'arrête donc de soi-même au bon endroit.
+    let mut parent = subtree.parent().map(Path::to_path_buf);
+    while let Some(dir) = parent {
+        if dir == notes_root || fs::remove_dir(&dir).is_err() {
+            break;
+        }
+        parent = dir.parent().map(Path::to_path_buf);
+    }
+
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +374,40 @@ mod tests {
 
         assert!(!move_for_path(&root, &root.join("A/x.stl"), &root.join("A/x.stl")).unwrap());
         assert_eq!(read(&root, "A/x.stl").as_deref(), Some("# note"));
+    }
+
+    #[test]
+    fn supprime_la_note_et_son_document() {
+        let (_dir, root) = models_tree();
+        fs::create_dir_all(root.join("A")).unwrap();
+        fs::write(root.join("A/x.stl"), "x").unwrap();
+        write(&root, "A/x.stl", "# note").unwrap();
+        write_state(&root, "A/x.stl", b"document").unwrap();
+
+        assert!(remove_for_path(&root, "A/x.stl"));
+        assert!(read(&root, "A/x.stl").is_none());
+        // L'état CRDT part avec : sans ça, un redémarrage ressusciterait le
+        // texte depuis le document Yjs.
+        assert!(read_state(&root, "A/x.stl").is_none());
+        // Deuxième passage : plus rien à supprimer.
+        assert!(!remove_for_path(&root, "A/x.stl"));
+    }
+
+    #[test]
+    fn supprime_tout_le_sous_arbre_d_un_dossier() {
+        let (_dir, root) = models_tree();
+        fs::create_dir_all(root.join("A/sous")).unwrap();
+        fs::write(root.join("A/sous/x.stl"), "x").unwrap();
+        write(&root, "A", "# dossier").unwrap();
+        write(&root, "A/sous/x.stl", "# fichier").unwrap();
+        write(&root, "B", "# voisin").unwrap();
+
+        assert!(remove_for_path(&root, "A"));
+        assert!(read(&root, "A").is_none());
+        assert!(read(&root, "A/sous/x.stl").is_none());
+        // Un dossier recréé plus tard ne doit pas hériter des notes de l'ancien.
+        assert!(!root.join(NOTES_DIR).join("A").exists());
+        // Le voisin est intact.
+        assert_eq!(read(&root, "B").as_deref(), Some("# voisin"));
     }
 }

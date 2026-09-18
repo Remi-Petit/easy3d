@@ -200,6 +200,15 @@
     "done": "„{name}“ umbenannt.",
     "failed": "Umbenennen fehlgeschlagen."
   },
+  "delete": {
+    "title": "Löschen",
+    "cancel": "Abbrechen",
+    "confirm": "Löschen",
+    "whatFile": "„{name}“ wird endgültig gelöscht.",
+    "whatFolder": "„{name}“ und seine {count} Datei werden endgültig gelöscht. | „{name}“ und seine {count} Dateien werden endgültig gelöscht.",
+    "done": "„{name}“ gelöscht.",
+    "failed": "Löschen fehlgeschlagen."
+  },
   "time": {
     "now": "gerade eben",
     "seconds": "vor {count}s",

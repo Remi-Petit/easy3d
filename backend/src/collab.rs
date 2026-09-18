@@ -116,6 +116,35 @@ impl Rooms {
         }
         Ok(())
     }
+
+    /// Oublie les documents d'un élément **supprimé** du catalogue.
+    ///
+    /// Sans ça, un document resté en mémoire (une note encore ouverte dans un
+    /// onglet) réécrirait son `.md` au prochain flush : la note ressusciterait
+    /// sous un modèle qui n'existe plus. Chaque document concerné est **vidé**
+    /// (les éditeurs ouverts voient la note se vider, ce qui est cohérent avec la
+    /// suppression, et le flush suivant supprime les fichiers) puis retiré du
+    /// registre.
+    ///
+    /// `rel` peut désigner un dossier : ses documents et ceux de ses descendants
+    /// sont oubliés.
+    pub fn forget(state: &AppState, rel: &str) {
+        let prefix = format!("{rel}/");
+        let mut map = state.collab.map.lock().unwrap();
+        let keys: Vec<String> = map
+            .keys()
+            .filter(|key| key.as_str() == rel || key.starts_with(&prefix))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            if let Some(room) = map.remove(&key)
+                && let Some(frame) = room.replace_text("")
+            {
+                let _ = room.tx.send(frame);
+            }
+        }
+    }
 }
 
 /// Un document partagé et son canal de diffusion.

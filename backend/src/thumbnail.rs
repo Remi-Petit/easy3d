@@ -97,9 +97,14 @@ pub fn ensure_for_changed(root: &Path, thumbs_root: &Path, abs_path: &Path) {
     ensure_thumbnail(abs_path, &rel, thumbs_root);
 }
 
-/// Supprime l'aperçu mis en cache d'un fichier (appelé par le watcher lorsqu'un
-/// fichier est supprimé, et par les tests). Aucun effet si aucun aperçu
-/// n'existe.
+/// Supprime l'aperçu mis en cache d'un fichier ou d'un dossier (appelé par le
+/// watcher sur un chemin supprimé, et par `DELETE` côté API). Aucun effet si
+/// aucun aperçu n'existe.
+///
+/// Un fichier a son `.png` ; un dossier a **tout un sous-arbre** d'aperçus
+/// (`.easy3d-thumbs/Maison/Toit/…`), qui part d'un bloc. Les deux formes sont
+/// tentées : le chemin n'existe plus sur disque quand c'est le watcher qui
+/// appelle, on ne peut donc pas se fier à son type.
 ///
 /// Le chemin est reconstruit depuis `thumbs_root` : [`thumb_rel_path`] inclut
 /// déjà `THUMB_DIR`, l'y joindre à nouveau viserait
@@ -109,7 +114,13 @@ pub fn remove_for_path(root: &Path, thumbs_root: &Path, abs_path: &Path) {
     let Some(rel) = rel_of(root, abs_path) else {
         return;
     };
+
     let _ = fs::remove_file(thumbs_root.join(format!("{rel}.png")));
+
+    let subtree = thumbs_root.join(&rel);
+    if subtree.is_dir() {
+        let _ = fs::remove_dir_all(&subtree);
+    }
 }
 
 /// Fait suivre les aperçus d'un élément **renommé ou déplacé**.
@@ -381,6 +392,31 @@ mod tests {
         remove_for_path(root, &thumbs, &to);
         assert!(!thumbs.join("toit.stl.png").exists());
         assert!(thumbs.join("piece.obj.png").is_file());
+    }
+
+    /// Supprimer un dossier emporte tout son sous-arbre d'aperçus, sans toucher
+    /// aux voisins ni au reste du cache.
+    #[test]
+    fn remove_for_path_d_un_dossier_emporte_le_sous_arbre() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let thumbs = root.join(THUMB_DIR);
+        fs::create_dir_all(root.join("Maison/Toit")).unwrap();
+
+        for rel in [
+            "Maison/Toit/piece.stl.png",
+            "Maison/Toit/sous/vis.stl.png",
+            "Maison/garde.stl.png",
+        ] {
+            let path = thumbs.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "png").unwrap();
+        }
+
+        remove_for_path(root, &thumbs, &root.join("Maison/Toit"));
+
+        assert!(!thumbs.join("Maison/Toit").exists());
+        assert!(thumbs.join("Maison/garde.stl.png").is_file());
     }
 
     /// Les aperçus sans modèle sont retirés : ceux d'un ancien nommage

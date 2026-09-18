@@ -1408,6 +1408,12 @@ body {
   outline: none;
 }
 
+/* Action destructive : repérable au premier coup d'œil, sans crier. */
+.card-menu__item--danger,
+.card-menu__item--danger .card-menu__icon {
+  color: var(--err);
+}
+
 .card-menu__icon {
   width: 15px;
   height: 15px;
@@ -1432,20 +1438,31 @@ body {
 }
 
 /* Un refus du backend reste affiché sous le champ : on corrige et on réessaie. */
-.rename__error {
+.rename__error,
+.confirm__error {
   margin: 9px 0 0;
   color: var(--err);
   font-size: 12.5px;
 }
 
-.rename__actions {
+/* Confirmation d'une action destructive : ce qui va partir, puis les choix. */
+.confirm__warning {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.rename__actions,
+.confirm__actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
 .rename__cancel,
-.rename__confirm {
+.rename__confirm,
+.confirm__cancel,
+.confirm__confirm {
   padding: 7px 14px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -1456,13 +1473,22 @@ body {
   cursor: pointer;
 }
 
-.rename__confirm {
+.rename__confirm,
+.confirm__confirm {
   background: var(--accent);
   border-color: var(--accent);
 }
 
+.confirm__confirm--danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
 .rename__cancel:disabled,
-.rename__confirm:disabled {
+.rename__confirm:disabled,
+.confirm__cancel:disabled,
+.confirm__confirm:disabled {
   opacity: 0.55;
   cursor: default;
 }
