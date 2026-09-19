@@ -56,6 +56,75 @@ impl Watch {
     }
 }
 
+/// Valeur renvoyée **à la place** de la clé d'API dans les réponses HTTP.
+///
+/// Elle dit au navigateur « une clé est enregistrée » sans la révéler. En sens
+/// inverse, une clé reçue sous cette forme est comprise comme « ne touche pas à
+/// celle que tu as » : c'est ce que renvoie le formulaire d'administration quand
+/// l'utilisateur ne la retape pas.
+pub const KEY_PLACEHOLDER: &str = "***";
+
+/// Recherche assistée par un modèle de langage.
+///
+/// Absente (tous les champs vides), la recherche IA est **indisponible** : le
+/// bouton de la barre de recherche reste grisé. Rien n'est écrit dans le YAML
+/// tant que l'utilisateur n'a rien configuré.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ai {
+    /// Fournisseur : `openai`, `anthropic`, `ollama` (voir [`crate::ai::PROVIDERS`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// URL de base de l'API. Vide = celle du fournisseur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Modèle à interroger. Vide = celui du fournisseur.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Clé d'API — un **secret** : jamais renvoyée telle quelle (voir
+    /// [`Ai::redacted`]), et jamais journalisée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+impl Ai {
+    /// `true` si un fournisseur est choisi : la recherche IA est utilisable.
+    pub fn is_configured(&self) -> bool {
+        self.provider
+            .as_deref()
+            .is_some_and(|p| !p.trim().is_empty())
+    }
+
+    /// `true` si rien n'est fixé : `save` laisse alors le YAML sans ce bloc.
+    fn is_empty(&self) -> bool {
+        self.provider.is_none()
+            && self.base_url.is_none()
+            && self.model.is_none()
+            && self.api_key.is_none()
+    }
+
+    /// Copie où la clé est remplacée par [`KEY_PLACEHOLDER`] — ce que l'API peut
+    /// montrer. La configuration reste la même pour tout le reste.
+    pub fn redacted(&self) -> Self {
+        Self {
+            api_key: self.api_key.as_ref().map(|_| KEY_PLACEHOLDER.to_string()),
+            ..self.clone()
+        }
+    }
+
+    /// Clé effective après réception d'un formulaire :
+    ///
+    /// - absente ou placeholder → on garde celle déjà enregistrée ;
+    /// - chaîne vide → l'utilisateur l'a effacée ;
+    /// - autre → nouvelle clé.
+    pub fn merge_key(&self, incoming: Option<&str>) -> Option<String> {
+        match incoming.map(str::trim) {
+            None | Some(KEY_PLACEHOLDER) => self.api_key.clone(),
+            Some("") => None,
+            Some(value) => Some(value.to_string()),
+        }
+    }
+}
+
 /// Configuration de l'application.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -68,6 +137,20 @@ pub struct Config {
     /// Surveillance du dossier des modèles.
     #[serde(default, skip_serializing_if = "Watch::is_auto")]
     pub watch: Watch,
+    /// Recherche assistée par un modèle de langage.
+    #[serde(default, skip_serializing_if = "Ai::is_empty")]
+    pub ai: Ai,
+}
+
+impl Config {
+    /// Copie destinée à sortir du backend (HTTP, WebSocket) : la clé d'API y est
+    /// masquée.
+    pub fn redacted(&self) -> Self {
+        Self {
+            ai: self.ai.redacted(),
+            ..self.clone()
+        }
+    }
 }
 
 impl Config {

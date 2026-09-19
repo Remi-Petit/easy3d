@@ -11,6 +11,7 @@
 //! - [`notes`] : notes Markdown associées aux dossiers et fichiers.
 //! - [`collab`] : édition collaborative des notes (CRDT Yjs).
 
+pub mod ai;
 pub mod api;
 pub mod collab;
 pub mod config;

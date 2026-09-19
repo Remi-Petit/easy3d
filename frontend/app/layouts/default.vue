@@ -27,6 +27,24 @@ const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIc
 // même état, donc le même avancement (voir `useUpload`).
 const { upload } = useUpload()
 
+// Recherche assistée : le bouton n'est proposé que si un fournisseur est
+// configuré (voir `useAiSearch` et l'écran d'administration).
+//
+// Les refs sont déstructurées : dans un template, seules les refs de premier
+// niveau du `setup` sont dépliées automatiquement.
+const {
+  configured: aiReady,
+  mode: aiMode,
+  query: aiQuestion,
+  loading: aiLoading,
+  run: runAi,
+  toggle: toggleAi,
+  refresh: refreshAi,
+} = useAiSearch()
+onMounted(() => {
+  void refreshAi()
+})
+
 /** `true` sur la page d'administration : section distincte du catalogue. */
 const isAdmin = computed(() => route.path.startsWith('/admin'))
 
@@ -43,6 +61,15 @@ const title = computed(() => {
 const isHome = computed(() => route.path === '/')
 /** Barre de recherche du catalogue : ni sur la vue fichier, ni sur l'admin. */
 const showFilter = computed(() => !route.params.rel && !isAdmin.value)
+
+/**
+ * Recherche assistée ouverte, et applicable ici.
+ *
+ * `showFilter` la limite aux pages du catalogue : la barre d'outils disparaît
+ * sur l'administration et sur la vue d'un fichier, le mode n'y aurait plus de
+ * point d'entrée.
+ */
+const aiPanel = computed(() => showFilter.value && aiMode.value)
 
 /**
  * Dossier d'accueil d'un envoi de fichiers : celui de la page courante quand on
@@ -257,11 +284,59 @@ const navUi = {
              défilement. -->
         <div v-if="showFilter" class="topbar">
           <div class="toolbar">
-            <div class="search">
+            <!--
+              En recherche assistée, le champ ne filtre plus : il reçoit la
+              description de ce que l'on cherche, et `Entrée` lance la
+              recherche (qui prend plusieurs secondes).
+            -->
+            <div v-if="aiMode" class="search search--ai">
+              <span class="icon">✦</span>
+              <input
+                v-model="aiQuestion"
+                type="text"
+                :placeholder="$t('ai.placeholder')"
+                :disabled="aiLoading"
+                @keydown.enter="runAi()"
+              />
+              <button
+                type="button"
+                class="search__go"
+                :disabled="aiLoading || !aiQuestion.trim()"
+                :aria-label="$t('ai.submit')"
+                :title="$t('ai.submit')"
+                @click="runAi()"
+              >
+                {{ aiLoading ? '…' : '→' }}
+              </button>
+            </div>
+
+            <div v-else class="search">
               <span class="icon">🔍</span>
               <input v-model="query" type="text" :placeholder="placeholder" />
             </div>
+
+            <!--
+              Bascule de la recherche assistée. Désactivée tant qu'aucun
+              fournisseur n'est configuré : le `title` est porté par le
+              conteneur pour que l'explication apparaisse quand même (un
+              bouton désactivé ne déclenche pas toujours son infobulle).
+            -->
+            <span class="ai-toggle" :title="aiReady ? $t('ai.open') : $t('ai.needSetup')">
+              <button
+                type="button"
+                class="ai-btn"
+                :class="{ 'ai-btn--on': aiMode }"
+                :disabled="!aiReady"
+                :aria-pressed="aiMode"
+                :title="aiReady ? $t('ai.open') : $t('ai.needSetup')"
+                @click="toggleAi()"
+              >
+                ✦ {{ $t('ai.button') }}
+              </button>
+            </span>
+
             <button
+              v-if="!aiMode"
               type="button"
               class="sort"
               :class="`sort--${sortMode}`"
@@ -275,11 +350,11 @@ const navUi = {
 
             <!-- Ajout de fichiers/dossiers dans le catalogue (le dossier
                  courant sert d'accueil quand on est dans un dossier). -->
-            <UploadButton :folder="uploadFolder" />
+            <UploadButton v-if="!aiMode" :folder="uploadFolder" />
           </div>
 
           <!-- Filtre par type : formats détectés dans la vue courante. -->
-          <div v-if="availableTypes.length > 1" class="types">
+          <div v-if="availableTypes.length > 1 && !aiMode" class="types">
             <button
               v-for="entry in availableTypes"
               :key="entry.type"
@@ -298,7 +373,11 @@ const navUi = {
           </div>
         </div>
 
-        <div class="page">
+        <!-- Recherche assistée : le modèle remplace le catalogue le temps de
+             la question (les filtres classiques n'ont pas la même sémantique). -->
+        <AiResults v-if="aiPanel" />
+
+        <div v-if="!aiPanel" class="page">
           <slot />
         </div>
 

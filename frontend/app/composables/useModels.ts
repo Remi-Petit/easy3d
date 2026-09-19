@@ -1,5 +1,6 @@
 // Types alignés sur le JSON du backend Rust (scanner.rs / api.rs).
 import { DEFAULT_FORMATS, type FormatInfo } from '~/utils/formats'
+import type { AiConfig } from '~/utils/ai'
 import type { WsConfig } from '~/utils/collab'
 
 export interface FileInfo {
@@ -69,6 +70,12 @@ export interface AppConfig {
   watch?: {
     poll_seconds?: number | null
   }
+  /**
+   * Recherche assistée : fournisseur et clé d'API (voir `~/utils/ai`). La clé
+   * n'arrive ici que masquée (`***`) : voir `config::KEY_PLACEHOLDER` côté
+   * backend.
+   */
+  ai?: AiConfig
 }
 
 /** Ce que `/api/config` expose sur le re-scan périodique. */

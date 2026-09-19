@@ -58,7 +58,74 @@ async function loadResolvedRoot() {
   }
 }
 
-onMounted(loadResolvedRoot)
+onMounted(() => {
+  void loadResolvedRoot()
+  // La liste des fournisseurs et l'état du bouton de recherche vivent dans
+  // `useAiSearch` : on les relit ici, c'est le seul endroit où on les modifie.
+  void refreshAi()
+})
+
+// ── Recherche assistée (IA) ───────────────────────────────────────────────────
+// Le fournisseur et sa clé se règlent ici ; le bouton ✦ de la barre de recherche
+// ne s'active qu'une fois un fournisseur choisi (voir `useAiSearch`).
+const ai = useAiSearch()
+// Les refs renvoyées par le composable sont déstructurées : le template ne
+// déplie automatiquement que les refs de premier niveau du `setup`.
+const { providers: aiProviders, refresh: refreshAi } = ai
+const aiProvider = ref('')
+const aiBaseUrl = ref('')
+const aiModel = ref('')
+// La clé n'est jamais renvoyée en clair : le champ contient `***` quand une clé
+// est enregistrée, et c'est cette valeur qu'on renvoie telle quelle pour la
+// conserver (voir `Ai::merge_key`).
+const aiKey = ref('')
+const aiTest = ref<{ state: 'idle' | 'running' | 'ok' | 'error'; message: string }>({
+  state: 'idle',
+  message: '',
+})
+
+/** Fournisseur choisi, tel que le backend le décrit (défauts compris). */
+const aiDefaults = computed(() => aiProviders.value.find((p) => p.id === aiProvider.value) ?? null)
+/** Le fournisseur exige-t-il une clé ? (faux pour un Ollama local) */
+const aiNeedsKey = computed(() => aiDefaults.value?.needs_key ?? true)
+
+/**
+ * Choix du fournisseur : on montre tout de suite l'adresse et le modèle qui
+ * seront utilisés si l'on laisse les champs vides (le backend complète).
+ */
+function pickProvider() {
+  const defaults = aiDefaults.value
+  if (defaults) {
+    if (!aiBaseUrl.value.trim()) aiBaseUrl.value = defaults.base_url
+    if (!aiModel.value.trim()) aiModel.value = defaults.model
+  }
+  aiTest.value = { state: 'idle', message: '' }
+  persist()
+}
+
+/** Efface la clé enregistrée : vide veut dire « supprime-la » côté backend. */
+function clearAiKey() {
+  aiKey.value = ''
+  persist()
+}
+
+/**
+ * Teste le fournisseur **enregistré** : on écrit d'abord la configuration,
+ * sinon le test porterait sur les valeurs précédentes.
+ */
+async function testAi() {
+  aiTest.value = { state: 'running', message: '' }
+  await persist()
+  try {
+    const res = await $fetch<{ message: string }>('/api/ai/test', { method: 'POST' })
+    aiTest.value = { state: 'ok', message: res.message }
+  } catch (e: any) {
+    aiTest.value = {
+      state: 'error',
+      message: e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('common.unknownError'),
+    }
+  }
+}
 
 /** Phrase expliquant la recommandation, construite depuis les faits du backend. */
 const recommendation = computed(() => {
@@ -123,6 +190,20 @@ watch(
   { immediate: true },
 )
 
+// …et pour la recherche assistée : la configuration appliquée réaligne le
+// formulaire, y compris la clé masquée.
+watch(
+  () => data.value?.config?.ai,
+  (server) => {
+    if (inFlight) return
+    aiProvider.value = server?.provider ?? ''
+    aiBaseUrl.value = server?.base_url ?? ''
+    aiModel.value = server?.model ?? ''
+    aiKey.value = server?.api_key ?? ''
+  },
+  { immediate: true },
+)
+
 /**
  * Écrit le réglage dans `config.yml`. Les clics rapprochés sont sérialisés :
  * on garde la dernière valeur demandée sans multiplier les requêtes.
@@ -148,11 +229,23 @@ async function persist() {
             models_root: data.value?.config?.models_root ?? null,
             display: { mode: mode.value },
             watch: { poll_seconds: pollValue.value },
+            ai: {
+              // `null` = pas de fournisseur : la clé est alors effacée côté
+              // backend (pas de secret conservé pour rien).
+              provider: aiProvider.value || null,
+              base_url: aiBaseUrl.value.trim() || null,
+              model: aiModel.value.trim() || null,
+              // `***` = « garde la clé enregistrée », vide = « supprime-la ».
+              api_key: aiProvider.value ? aiKey.value.trim() : null,
+            },
           },
         })
         saveState.value = 'ok'
         saveMessage.value = t('admin.saved')
         await loadResolvedRoot()
+        // Le bouton de recherche de la barre d'outils suit : il s'active dès
+        // qu'un fournisseur est choisi.
+        void refreshAi()
       } catch (e: any) {
         saveState.value = 'error'
         saveMessage.value =
@@ -321,6 +414,94 @@ usePageHeader(() => ({
           <dd :title="resolvedRoot">{{ resolvedRoot || $t('common.none') }}</dd>
         </div>
       </dl>
+    </section>
+
+    <!-- Recherche assistée : le fournisseur de modèle et sa clé d'API. Tant
+         qu'aucun fournisseur n'est choisi, le bouton ✦ de la barre de
+         recherche reste grisé. -->
+    <section class="admin__card">
+      <h2 class="admin__title">{{ $t('ai.settings') }}</h2>
+
+      <div class="admin__field">
+        <label class="admin__label" for="ai-provider">{{ $t('ai.provider') }}</label>
+        <div class="admin__row">
+          <select
+            id="ai-provider"
+            v-model="aiProvider"
+            class="admin__input"
+            @change="pickProvider"
+          >
+            <option value="">{{ $t('ai.none') }}</option>
+            <option v-for="p in aiProviders" :key="p.id" :value="p.id">
+              {{ p.label }}
+            </option>
+          </select>
+        </div>
+        <p class="admin__hint">{{ $t('ai.providerHint') }}</p>
+      </div>
+
+      <div class="admin__field">
+        <label class="admin__label" for="ai-base-url">{{ $t('ai.baseUrl') }}</label>
+        <div class="admin__row">
+          <input
+            id="ai-base-url"
+            v-model="aiBaseUrl"
+            class="admin__input"
+            type="text"
+            :placeholder="aiDefaults?.base_url ?? ''"
+            @change="persist"
+          />
+        </div>
+        <p class="admin__hint">{{ $t('ai.baseUrlHint') }}</p>
+      </div>
+
+      <div class="admin__field">
+        <label class="admin__label" for="ai-model">{{ $t('ai.model') }}</label>
+        <div class="admin__row">
+          <input
+            id="ai-model"
+            v-model="aiModel"
+            class="admin__input"
+            type="text"
+            :placeholder="aiDefaults?.model ?? ''"
+            @change="persist"
+          />
+        </div>
+      </div>
+
+      <div class="admin__field">
+        <label class="admin__label" for="ai-key">{{ $t('ai.apiKey') }}</label>
+        <div class="admin__row">
+          <input
+            id="ai-key"
+            v-model="aiKey"
+            class="admin__input"
+            type="password"
+            autocomplete="off"
+            :placeholder="aiNeedsKey ? 'sk-...' : $t('ai.noKeyNeeded')"
+            @change="persist"
+          />
+          <button v-if="aiKey" type="button" class="admin__action" @click="clearAiKey">
+            {{ $t('ai.apiKeyClear') }}
+          </button>
+          <button
+            type="button"
+            class="admin__action"
+            :disabled="!aiProvider"
+            @click="testAi"
+          >
+            {{ aiTest.state === 'running' ? $t('ai.testing') : $t('ai.test') }}
+          </button>
+        </div>
+        <p class="admin__hint">{{ $t('ai.apiKeyHint') }}</p>
+        <p
+          v-if="aiTest.message"
+          class="admin__hint"
+          :class="aiTest.state === 'ok' ? 'admin__hint--rec' : 'admin__status--err'"
+        >
+          {{ aiTest.state === 'ok' ? $t('ai.testOk', { message: aiTest.message }) : aiTest.message }}
+        </p>
+      </div>
     </section>
 
     <!-- Notes : liste des éléments, avec accès à l'éditeur collaboratif. -->
