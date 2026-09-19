@@ -84,10 +84,15 @@ test('recherche IA : grisée tant qu’aucun fournisseur n’est configuré', as
   await page.goto('/')
   const bouton = page.getByRole('button', { name: /IA/ })
   await expect(bouton).toBeDisabled()
-  // L'infobulle dit où aller, et le conteneur la porte aussi (un bouton
-  // désactivé ne déclenche pas toujours son propre `title`).
-  await expect(bouton).toHaveAttribute('title', /administration/)
-  await expect(page.locator('.ai-toggle')).toHaveAttribute('title', /administration/)
+
+  // L'explication vit dans une infobulle maison : masquée au repos, révélée au
+  // survol, et rattachée au bouton pour les lecteurs d'écran.
+  const bulle = page.locator('#ai-btn-help')
+  await expect(bulle).toHaveText(/administration/)
+  await expect(bouton).toHaveAttribute('aria-describedby', 'ai-btn-help')
+  await expect(bulle).toHaveCSS('opacity', '0')
+  await page.locator('.ai-toggle').hover()
+  await expect(bulle).toHaveCSS('opacity', '1')
 
   // Le catalogue est bien là : pas de panneau de recherche assistée.
   await expect(page.locator('.ai')).toHaveCount(0)
