@@ -1546,7 +1546,41 @@ select.admin__input option {
 /* Bascule dans la barre d'outils : même facture que le tri et l'ajout, mais
    désactivée tant qu'aucun fournisseur n'est configuré. */
 .ai-toggle {
+  position: relative;
   display: flex;
+}
+
+/*
+ * Infobulle maison : plus rapide et plus lisible que le `title` natif, et seule
+ * façon d'expliquer un bouton désactivé (qui, lui, n'en déclenche pas toujours).
+ * Elle est toujours dans le DOM, révélée par l'opacité : la transition reste
+ * donc fluide dans les deux sens.
+ */
+.ai-toggle__tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 260px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.ai-toggle:hover .ai-toggle__tip,
+.ai-toggle:focus-within .ai-toggle__tip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .ai-btn {

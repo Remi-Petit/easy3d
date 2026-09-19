@@ -317,22 +317,27 @@ const navUi = {
 
             <!--
               Bascule de la recherche assistée. Désactivée tant qu'aucun
-              fournisseur n'est configuré : le `title` est porté par le
-              conteneur pour que l'explication apparaisse quand même (un
-              bouton désactivé ne déclenche pas toujours son infobulle).
+              fournisseur n'est configuré : l'explication s'affiche au survol,
+              dans une infobulle maison (le `title` natif arrive après une
+              seconde, sans style, et n'apparaît pas toujours sur un bouton
+              désactivé). `aria-describedby` garde le texte lisible par un
+              lecteur d'écran.
             -->
-            <span class="ai-toggle" :title="aiReady ? $t('ai.open') : $t('ai.needSetup')">
+            <span class="ai-toggle">
               <button
                 type="button"
                 class="ai-btn"
                 :class="{ 'ai-btn--on': aiMode }"
                 :disabled="!aiReady"
                 :aria-pressed="aiMode"
-                :title="aiReady ? $t('ai.open') : $t('ai.needSetup')"
+                aria-describedby="ai-btn-help"
                 @click="toggleAi()"
               >
                 ✦ {{ $t('ai.button') }}
               </button>
+              <span id="ai-btn-help" class="ai-toggle__tip" role="tooltip">
+                {{ aiReady ? $t('ai.open') : $t('ai.needSetup') }}
+              </span>
             </span>
 
             <button
