@@ -984,14 +984,47 @@ body {
   padding: 6px 16px;
 }
 
+/* Hauteur de l'éditeur Markdown : elle était posée en style en ligne dans
+   `NotePanel`, ce qui ne laissait aucun moyen de l'adapter au contexte. */
+.note .md-editor {
+  height: 360px;
+}
+
+/* Dans l'administration, la note se contente de moins de hauteur : elle n'est
+   qu'un aperçu au-dessus duquel on travaille, pas la page principale. */
+.admin .note .md-editor {
+  height: 260px;
+}
+
+.admin .note__preview {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
 /* ---------- Page d'administration ---------- */
-/* Deux panneaux côte à côte (réglages, notes), puis l'éditeur de note en
-   pleine largeur dessous. */
+/* Deux colonnes : les réglages (et la recherche assistée, juste en dessous) à
+   gauche, les notes à droite — leur éditeur s'ouvre sous la liste, dans la même
+   colonne. Les cartes de gauche sont regroupées dans `.admin__col` plutôt que
+   placées par la grille : sinon la seconde se retrouverait en colonne de droite,
+   à côté de la première, et les notes seraient repoussées en dessous.
+   Les hauteurs restent **naturelles** (`start`) : étirer la colonne des notes à
+   la hauteur de la gauche, avec une liste qui prend l'espace disponible, fait
+   boucler le calcul de la ligne de grille (la carte grandit, la ligne grandit,
+   la carte grandit…). La liste est donc bornée par la fenêtre, ce qui revient au
+   même à l'œil sans le risque. */
 .admin {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
   gap: 20px;
   align-items: start;
+}
+
+/* Colonne (réglages + IA à gauche, liste + éditeur à droite). */
+.admin__col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 
 .admin__card {
@@ -1003,10 +1036,6 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
-}
-
-.admin__card--wide {
-  grid-column: 1 / -1;
 }
 
 .admin__title {
@@ -1233,7 +1262,9 @@ select.admin__input option {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  max-height: 340px;
+  /* Volontairement courte : l'éditeur s'ouvre juste en dessous, et doit rester
+     visible sans faire défiler la page. */
+  max-height: min(38vh, 340px);
   overflow-y: auto;
 }
 
