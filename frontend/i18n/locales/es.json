@@ -83,7 +83,9 @@
     "noKeyNeeded": "no hace falta clave",
     "test": "Probar",
     "testing": "Prueba en curso…",
-    "testOk": "El modelo ha respondido: «{message}»"
+    "modelHint": "El modelo se elige en la lista que devuelve el proveedor: introduce la clave, pulsa Probar y luego Guardar. La lista se conserva, así que después podrás cambiar de modelo sin volver a dar la clave.",
+    "modelsFound": "{count} modelo disponible. | {count} modelos disponibles.",
+    "save": "Guardar"
   },
   "catalog": {
     "title": "Models",

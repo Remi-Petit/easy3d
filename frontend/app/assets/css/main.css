@@ -34,6 +34,9 @@
 }
 
 :root {
+  /* Contrôles natifs (menus déroulants, barres de défilement) en sombre : sans
+     ça, la liste d'un `<select>` s'ouvre sur un fond blanc. */
+  color-scheme: dark;
   --bg: #0a0e16;
   --surface: #121826;
   --surface-2: #182234;
@@ -1088,6 +1091,27 @@ body {
   width: 96px;
 }
 
+/*
+ * Cartes « Recherche assistée » : les champs prennent la place disponible.
+ * Sans ça, un `input` et un `select` se contentent de leur largeur intrinsèque —
+ * très différente de l'un à l'autre — et la carte paraît bancale.
+ */
+.admin__field--ai .admin__row > .admin__input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* Liste de choix : même facture que les champs de saisie. */
+select.admin__input {
+  cursor: pointer;
+}
+
+/* Le menu déroulant natif doit rester lisible sur le thème sombre. */
+select.admin__input option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 .admin__row {
   display: flex;
   flex-wrap: wrap;
@@ -1115,6 +1139,31 @@ body {
 .admin__action:hover {
   border-color: var(--accent);
   color: var(--text);
+}
+
+/* Ligne d'actions en fin de carte (bouton « Enregistrer » de la recherche IA) :
+   le bouton principal porte la couleur, comme les confirmations de dialogue. */
+.admin__field--actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin__action--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.admin__action--primary:hover {
+  color: #fff;
+  filter: brightness(1.06);
+}
+
+.admin__action--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* Recommandation du backend : une phrase, pas un réglage. */

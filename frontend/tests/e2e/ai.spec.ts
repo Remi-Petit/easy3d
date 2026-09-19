@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 /**
  * Recherche assistée (IA).
@@ -12,23 +12,37 @@ import { expect, test } from '@playwright/test'
  */
 
 /** Carte « Recherche assistée » de l'administration. */
-async function ouvrirCarteIA(page: import('@playwright/test').Page) {
+async function ouvrirCarteIA(page: Page) {
   await page.goto('/admin')
   // `/admin` compilée à la première visite du serveur de dev : délai large,
   // comme dans `admin.spec.ts`.
   await expect(page.getByLabel('Fournisseur')).toBeVisible({ timeout: 30_000 })
+  // Le modèle n'est plus un champ de saisie : c'est une liste de choix, remplie
+  // par ce que le fournisseur annonce.
+  await expect(page.locator('select#ai-model')).toBeVisible()
 }
 
 /**
- * Choisit « Aucun » et attend que le backend l'ait **enregistré**.
+ * Enregistre la carte IA (bouton « Enregistrer ») et attend l'accusé du backend.
  *
- * L'enregistrement part au changement du champ ; naviguer juste après
- * annulerait la requête en vol. La relecture après rechargement est la preuve
- * que la valeur vient bien du serveur.
+ * Rien n'est écrit au changement de champ, contrairement aux réglages
+ * d'affichage : la clé ne part qu'ici.
  */
-async function effacerFournisseur(page: import('@playwright/test').Page) {
+async function enregistrerIA(page: Page) {
+  await page.getByRole('button', { name: 'Enregistrer' }).first().click()
+  await expect(page.locator('.admin__status--ok').first()).toBeVisible({ timeout: 10_000 })
+}
+
+/**
+ * Choisit « Aucun » et l'enregistre : la recherche assistée redevient grisée.
+ *
+ * La relecture après rechargement est la preuve que la valeur vient du serveur —
+ * naviguer juste après le clic annulerait la requête en vol.
+ */
+async function effacerFournisseur(page: Page) {
   await expect(async () => {
     await page.getByLabel('Fournisseur').selectOption('')
+    await enregistrerIA(page)
     await page.reload()
     await expect(page.getByLabel('Fournisseur')).toHaveValue('', { timeout: 2000 })
   }).toPass({ timeout: 30_000 })
@@ -37,21 +51,28 @@ async function effacerFournisseur(page: import('@playwright/test').Page) {
 /**
  * Configure Ollama sur une adresse volontairement fermée.
  *
- * Aucun appel réseau réel n'a lieu : on vérifie le chemin d'échec et la qualité
- * du message, pas une réponse de modèle.
+ * « Tester » échoue alors en expliquant la cause — c'est aussi lui qui remplit
+ * la liste des modèles quand le fournisseur répond.
  */
-async function configurerOllamaFerme(page: import('@playwright/test').Page) {
+async function configurerOllamaFerme(page: Page) {
   const fournisseur = page.getByLabel('Fournisseur')
   const adresse = page.getByLabel('Adresse de l’API')
 
   await expect(async () => {
     await fournisseur.selectOption('ollama')
     await adresse.fill('http://127.0.0.1:9/v1')
-    await adresse.press('Tab')
+
+    await page.getByRole('button', { name: 'Tester' })
+      .click()
+    await expect(page.locator('.admin__status--err')).toContainText('impossible', {
+      timeout: 20_000,
+    })
+
+    await enregistrerIA(page)
     await page.reload()
     await expect(fournisseur).toHaveValue('ollama', { timeout: 2000 })
     await expect(adresse).toHaveValue('http://127.0.0.1:9/v1', { timeout: 2000 })
-  }).toPass({ timeout: 30_000 })
+  }).toPass({ timeout: 60_000 })
 }
 
 test('recherche IA : grisée tant qu’aucun fournisseur n’est configuré', async ({ page }) => {

@@ -83,7 +83,9 @@
     "noKeyNeeded": "aucune clé nécessaire",
     "test": "Tester",
     "testing": "Test en cours…",
-    "testOk": "Le modèle a répondu : « {message} »"
+    "modelHint": "Le modèle se choisit dans la liste renvoyée par le fournisseur : renseignez la clé, cliquez sur Tester, puis Enregistrer. La liste est conservée — vous pourrez ensuite changer de modèle sans redonner la clé.",
+    "modelsFound": "{count} modèle disponible. | {count} modèles disponibles.",
+    "save": "Enregistrer"
   },
   "catalog": {
     "title": "Models",

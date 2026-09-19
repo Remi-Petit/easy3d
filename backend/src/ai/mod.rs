@@ -76,11 +76,36 @@ pub enum Turn {
     },
 }
 
-/// Requête HTTP prête à partir (corps JSON compris).
+/// Requête HTTP prête à partir.
 pub struct Request {
+    /// `POST` (conversation) ou `GET` (liste des modèles).
+    pub method: &'static str,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// Corps JSON ; ignoré pour un `GET`.
     pub body: Value,
+}
+
+impl Request {
+    /// Requête de conversation.
+    pub fn post(url: String, headers: Vec<(String, String)>, body: Value) -> Self {
+        Self {
+            method: "POST",
+            url,
+            headers,
+            body,
+        }
+    }
+
+    /// Requête de lecture (liste des modèles).
+    pub fn get(url: String, headers: Vec<(String, String)>) -> Self {
+        Self {
+            method: "GET",
+            url,
+            headers,
+            body: Value::Null,
+        }
+    }
 }
 
 /// Paramètres effectifs d'un appel : la config, complétée par les défauts du
@@ -120,6 +145,9 @@ pub trait Provider: Sync {
     fn default_base_url(&self) -> &'static str;
     fn default_model(&self) -> &'static str;
 
+    /// En-têtes d'authentification (et de version), communs à tous les appels.
+    fn headers(&self, cfg: &Resolved) -> Vec<(String, String)>;
+
     /// Fabrique la requête du prochain tour.
     fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[tools::Spec])
     -> Request;
@@ -127,10 +155,73 @@ pub trait Provider: Sync {
     /// Lit une réponse réussie.
     fn parse(&self, status: u16, body: &str) -> Result<Reply, String>;
 
+    /// Requête qui liste les modèles accessibles avec cette clé.
+    ///
+    /// `GET {base}/models` est le point d'entrée commun : OpenAI et les serveurs
+    /// qui l'imitent (Ollama, DeepSeek…) l'exposent tel quel, et Anthropic en
+    /// fait autant avec ses propres en-têtes.
+    fn models_request(&self, cfg: &Resolved) -> Request {
+        Request::get(format!("{}/models", cfg.base_url), self.headers(cfg))
+    }
+
+    /// Lit la liste des modèles.
+    ///
+    /// Le format `{"data": [{"id": …}]}` est celui des trois fournisseurs, ce
+    /// qui évite un fichier de plus pour une simple lecture.
+    fn parse_models(&self, status: u16, body: &str) -> Result<Vec<String>, String> {
+        if status >= 400 {
+            return Err(self.error(status, body));
+        }
+        if let Some(message) = error_message(body) {
+            return Err(message);
+        }
+
+        let value: Value = serde_json::from_str(body)
+            .map_err(|e| format!("réponse illisible du fournisseur : {e}"))?;
+        let mut models: Vec<String> = Vec::new();
+        for item in value
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if is_chat_model(id) && !models.iter().any(|known| known == id) {
+                models.push(id.to_string());
+            }
+        }
+
+        if models.is_empty() {
+            return Err("le fournisseur n'annonce aucun modèle de conversation.".to_string());
+        }
+        Ok(models)
+    }
+
     /// Message d'erreur lisible pour un statut en échec.
     fn error(&self, status: u16, body: &str) -> String {
         format!("le fournisseur a répondu {status} : {}", short_body(body))
     }
+}
+
+/// Écarte les modèles qui ne servent pas à une conversation.
+///
+/// Les fournisseurs renvoient embeddings, synthèse vocale et génération
+/// d'images dans la même liste que les modèles de conversation : sans ce tri, le
+/// choix serait noyé.
+fn is_chat_model(id: &str) -> bool {
+    const NON_CHAT: [&str; 7] = [
+        "embed",
+        "whisper",
+        "tts",
+        "dall-e",
+        "moderation",
+        "transcribe",
+        "audio",
+    ];
+    let id = id.to_lowercase();
+    !NON_CHAT.iter().any(|needle| id.contains(needle))
 }
 
 /// Les fournisseurs connus, dans l'ordre où l'administration les propose.
@@ -250,28 +341,39 @@ pub async fn search(state: &AppState, query: &str) -> Result<Outcome, String> {
     .await
 }
 
-/// Vérifie qu'un fournisseur répond, pour le bouton « Tester » de
-/// l'administration.
-pub async fn test(state: &AppState) -> Result<String, String> {
-    let cfg = resolve(&state.config().ai)?;
+/// Liste les modèles proposés par le fournisseur, pour un jeu de paramètres
+/// donné.
+///
+/// C'est ce qui remplit la liste déroulante de l'administration : plutôt que de
+/// faire saisir un nom de modèle (qui change, et que personne ne connaît par
+/// cœur), on demande au fournisseur ce que la clé donne droit d'utiliser.
+///
+/// Rien n'est enregistré ici : la configuration transmise peut venir d'un
+/// formulaire non encore validé.
+pub async fn list_models(ai: &Ai) -> Result<Vec<String>, String> {
+    let cfg = resolve(ai)?;
     let provider = provider_for(cfg.provider)
         .ok_or_else(|| format!("fournisseur d'IA inconnu : « {} ».", cfg.provider))?;
 
-    let turns = [Turn::User("Réponds exactement : OK".to_string())];
-    let system = "Tu réponds en un mot, sans phrase ni ponctuation.";
-    let request = provider.build(&cfg, system, &turns, &[]);
-
     let client = client()?;
-    let (status, body) = send(&client, request).await?;
-    if status >= 400 {
-        return Err(provider.error(status, &body));
-    }
+    models_with(&cfg, provider, move |req| {
+        let client = client.clone();
+        Box::pin(async move { send(&client, req).await })
+    })
+    .await
+}
 
-    let reply = provider.parse(status, &body)?;
-    match reply.text {
-        Some(text) if !text.trim().is_empty() => Ok(short_body(text.trim())),
-        _ => Err("le fournisseur a répondu sans texte.".to_string()),
-    }
+/// Lecture de la liste des modèles, sur un transport fourni par l'appelant.
+async fn models_with<F>(
+    cfg: &Resolved,
+    provider: &'static (dyn Provider + Sync),
+    mut transport: F,
+) -> Result<Vec<String>, String>
+where
+    F: FnMut(Request) -> Answer + Send,
+{
+    let (status, body) = transport(provider.models_request(cfg)).await?;
+    provider.parse_models(status, &body)
 }
 
 /// Boucle de recherche, sur un transport fourni par l'appelant.
@@ -392,16 +494,22 @@ fn client() -> Result<reqwest::Client, String> {
 
 /// Envoie une requête et renvoie statut + corps.
 async fn send(client: &reqwest::Client, request: Request) -> Raw {
-    let mut builder = client.post(&request.url);
+    // `GET` sert à lire la liste des modèles ; tout le reste est un `POST` JSON.
+    let mut builder = if request.method == "GET" {
+        client.get(&request.url)
+    } else {
+        client.post(&request.url)
+    };
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
     }
 
-    let response = builder
-        .json(&request.body)
-        .send()
-        .await
-        .map_err(|e| format!("appel de {} impossible : {e}", request.url))?;
+    let response = if request.method == "GET" {
+        builder.send().await
+    } else {
+        builder.json(&request.body).send().await
+    }
+    .map_err(|e| format!("appel de {} impossible : {e}", request.url))?;
     let status = response.status().as_u16();
     let body = response
         .text()
@@ -662,6 +770,70 @@ mod tests {
                 }) as Answer
             },
         )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.contains("401") && err.contains("Invalid API key"),
+            "{err}"
+        );
+    }
+
+    /// Ce qui est retenu de chaque requête émise, pour vérifier le transport.
+    type Seen = Mutex<Vec<(&'static str, String, Vec<(String, String)>)>>;
+
+    /// La liste des modèles passe par le même transport que la conversation :
+    /// on la vérifie sans réseau, en contrôlant la requête émise.
+    #[tokio::test]
+    async fn la_liste_des_modeles_est_lue() {
+        let cfg = resolve(&ai_config("openai", Some("sk-test"), None)).unwrap();
+        let seen: Seen = Mutex::new(Vec::new());
+
+        let models = models_with(&cfg, &openai::OPENAI, |request| {
+            seen.lock().unwrap().push((
+                request.method,
+                request.url.clone(),
+                request.headers.clone(),
+            ));
+            Box::pin(async move {
+                Ok((
+                    200u16,
+                    json(r#"{"data":[{"id":"gpt-4o"},{"id":"o3-mini"}]}"#).to_string(),
+                ))
+            }) as Answer
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(models, vec!["gpt-4o", "o3-mini"]);
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "GET");
+        assert_eq!(seen[0].1, "https://api.openai.com/v1/models");
+        assert!(
+            seen[0]
+                .2
+                .iter()
+                .any(|(name, value)| name == "authorization" && value == "Bearer sk-test"),
+            "la clé doit accompagner la requête : {:?}",
+            seen[0].2
+        );
+    }
+
+    /// Une clé refusée empêche de lister les modèles, avec le message du
+    /// fournisseur (c'est ce que verra l'utilisateur dans l'administration).
+    #[tokio::test]
+    async fn une_cle_refusee_empeche_de_lister_les_modeles() {
+        let cfg = resolve(&ai_config("openai", Some("sk-faux"), None)).unwrap();
+
+        let err = models_with(&cfg, &openai::OPENAI, |_req| {
+            Box::pin(async move {
+                Ok((
+                    401u16,
+                    json(r#"{"error":{"message":"Invalid API key"}}"#).to_string(),
+                ))
+            }) as Answer
+        })
         .await
         .unwrap_err();
 

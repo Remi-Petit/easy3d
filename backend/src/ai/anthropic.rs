@@ -42,22 +42,21 @@ impl Provider for Anthropic {
         MODEL
     }
 
-    fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[Spec]) -> Request {
-        let mut headers = vec![
-            ("anthropic-version".to_string(), API_VERSION.to_string()),
-            // Anthropic refuse un contenu vide : une chaîne vide suffit à
-            // signaler l'absence de clé (Ollama, par exemple, n'en veut pas).
-            (
-                "x-api-key".to_string(),
-                cfg.api_key.clone().unwrap_or_default(),
-            ),
-        ];
-        headers.retain(|(_, value)| !value.is_empty());
+    fn headers(&self, cfg: &Resolved) -> Vec<(String, String)> {
+        let mut headers = vec![("anthropic-version".to_string(), API_VERSION.to_string())];
+        // Anthropic refuse une valeur vide : l'en-tête disparaît s'il n'y a pas
+        // de clé (Ollama, par exemple, n'en veut pas).
+        if let Some(key) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
+            headers.push(("x-api-key".to_string(), key.to_string()));
+        }
+        headers
+    }
 
-        Request {
-            url: format!("{}/messages", cfg.base_url),
-            headers,
-            body: json!({
+    fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[Spec]) -> Request {
+        Request::post(
+            format!("{}/messages", cfg.base_url),
+            self.headers(cfg),
+            json!({
                 "model": cfg.model,
                 "max_tokens": MAX_TOKENS,
                 "system": system,
@@ -68,7 +67,7 @@ impl Provider for Anthropic {
                     "input_schema": tool.schema,
                 })).collect::<Vec<Value>>(),
             }),
-        }
+        )
     }
 
     fn parse(&self, _status: u16, body: &str) -> Result<Reply, String> {
@@ -363,5 +362,33 @@ mod tests {
 
         assert!(message.contains("Anthropic"), "{message}");
         assert!(message.contains("invalid x-api-key"), "{message}");
+    }
+
+    #[test]
+    fn la_liste_des_modeles_porte_les_entetes_anthropic() {
+        let request = ANTHROPIC.models_request(&cfg());
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.url, "https://api.anthropic.com/v1/models");
+        assert!(
+            request
+                .headers
+                .contains(&("anthropic-version".to_string(), API_VERSION.to_string()))
+        );
+        assert!(
+            request
+                .headers
+                .contains(&("x-api-key".to_string(), "sk-ant-test".to_string()))
+        );
+    }
+
+    #[test]
+    fn les_modeles_anthropic_sont_lus() {
+        let body = r#"{"data":[
+            {"type":"model","id":"claude-sonnet-4-5","display_name":"Claude Sonnet 4.5"},
+            {"type":"model","id":"claude-haiku-4-5"}],"has_more":false}"#;
+
+        let models = ANTHROPIC.parse_models(200, body).unwrap();
+        assert_eq!(models, vec!["claude-sonnet-4-5", "claude-haiku-4-5"]);
     }
 }

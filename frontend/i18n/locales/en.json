@@ -83,7 +83,9 @@
     "noKeyNeeded": "no key needed",
     "test": "Test",
     "testing": "Testing…",
-    "testOk": "The model answered: “{message}”"
+    "modelHint": "Pick the model from the list the provider returns: fill in the key, click Test, then Save. The list is kept, so you can switch models later without re-entering the key.",
+    "modelsFound": "{count} model available. | {count} models available.",
+    "save": "Save"
   },
   "catalog": {
     "title": "Models",

@@ -42,7 +42,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   Il ne peut proposer que des fichiers **existants** : chaque chemin est vérifié
   côté serveur. Le fournisseur (OpenAI, Anthropic, Ollama…) et la clé se règlent
   dans l'administration ; tant que rien n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 199 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 201 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -114,10 +114,16 @@ avant de l'exposer.
 
 Désactivée par défaut : dans **Administration → Recherche assistée**, on choisit
 un fournisseur (OpenAI, Anthropic, ou un Ollama local), son adresse éventuelle et
-un modèle. La clé d'API est écrite dans `config.yml` **côté serveur** et n'est
-jamais renvoyée à l'interface (elle y apparaît sous la forme `***`). Le bouton de
-recherche ne s'active qu'une fois un fournisseur choisi ; sinon il reste grisé en
-expliquant où aller.
+sa clé d'API. Le bouton **Tester** demande alors au fournisseur la liste des
+modèles que cette clé ouvre, et le modèle se choisit dedans — pas de nom à
+connaître par cœur, et la vérification de la clé est immédiate. La liste est
+**conservée avec la configuration** : pour changer de modèle plus tard, il suffit
+d'ouvrir l'administration, de choisir dans la liste et d'enregistrer, sans
+redonner la clé. Rien n'est écrit avant le bouton **Enregistrer** : la clé ne part
+qu'une fois, elle est écrite dans `config.yml` **côté serveur**, et elle n'est
+jamais renvoyée à l'interface — elle y apparaît sous la forme `***`. Le bouton de
+recherche ne s'active qu'une fois un fournisseur enregistré ; sinon il reste
+grisé en expliquant où aller.
 
 Une recherche est une petite conversation : le modèle interroge le catalogue par
 quelques outils qui tournent **dans le backend** (vue d'ensemble, recherche par

@@ -83,7 +83,9 @@
     "noKeyNeeded": "kein Schlüssel nötig",
     "test": "Testen",
     "testing": "Test läuft…",
-    "testOk": "Das Modell hat geantwortet: „{message}“"
+    "modelHint": "Das Modell wird aus der Liste des Anbieters gewählt: Schlüssel eintragen, auf Testen und dann auf Speichern klicken. Die Liste bleibt erhalten — ein späterer Modellwechsel braucht den Schlüssel nicht erneut.",
+    "modelsFound": "{count} Modell verfügbar. | {count} Modelle verfügbar.",
+    "save": "Speichern"
   },
   "catalog": {
     "title": "Models",
