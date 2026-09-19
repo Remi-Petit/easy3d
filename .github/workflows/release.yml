@@ -119,13 +119,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
           ls -l dist
+
+          # Les notes de version s'écrivent à la main dans
+          # `.github/release-notes/<version>.md` : `--generate-notes` liste des
+          # commits, alors qu'on veut raconter ce que la version apporte. Le
+          # fichier est facultatif — sans lui, on retombe sur les notes générées.
+          notes=(--generate-notes)
+          if [ -f ".github/release-notes/${VERSION}.md" ]; then
+            notes=(--notes-file ".github/release-notes/${VERSION}.md")
+          fi
+
           # Rejouer le workflow sur un tag déjà publié remplace les fichiers au
           # lieu d'échouer.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" "${notes[@]}"
           else
-            gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+            gh release create "$TAG" dist/* --title "easy3d $VERSION" "${notes[@]}"
           fi
