@@ -29,6 +29,7 @@ use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// `true` si `EASY3D_MCP_ALLOW_WRITE` autorise les outils destructeurs.
 ///
@@ -149,6 +150,9 @@ impl ServerHandler for Easy3dMcp {
                 "Catalogue de modèles 3D easy3d (STL, OBJ, 3MF, G-code) et ses notes Markdown.\n\
                  Commencer par list_models pour découvrir le catalogue, puis get_model pour le \
                  détail d'un fichier et read_note pour sa note.\n\
+                 find_models cherche plus large : dans les noms, les chemins, les notes Markdown \
+                 et les métadonnées annoncées par le slicer dans les G-codes (matière, hauteur de \
+                 couche, temps d'impression...).\n\
                  Une note est rattachée à un élément **existant** du catalogue (fichier ou \
                  dossier) ; son écriture est immédiatement visible dans l'application.",
             )
@@ -180,6 +184,28 @@ struct ListModelsArgs {
     #[serde(default)]
     ext: Option<String>,
     /// Nombre maximum d'entrées renvoyées (défaut 50, maximum 500).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Entrée de `find_models`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct FindModelsArgs {
+    /// Mots à chercher, tous obligatoires : nom, chemin, note Markdown ou
+    /// métadonnée de découpe d'un G-code (matière, hauteur de couche, temps
+    /// d'impression...). Vide = les plus récemment modifiés d'abord.
+    #[serde(default)]
+    query: Option<String>,
+    /// Ne garder que ce dossier (chemin relatif, ex : `DemaAuto`).
+    #[serde(default)]
+    folder: Option<String>,
+    /// Ne garder que cette extension, sans le point (ex : `stl`).
+    #[serde(default)]
+    ext: Option<String>,
+    /// Ne garder que les éléments qui ont (ou n'ont pas) une note.
+    #[serde(default)]
+    has_note: Option<bool>,
+    /// Nombre maximum de résultats (défaut 20, maximum 40).
     #[serde(default)]
     limit: Option<u32>,
 }
@@ -296,6 +322,10 @@ struct ModelDetail {
     modified: Option<u64>,
     /// Chemin absolu sur le disque.
     abs_path: String,
+    /// Réglages annoncés par le slicer (vide si l'en-tête n'en contient pas, ou
+    /// si le fichier n'est pas un G-code) : matière, hauteur de couche, temps
+    /// d'impression, températures...
+    gcode_metadata: BTreeMap<String, String>,
 }
 
 /// Sortie des outils de note.
@@ -313,6 +343,39 @@ struct NoteSummary {
     rel: String,
     /// Nombre de caractères.
     chars: usize,
+}
+
+/// Sortie de `find_models`.
+#[derive(Debug, Serialize, JsonSchema)]
+struct FindModelsOutput {
+    /// Éléments correspondant aux filtres.
+    matched: usize,
+    /// Éléments effectivement renvoyés (bornés par `limit`).
+    returned: usize,
+    models: Vec<FoundModel>,
+}
+
+/// Un élément trouvé par `find_models`, avec ce qui l'a fait remonter.
+#[derive(Debug, Serialize, JsonSchema)]
+struct FoundModel {
+    /// Chemin relatif (clé du catalogue et des notes).
+    rel: String,
+    /// Dossier d'appartenance (`null` si l'élément est à la racine).
+    folder: Option<String>,
+    /// `true` si l'élément est un dossier.
+    is_folder: bool,
+    /// Extension en minuscules (vide pour un dossier).
+    ext: String,
+    /// Taille en octets (`null` pour un dossier).
+    size_bytes: Option<u64>,
+    /// Dernière modification, en secondes unix.
+    modified: Option<u64>,
+    /// Extrait de la note Markdown, si l'élément en a une.
+    note_excerpt: Option<String>,
+    /// Réglages annoncés par le slicer (G-codes uniquement).
+    gcode_metadata: BTreeMap<String, String>,
+    /// Ce qui a fait correspondre l'élément : `name:…`, `note:…` ou `meta:…`.
+    matched_on: Option<String>,
 }
 
 /// Sortie de `list_notes`.
@@ -437,8 +500,8 @@ impl Easy3dMcp {
     /// Détail d'un élément du catalogue.
     #[tool(
         description = "Get the details of one catalogue entry: relative path, format and \
-                       viewer, preview image, whether it has a note, size, dates and the \
-                       absolute path on disk."
+                       viewer, preview image, whether it has a note, size, dates, slicer \
+                       metadata (G-code) and the absolute path on disk."
     )]
     fn get_model(
         &self,
@@ -468,10 +531,56 @@ impl Easy3dMcp {
             ext: formats::ext_of(&file.rel),
             created: file.created,
             modified: file.modified,
+            gcode_metadata: formats::gcode_metadata(&file.rel, &root.join(&file.rel)),
             folder,
             rel: args.rel,
             size_bytes,
         }))
+    }
+
+    /// Recherche dans le catalogue, notes et métadonnées comprises.
+    #[tool(
+        description = "Search the catalogue by name, path, Markdown note or slicer metadata \
+                       (G-code filament, layer height, print time...). Unlike list_models, which \
+                       only looks at paths, this one looks inside notes and G-code headers. All \
+                       words of `query` must match; without `query` the most recently modified \
+                       entries come first. `matched_on` says which field matched."
+    )]
+    fn find_models(&self, Parameters(args): Parameters<FindModelsArgs>) -> Json<FindModelsOutput> {
+        let filter = crate::ai::tools::Filter {
+            query: args.query.unwrap_or_default(),
+            folder: args.folder,
+            ext: args.ext,
+            has_note: args.has_note,
+            limit: args.limit.unwrap_or(20).clamp(1, 40) as usize,
+            ..Default::default()
+        };
+
+        let found = crate::ai::tools::find(&self.state, &filter);
+        let models = found
+            .results
+            .iter()
+            .map(|f| FoundModel {
+                rel: f.rel.clone(),
+                folder: (!f.folder.is_empty()).then(|| f.folder.clone()),
+                is_folder: f.is_folder(),
+                ext: f.ext.clone(),
+                size_bytes: (!f.is_folder()).then_some(f.size),
+                modified: f.modified,
+                note_excerpt: f
+                    .note
+                    .as_deref()
+                    .map(|note| crate::ai::tools::excerpt(note, 200)),
+                gcode_metadata: f.meta.clone(),
+                matched_on: f.hint.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        Json(FindModelsOutput {
+            matched: found.total,
+            returned: models.len(),
+            models,
+        })
     }
 
     /// Notes existantes, et nombre d'éléments à documenter.
@@ -765,7 +874,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("piece.stl"), "solid x").unwrap();
         std::fs::create_dir_all(dir.path().join("DemaAuto")).unwrap();
-        std::fs::write(dir.path().join("DemaAuto/boitier.gcode"), "G1 X0").unwrap();
+        std::fs::write(
+            dir.path().join("DemaAuto/boitier.gcode"),
+            "; generated by OrcaSlicer 2.1.0\n; filament_type = PETG\n; layer_height = 0.2\nG1 X0\n",
+        )
+        .unwrap();
         std::fs::write(dir.path().join("lisez-moi.txt"), "rien à voir").unwrap();
 
         let config = Config {
@@ -847,12 +960,169 @@ mod tests {
         assert!(detail.format_has_preview);
         assert!(!detail.has_note);
         assert!(detail.size_bytes.is_some());
+        // Un STL n'annonce pas de réglages de découpe.
+        assert!(detail.gcode_metadata.is_empty());
 
         // Un élément inconnu est refusé, pas inventé.
         let missing = server.get_model(Parameters(ElementArgs {
             rel: "inconnu.stl".into(),
         }));
         assert!(missing.is_err());
+    }
+
+    /// Les réglages du slicer accompagnent le détail d'un G-code : un agent peut
+    /// alors répondre à « qu'est-ce qui s'imprime en PETG ? » sans ouvrir le
+    /// fichier.
+    #[test]
+    fn le_detail_d_un_gcode_expose_les_metadonnees_du_slicer() {
+        let (_dir, server) = test_server(false);
+        let detail = server
+            .get_model(Parameters(ElementArgs {
+                rel: "DemaAuto/boitier.gcode".into(),
+            }))
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            detail
+                .gcode_metadata
+                .get("filament_type")
+                .map(String::as_str),
+            Some("PETG")
+        );
+        assert_eq!(
+            detail
+                .gcode_metadata
+                .get("layer_height")
+                .map(String::as_str),
+            Some("0.2")
+        );
+        assert!(detail.gcode_metadata["generated_by"].contains("OrcaSlicer"));
+    }
+
+    /// `find_models` va là où `list_models` ne regarde pas : notes et
+    /// métadonnées de découpe.
+    #[tokio::test]
+    async fn cherche_dans_les_notes_et_les_metadonnees() {
+        let (_dir, server) = test_server(false);
+        server
+            .create_note(Parameters(WriteNoteArgs {
+                rel: "piece.stl".into(),
+                content: "Support de carte, imprimé en PETG.".into(),
+            }))
+            .unwrap();
+        wait_flush().await;
+
+        // Par métadonnée de G-code : invisible dans le chemin.
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                query: Some("PETG".into()),
+                ..Default::default()
+            }))
+            .0;
+        let rels: Vec<&str> = found.models.iter().map(|m| m.rel.as_str()).collect();
+        assert!(rels.contains(&"DemaAuto/boitier.gcode"), "{rels:?}");
+        let gcode = found
+            .models
+            .iter()
+            .find(|m| m.rel.ends_with("boitier.gcode"))
+            .unwrap();
+        assert_eq!(gcode.matched_on.as_deref(), Some("meta:filament_type=PETG"));
+        assert_eq!(gcode.gcode_metadata["filament_type"], "PETG");
+        assert!(!gcode.is_folder);
+
+        // Par note : « carte » n'apparaît que dans la note du STL.
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                query: Some("carte".into()),
+                ..Default::default()
+            }))
+            .0;
+        assert_eq!(found.matched, 1);
+        assert_eq!(found.models[0].rel, "piece.stl");
+        assert_eq!(found.models[0].matched_on.as_deref(), Some("note:carte"));
+        assert!(
+            found.models[0]
+                .note_excerpt
+                .as_deref()
+                .unwrap()
+                .contains("Support de carte")
+        );
+
+        // Tous les mots sont obligatoires : « carte » + un mot absent = rien.
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                query: Some("carte introuvable".into()),
+                ..Default::default()
+            }))
+            .0;
+        assert_eq!(found.matched, 0);
+        assert!(found.models.is_empty());
+    }
+
+    /// Filtres de `find_models` : dossier, extension et présence de note.
+    #[test]
+    fn filtre_la_recherche_par_dossier_et_extension() {
+        let (_dir, server) = test_server(false);
+
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                folder: Some("DemaAuto".into()),
+                ..Default::default()
+            }))
+            .0;
+        // Le dossier lui-même et son contenu.
+        assert_eq!(found.matched, 2);
+        assert!(
+            found
+                .models
+                .iter()
+                .any(|m| m.rel == "DemaAuto" && m.is_folder)
+        );
+        let file = found.models.iter().find(|m| !m.is_folder).unwrap();
+        assert_eq!(file.rel, "DemaAuto/boitier.gcode");
+        assert_eq!(file.folder.as_deref(), Some("DemaAuto"));
+
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                ext: Some(".gcode".into()),
+                ..Default::default()
+            }))
+            .0;
+        assert_eq!(found.matched, 1);
+        assert_eq!(found.models[0].ext, "gcode");
+
+        // Aucun élément n'a encore de note.
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                has_note: Some(true),
+                ..Default::default()
+            }))
+            .0;
+        assert_eq!(found.matched, 0);
+
+        // Sans filtre, le catalogue entier, les dossiers compris.
+        let found = server
+            .find_models(Parameters(FindModelsArgs {
+                limit: Some(40),
+                ..Default::default()
+            }))
+            .0;
+        assert_eq!(found.matched, 4);
+        assert_eq!(found.returned, 4);
+        assert!(
+            found
+                .models
+                .iter()
+                .any(|m| m.is_folder && m.rel == "DemaAuto")
+        );
+        assert!(
+            found
+                .models
+                .iter()
+                .filter(|m| m.is_folder)
+                .all(|m| m.size_bytes.is_none())
+        );
     }
 
     #[tokio::test]

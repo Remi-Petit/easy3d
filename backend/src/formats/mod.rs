@@ -32,6 +32,9 @@ mod thumb_style;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
 
+/// Métadonnées de slicer d'un G-code (voir [`gcode::metadata_for`]).
+pub(crate) use gcode::metadata_for as gcode_metadata;
+
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::path::Path;

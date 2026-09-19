@@ -24,16 +24,25 @@ A l'heure actuelle, mon [Beszel](https://github.com/henrygd/beszel) affiche une 
 - **Pas de base de données.** Tout est gérer via des fichiers markdown. Le backend détecte les modifications provenant du dossier `models/` et met à jour l'app automatiquement. Il n'est donc pas obligatoire d'ajouter les fichiers depuis l'interface web, on peut très bien n'utiliser que le dossier en question.
 Ce n'est pas un système de polling, ça utilise la librairie notify de rust permettant de récupérer l'information en temps réel.
 L'avantage, c'est que vous ne dépendez pas de l'outil, c'est l'outil qui s'adapte à vous.
+Pour certains paramètres, il y a des configurations via un fichier yml, mis à jour en temps réel via la page d'administration.
 Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Windows/macOS, montages réseau) ne remontent **aucun** événement. Le dossier est alors re-scanné de temps en temps — la page d'administration propose 5 s par défaut dans ce cas, et laisse la main (voir « Re-scan périodique »).
 - **Aperçus générés par le serveur, sans GPU** : STL / OBJ / 3MF rasterisés en
   CPU, vignette embarquée extraite des G-code — et ramenée au style de la maison
   (matière claire sur fond sombre), comme les rendus de maillage. La grille reste
   légère même avec des centaines de fichiers.
 - **Notes collaboratives** (CRDT Yjs) : Les utilisateurs peuvent ajouter des notes sur des dossiers / fichiers. Tout est stocké en markdown, pas de base de donnée. Ça a été conçu pour pouvoir fonctionner en temps réel. Via le serveur MCP, l'IA peut lire / ajouter / modifier des notes.
-- **Un serveur MCP intégré** : un agent liste les modèles, lit et écrit les notes,
-  consulte et modifie la configuration par le même chemin que l'interface, donc
-  sans jamais écraser une édition en cours.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 173 clés, traduites à 100 %.<!-- langues:end -->
+- **Un serveur MCP intégré** : un agent liste les modèles, cherche dans les notes
+  et les métadonnées des G-codes, lit et écrit les notes, consulte et modifie la
+  configuration par le même chemin que l'interface, donc sans jamais écraser une
+  édition en cours.
+- **Recherche assistée (IA), optionnelle** : on décrit ce que l'on cherche —
+  « une pièce en PETG », « le boîtier de la carte » — et un modèle de langage
+  fouille le catalogue : noms, dossiers, notes Markdown et métadonnées annoncées
+  par le slicer dans les G-codes (matière, hauteur de couche, temps d'impression…).
+  Il ne peut proposer que des fichiers **existants** : chaque chemin est vérifié
+  côté serveur. Le fournisseur (OpenAI, Anthropic, Ollama…) et la clé se règlent
+  dans l'administration ; tant que rien n'est configuré, le bouton reste grisé.
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 199 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -100,6 +109,25 @@ agent s'authentifie (le portail web, lui, attend un login navigateur).
 
 L'API n'a pas d'authentification : garde-la sur `localhost`, ou ajoute un jeton
 avant de l'exposer.
+
+## Recherche assistée (IA)
+
+Désactivée par défaut : dans **Administration → Recherche assistée**, on choisit
+un fournisseur (OpenAI, Anthropic, ou un Ollama local), son adresse éventuelle et
+un modèle. La clé d'API est écrite dans `config.yml` **côté serveur** et n'est
+jamais renvoyée à l'interface (elle y apparaît sous la forme `***`). Le bouton de
+recherche ne s'active qu'une fois un fournisseur choisi ; sinon il reste grisé en
+expliquant où aller.
+
+Une recherche est une petite conversation : le modèle interroge le catalogue par
+quelques outils qui tournent **dans le backend** (vue d'ensemble, recherche par
+nom, dossier, note ou métadonnée de G-code, lecture d'une note) et conclut par
+une liste de propositions, chacune accompagnée de sa raison. Deux garde-fous :
+la boucle est plafonnée à six étapes, et les chemins proposés sont confrontés au
+catalogue réel — un fichier inventé est écarté.
+
+Côté conteneur, rien de plus à installer : l'appel sortant se fait en HTTPS
+(`rustls`), et il n'y a aucune dépendance à OpenSSL.
 
 ## Précisions
 
