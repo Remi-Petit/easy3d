@@ -159,7 +159,6 @@ function toggleEdit() {
       theme="dark"
       preview-theme="github"
       :toolbars="TOOLBARS"
-      :style="{ height: '360px' }"
       :no-highlight="true"
       :no-mermaid="true"
       :no-katex="true"

@@ -420,6 +420,22 @@ const selectedNote = computed<string | null>(() => {
   return files.find((f) => f.rel === rel)?.note ?? null
 })
 
+/** L'éditeur, dont on veut qu'il soit visible dès qu'on choisit un élément. */
+const editeurNote = ref<HTMLElement | null>(null)
+
+/**
+ * Un clic sur la liste ouvre l'éditeur juste en dessous : on l'amène dans la vue.
+ *
+ * La liste est courte (elle défile), mais l'éditeur peut tomber sous la ligne de
+ * flottaison sur un écran bas — et on vient de cliquer, l'attendre serait
+ * pénible.
+ */
+watch(selected, async (rel) => {
+  if (!rel) return
+  await nextTick()
+  editeurNote.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+})
+
 // En-tête : le sous-titre est un état partagé, cette page doit le déclarer.
 usePageHeader(() => ({
   subtitle: t('admin.subtitle'),
@@ -435,245 +451,256 @@ usePageHeader(() => ({
   <div v-if="!data" class="empty">{{ $t('common.loading') }}</div>
 
   <div v-else class="admin">
-    <!-- Réglages : écrits dans config.yml, appliqués à chaud par le backend. -->
-    <section class="admin__card">
-      <h2 class="admin__title">{{ $t('admin.settings') }}</h2>
+    <!--
+      Deux colonnes : les réglages puis la recherche assistée à gauche, les notes
+      à droite. L'éditeur de note se place **sous la liste**, dans la même
+      colonne : en pleine largeur sous les deux colonnes, il n'apparaîtrait
+      qu'après la plus haute des deux, donc tout en bas de la page.
+    -->
+    <div class="admin__col">
+      <!-- Réglages : écrits dans config.yml, appliqués à chaud par le backend. -->
+      <section class="admin__card">
+        <h2 class="admin__title">{{ $t('admin.settings') }}</h2>
 
-      <div class="admin__field">
-        <span class="admin__label">{{ $t('admin.display') }}</span>
-        <div class="admin__choices">
-          <label class="admin__choice" :class="{ 'admin__choice--on': mode === '3d' }">
-            <input v-model="mode" type="radio" value="3d" @change="persist" />
-            <span>{{ $t('admin.mode3d') }}</span>
-          </label>
-          <label class="admin__choice" :class="{ 'admin__choice--on': mode === 'image' }">
-            <input v-model="mode" type="radio" value="image" @change="persist" />
-            <span>{{ $t('admin.modeImage') }}</span>
-          </label>
+        <div class="admin__field">
+          <span class="admin__label">{{ $t('admin.display') }}</span>
+          <div class="admin__choices">
+            <label class="admin__choice" :class="{ 'admin__choice--on': mode === '3d' }">
+              <input v-model="mode" type="radio" value="3d" @change="persist" />
+              <span>{{ $t('admin.mode3d') }}</span>
+            </label>
+            <label class="admin__choice" :class="{ 'admin__choice--on': mode === 'image' }">
+              <input v-model="mode" type="radio" value="image" @change="persist" />
+              <span>{{ $t('admin.modeImage') }}</span>
+            </label>
+          </div>
+          <p class="admin__hint">
+            <i18n-t keypath="admin.hint" scope="global">
+              <template #file><code>backend/config.yml</code></template>
+            </i18n-t>
+            <span v-if="saveState === 'saving'" class="admin__status">…</span>
+            <span
+              v-else-if="saveState === 'ok'"
+              class="admin__status admin__status--ok"
+            >{{ saveMessage }}</span>
+            <span
+              v-else-if="saveState === 'error'"
+              class="admin__status admin__status--err"
+            >{{ saveMessage }}</span>
+          </p>
         </div>
-        <p class="admin__hint">
-          <i18n-t keypath="admin.hint" scope="global">
-            <template #file><code>backend/config.yml</code></template>
-          </i18n-t>
-          <span v-if="saveState === 'saving'" class="admin__status">…</span>
-          <span
-            v-else-if="saveState === 'ok'"
-            class="admin__status admin__status--ok"
-          >{{ saveMessage }}</span>
-          <span
-            v-else-if="saveState === 'error'"
-            class="admin__status admin__status--err"
-          >{{ saveMessage }}</span>
-        </p>
-      </div>
 
-      <!-- Re-scan périodique : nécessaire seulement là où le système de fichiers
-           ne signale pas les dépôts faits hors de l'interface (montages
-           virtualisés ou réseau). Le backend dit ce qu'il en est ici. -->
-      <div class="admin__field">
-        <span class="admin__label">{{ $t('admin.watch') }}</span>
-        <div class="admin__row">
-          <input
-            v-model="pollSeconds"
-            class="admin__input admin__input--short"
-            type="number"
-            min="0"
-            :placeholder="$t('admin.watchAuto')"
-            @change="persist"
-          />
-          <span class="admin__unit">{{ $t('admin.watchUnit') }}</span>
-          <button
-            v-if="watchInfo && watchInfo.recommended !== (watchInfo.effective ?? 0)"
-            type="button"
-            class="admin__action"
-            @click="useRecommended"
+        <!-- Re-scan périodique : nécessaire seulement là où le système de fichiers
+             ne signale pas les dépôts faits hors de l'interface (montages
+             virtualisés ou réseau). Le backend dit ce qu'il en est ici. -->
+        <div class="admin__field">
+          <span class="admin__label">{{ $t('admin.watch') }}</span>
+          <div class="admin__row">
+            <input
+              v-model="pollSeconds"
+              class="admin__input admin__input--short"
+              type="number"
+              min="0"
+              :placeholder="$t('admin.watchAuto')"
+              @change="persist"
+            />
+            <span class="admin__unit">{{ $t('admin.watchUnit') }}</span>
+            <button
+              v-if="watchInfo && watchInfo.recommended !== (watchInfo.effective ?? 0)"
+              type="button"
+              class="admin__action"
+              @click="useRecommended"
+            >
+              {{ $t('admin.watchUse', { seconds: watchInfo.recommended }) }}
+            </button>
+            <!-- Non affiché en mode automatique : il n'y aurait rien à retirer. -->
+            <button
+              v-if="pollValue !== null"
+              type="button"
+              class="admin__action"
+              @click="resetToAuto"
+            >
+              {{ $t('admin.watchAutoAction') }}
+            </button>
+          </div>
+          <p class="admin__hint">{{ $t('admin.watchHint') }}</p>
+          <p v-if="recommendation" class="admin__hint admin__hint--rec">{{ recommendation }}</p>
+        </div>
+
+        <dl class="admin__applied">
+          <div>
+            <dt>{{ $t('admin.applied') }}</dt>
+            <dd>{{ $t(appliedMode === 'image' ? 'admin.modeImage' : 'admin.mode3d') }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('admin.watchApplied') }}</dt>
+            <dd>{{ appliedWatch }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('admin.rootRead') }}</dt>
+            <dd :title="resolvedRoot">{{ resolvedRoot || $t('common.none') }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <!-- Recherche assistée : le fournisseur de modèle et sa clé d'API. Tant
+           qu'aucun fournisseur n'est choisi, le bouton ✦ de la barre de
+           recherche reste grisé. -->
+      <section class="admin__card">
+        <h2 class="admin__title">{{ $t('ai.settings') }}</h2>
+
+        <div class="admin__field admin__field--ai">
+          <label class="admin__label" for="ai-provider">{{ $t('ai.provider') }}</label>
+          <div class="admin__row">
+            <select
+              id="ai-provider"
+              v-model="aiProvider"
+              class="admin__input"
+              @change="pickProvider"
+            >
+              <option value="">{{ $t('ai.none') }}</option>
+              <option v-for="p in aiProviders" :key="p.id" :value="p.id">
+                {{ p.label }}
+              </option>
+            </select>
+          </div>
+          <p class="admin__hint">{{ $t('ai.providerHint') }}</p>
+        </div>
+
+        <div class="admin__field admin__field--ai">
+          <label class="admin__label" for="ai-base-url">{{ $t('ai.baseUrl') }}</label>
+          <div class="admin__row">
+            <input
+              id="ai-base-url"
+              v-model="aiBaseUrl"
+              class="admin__input"
+              type="text"
+              :placeholder="aiDefaults?.base_url ?? ''"
+              @input="markAiTouched"
+            />
+          </div>
+          <p class="admin__hint">{{ $t('ai.baseUrlHint') }}</p>
+        </div>
+
+        <div class="admin__field admin__field--ai">
+          <label class="admin__label" for="ai-key">{{ $t('ai.apiKey') }}</label>
+          <div class="admin__row">
+            <input
+              id="ai-key"
+              v-model="aiKey"
+              class="admin__input"
+              type="password"
+              autocomplete="off"
+              :placeholder="aiNeedsKey ? 'sk-...' : $t('ai.noKeyNeeded')"
+              @input="markAiTouched"
+            />
+            <button v-if="aiKey" type="button" class="admin__action" @click="clearAiKey">
+              {{ $t('ai.apiKeyClear') }}
+            </button>
+            <!--
+              « Tester » ne se contente pas de vérifier la clé : il demande au
+              fournisseur les modèles qu'elle ouvre, et remplit la liste de choix
+              ci-dessous. Rien n'est enregistré à ce stade.
+            -->
+            <button
+              type="button"
+              class="admin__action"
+              :disabled="!aiProvider || aiTest.state === 'running'"
+              @click="testAi"
+            >
+              {{ aiTest.state === 'running' ? $t('ai.testing') : $t('ai.test') }}
+            </button>
+          </div>
+          <p class="admin__hint">{{ $t('ai.apiKeyHint') }}</p>
+          <p
+            v-if="aiTest.message"
+            class="admin__hint"
+            :class="aiTest.state === 'ok' ? 'admin__hint--rec' : 'admin__status--err'"
           >
-            {{ $t('admin.watchUse', { seconds: watchInfo.recommended }) }}
-          </button>
-          <!-- Non affiché en mode automatique : il n'y aurait rien à retirer. -->
-          <button
-            v-if="pollValue !== null"
-            type="button"
-            class="admin__action"
-            @click="resetToAuto"
-          >
-            {{ $t('admin.watchAutoAction') }}
-          </button>
+            {{ aiTest.message }}
+          </p>
         </div>
-        <p class="admin__hint">{{ $t('admin.watchHint') }}</p>
-        <p v-if="recommendation" class="admin__hint admin__hint--rec">{{ recommendation }}</p>
-      </div>
 
-      <dl class="admin__applied">
-        <div>
-          <dt>{{ $t('admin.applied') }}</dt>
-          <dd>{{ $t(appliedMode === 'image' ? 'admin.modeImage' : 'admin.mode3d') }}</dd>
+        <div class="admin__field admin__field--ai">
+          <label class="admin__label" for="ai-model">{{ $t('ai.model') }}</label>
+          <div class="admin__row">
+            <select
+              id="ai-model"
+              v-model="aiModel"
+              class="admin__input"
+              @input="markAiTouched"
+            >
+              <option v-if="!aiModelOptions.length" value="">{{ $t('common.none') }}</option>
+              <option v-for="name in aiModelOptions" :key="name" :value="name">
+                {{ name }}
+              </option>
+            </select>
+          </div>
+          <p class="admin__hint">{{ $t('ai.modelHint') }}</p>
         </div>
-        <div>
-          <dt>{{ $t('admin.watchApplied') }}</dt>
-          <dd>{{ appliedWatch }}</dd>
-        </div>
-        <div>
-          <dt>{{ $t('admin.rootRead') }}</dt>
-          <dd :title="resolvedRoot">{{ resolvedRoot || $t('common.none') }}</dd>
-        </div>
-      </dl>
-    </section>
 
-    <!-- Recherche assistée : le fournisseur de modèle et sa clé d'API. Tant
-         qu'aucun fournisseur n'est choisi, le bouton ✦ de la barre de
-         recherche reste grisé. -->
-    <section class="admin__card">
-      <h2 class="admin__title">{{ $t('ai.settings') }}</h2>
-
-      <div class="admin__field admin__field--ai">
-        <label class="admin__label" for="ai-provider">{{ $t('ai.provider') }}</label>
-        <div class="admin__row">
-          <select
-            id="ai-provider"
-            v-model="aiProvider"
-            class="admin__input"
-            @change="pickProvider"
-          >
-            <option value="">{{ $t('ai.none') }}</option>
-            <option v-for="p in aiProviders" :key="p.id" :value="p.id">
-              {{ p.label }}
-            </option>
-          </select>
-        </div>
-        <p class="admin__hint">{{ $t('ai.providerHint') }}</p>
-      </div>
-
-      <div class="admin__field admin__field--ai">
-        <label class="admin__label" for="ai-base-url">{{ $t('ai.baseUrl') }}</label>
-        <div class="admin__row">
-          <input
-            id="ai-base-url"
-            v-model="aiBaseUrl"
-            class="admin__input"
-            type="text"
-            :placeholder="aiDefaults?.base_url ?? ''"
-            @input="markAiTouched"
-          />
-        </div>
-        <p class="admin__hint">{{ $t('ai.baseUrlHint') }}</p>
-      </div>
-
-      <div class="admin__field admin__field--ai">
-        <label class="admin__label" for="ai-key">{{ $t('ai.apiKey') }}</label>
-        <div class="admin__row">
-          <input
-            id="ai-key"
-            v-model="aiKey"
-            class="admin__input"
-            type="password"
-            autocomplete="off"
-            :placeholder="aiNeedsKey ? 'sk-...' : $t('ai.noKeyNeeded')"
-            @input="markAiTouched"
-          />
-          <button v-if="aiKey" type="button" class="admin__action" @click="clearAiKey">
-            {{ $t('ai.apiKeyClear') }}
-          </button>
-          <!--
-            « Tester » ne se contente pas de vérifier la clé : il demande au
-            fournisseur les modèles qu'elle ouvre, et remplit la liste de choix
-            ci-dessous. Rien n'est enregistré à ce stade.
-          -->
-          <button
-            type="button"
-            class="admin__action"
-            :disabled="!aiProvider || aiTest.state === 'running'"
-            @click="testAi"
-          >
-            {{ aiTest.state === 'running' ? $t('ai.testing') : $t('ai.test') }}
-          </button>
-        </div>
-        <p class="admin__hint">{{ $t('ai.apiKeyHint') }}</p>
-        <p
-          v-if="aiTest.message"
-          class="admin__hint"
-          :class="aiTest.state === 'ok' ? 'admin__hint--rec' : 'admin__status--err'"
-        >
-          {{ aiTest.message }}
-        </p>
-      </div>
-
-      <div class="admin__field admin__field--ai">
-        <label class="admin__label" for="ai-model">{{ $t('ai.model') }}</label>
-        <div class="admin__row">
-          <select
-            id="ai-model"
-            v-model="aiModel"
-            class="admin__input"
-            @input="markAiTouched"
-          >
-            <option v-if="!aiModelOptions.length" value="">{{ $t('common.none') }}</option>
-            <option v-for="name in aiModelOptions" :key="name" :value="name">
-              {{ name }}
-            </option>
-          </select>
-        </div>
-        <p class="admin__hint">{{ $t('ai.modelHint') }}</p>
-      </div>
-
-      <!--
-        Enregistrement explicite : la clé ne part qu'ici, une fois, et après
-        avoir choisi un modèle dans ce que le fournisseur annonce.
-      -->
-      <div class="admin__field admin__field--actions">
-        <!-- Actif même sans fournisseur : c'est ainsi qu'on désactive la
-             recherche (le backend efface alors la clé enregistrée). -->
-        <button
-          type="button"
-          class="admin__action admin__action--primary"
-          :disabled="aiSave.state === 'saving'"
-          @click="saveAi"
-        >
-          {{ aiSave.state === 'saving' ? '…' : $t('ai.save') }}
-        </button>
-        <span v-if="aiSave.state === 'ok'" class="admin__status admin__status--ok">
-          {{ aiSave.message }}
-        </span>
-        <span v-else-if="aiSave.state === 'error'" class="admin__status admin__status--err">
-          {{ aiSave.message }}
-        </span>
-      </div>
-    </section>
-
-    <!-- Notes : liste des éléments, avec accès à l'éditeur collaboratif. -->
-    <section class="admin__card">
-      <h2 class="admin__title">
-        {{ $t('admin.notes') }} <span class="admin__count">{{ noteCount }}</span>
-      </h2>
-
-      <input
-        v-model="noteQuery"
-        class="admin__input"
-        type="search"
-        :placeholder="$t('filter.items')"
-      />
-
-      <ul class="admin__list">
-        <li v-for="t in filteredTargets" :key="t.rel">
+        <!--
+          Enregistrement explicite : la clé ne part qu'ici, une fois, et après
+          avoir choisi un modèle dans ce que le fournisseur annonce.
+        -->
+        <div class="admin__field admin__field--actions">
+          <!-- Actif même sans fournisseur : c'est ainsi qu'on désactive la
+               recherche (le backend efface alors la clé enregistrée). -->
           <button
             type="button"
-            class="admin__item"
-            :class="{ 'admin__item--on': selected === t.rel }"
-            @click="selected = t.rel"
+            class="admin__action admin__action--primary"
+            :disabled="aiSave.state === 'saving'"
+            @click="saveAi"
           >
-            <span class="admin__item-label" :title="t.rel">{{ t.label }}</span>
-            <span class="admin__item-where">{{ t.where }}</span>
-            <span v-if="t.hasNote" :title="$t('admin.hasNote')">📝</span>
+            {{ aiSave.state === 'saving' ? '…' : $t('ai.save') }}
           </button>
-        </li>
-        <li v-if="!filteredTargets.length" class="admin__empty">{{ $t('admin.noItems') }}</li>
-      </ul>
-    </section>
+          <span v-if="aiSave.state === 'ok'" class="admin__status admin__status--ok">
+            {{ aiSave.message }}
+          </span>
+          <span v-else-if="aiSave.state === 'error'" class="admin__status admin__status--err">
+            {{ aiSave.message }}
+          </span>
+        </div>
+      </section>
+    </div>
 
-    <!-- Édition de la note sélectionnée (temps réel, plusieurs personnes OK). -->
-    <section v-if="selected" class="admin__card admin__card--wide">
-      <h2 class="admin__title">{{ selected }}</h2>
-      <NotePanel :key="selected" :rel="selected" :note="selectedNote" />
-    </section>
+    <div class="admin__col">
+      <!-- Notes : liste des éléments, avec accès à l'éditeur collaboratif. -->
+      <section class="admin__card">
+        <h2 class="admin__title">
+          {{ $t('admin.notes') }} <span class="admin__count">{{ noteCount }}</span>
+        </h2>
+
+        <input
+          v-model="noteQuery"
+          class="admin__input"
+          type="search"
+          :placeholder="$t('filter.items')"
+        />
+
+        <ul class="admin__list">
+          <li v-for="t in filteredTargets" :key="t.rel">
+            <button
+              type="button"
+              class="admin__item"
+              :class="{ 'admin__item--on': selected === t.rel }"
+              @click="selected = t.rel"
+            >
+              <span class="admin__item-label" :title="t.rel">{{ t.label }}</span>
+              <span class="admin__item-where">{{ t.where }}</span>
+              <span v-if="t.hasNote" :title="$t('admin.hasNote')">📝</span>
+            </button>
+          </li>
+          <li v-if="!filteredTargets.length" class="admin__empty">{{ $t('admin.noItems') }}</li>
+        </ul>
+      </section>
+
+      <!-- Édition de la note sélectionnée (temps réel, plusieurs personnes OK).
+           Elle reste dans la colonne des notes : c'est là qu'on vient de cliquer. -->
+      <section v-if="selected" ref="editeurNote" class="admin__card">
+        <h2 class="admin__title">{{ selected }}</h2>
+        <NotePanel :key="selected" :rel="selected" :note="selectedNote" />
+      </section>
+    </div>
   </div>
 </template>
