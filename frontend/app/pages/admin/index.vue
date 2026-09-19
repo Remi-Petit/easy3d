@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { DisplayMode, FileInfo, ConfigResponse, WatchInfo } from '~/composables/useModels'
+import { modelOptions } from '~/utils/ai'
+import type { AiConfig, AiModelsResponse } from '~/utils/ai'
 
 // Page d'administration : réglages de l'application (écrits dans `config.yml`
 // via `PUT /api/config`) et gestion des notes.
@@ -74,7 +76,10 @@ const ai = useAiSearch()
 const { providers: aiProviders, refresh: refreshAi } = ai
 const aiProvider = ref('')
 const aiBaseUrl = ref('')
+// Le modèle n'est plus saisi à la main : il se choisit parmi ceux que le
+// fournisseur annonce pour la clé (bouton « Tester »).
 const aiModel = ref('')
+const aiModels = ref<string[]>([])
 // La clé n'est jamais renvoyée en clair : le champ contient `***` quand une clé
 // est enregistrée, et c'est cette valeur qu'on renvoie telle quelle pour la
 // conserver (voir `Ai::merge_key`).
@@ -83,46 +88,113 @@ const aiTest = ref<{ state: 'idle' | 'running' | 'ok' | 'error'; message: string
   state: 'idle',
   message: '',
 })
+const aiSave = ref<{ state: 'idle' | 'saving' | 'ok' | 'error'; message: string }>({
+  state: 'idle',
+  message: '',
+})
+/**
+ * Le formulaire a été touché : le serveur ne le réaligne plus.
+ *
+ * Sans ce verrou, le premier message du WebSocket (à chaque écriture de
+ * `config.yml`, y compris par nous) écraserait une clé en cours de saisie.
+ */
+const aiTouched = ref(false)
 
 /** Fournisseur choisi, tel que le backend le décrit (défauts compris). */
 const aiDefaults = computed(() => aiProviders.value.find((p) => p.id === aiProvider.value) ?? null)
 /** Le fournisseur exige-t-il une clé ? (faux pour un Ollama local) */
 const aiNeedsKey = computed(() => aiDefaults.value?.needs_key ?? true)
+/** Modèle enregistré, tel que le backend le connaît. */
+const aiSavedModel = computed(() => data.value?.config?.ai?.model ?? '')
+
+/** Choix proposés : ce que le fournisseur a annoncé, plus le modèle en cours. */
+const aiModelOptions = computed(() =>
+  modelOptions([...aiModels.value, aiSavedModel.value], aiModel.value),
+)
+
+/** Le formulaire a été modifié : c'est lui qui fait foi jusqu'au prochain
+ * enregistrement. */
+function markAiTouched() {
+  aiTouched.value = true
+  aiTest.value = { state: 'idle', message: '' }
+  aiSave.value = { state: 'idle', message: '' }
+}
 
 /**
- * Choix du fournisseur : on montre tout de suite l'adresse et le modèle qui
- * seront utilisés si l'on laisse les champs vides (le backend complète).
+ * Choix du fournisseur : on montre l'adresse qui sera utilisée si le champ est
+ * vide, et la liste des modèles repart de zéro (elle appartient à une adresse et
+ * à une clé données).
  */
 function pickProvider() {
+  markAiTouched()
+  aiModels.value = []
+
   const defaults = aiDefaults.value
-  if (defaults) {
-    if (!aiBaseUrl.value.trim()) aiBaseUrl.value = defaults.base_url
-    if (!aiModel.value.trim()) aiModel.value = defaults.model
-  }
-  aiTest.value = { state: 'idle', message: '' }
-  persist()
+  if (defaults && !aiBaseUrl.value.trim()) aiBaseUrl.value = defaults.base_url
 }
 
 /** Efface la clé enregistrée : vide veut dire « supprime-la » côté backend. */
 function clearAiKey() {
+  markAiTouched()
   aiKey.value = ''
-  persist()
 }
 
 /**
- * Teste le fournisseur **enregistré** : on écrit d'abord la configuration,
- * sinon le test porterait sur les valeurs précédentes.
+ * Interroge le fournisseur et remplit la liste des modèles.
+ *
+ * Rien n'est enregistré : les valeurs du formulaire partent telles quelles, et
+ * `***` dit au backend de réutiliser la clé qu'il détient. C'est aussi la
+ * vérification de la clé — un refus remonte le message du fournisseur.
  */
 async function testAi() {
   aiTest.value = { state: 'running', message: '' }
-  await persist()
+
   try {
-    const res = await $fetch<{ message: string }>('/api/ai/test', { method: 'POST' })
-    aiTest.value = { state: 'ok', message: res.message }
+    const res = await $fetch<AiModelsResponse>('/api/ai/models', {
+      method: 'POST',
+      body: {
+        provider: aiProvider.value || null,
+        base_url: aiBaseUrl.value.trim() || null,
+        api_key: aiKey.value.trim() || null,
+      },
+    })
+
+    aiModels.value = res.models
+    // Un choix par défaut utile, sans écraser un modèle déjà retenu.
+    if (!aiModel.value || !res.models.includes(aiModel.value)) {
+      aiModel.value = res.models[0] ?? ''
+    }
+    aiTest.value = { state: 'ok', message: t('ai.modelsFound', res.models.length) }
   } catch (e: any) {
+    aiModels.value = []
     aiTest.value = {
       state: 'error',
       message: e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('common.unknownError'),
+    }
+  }
+}
+
+/**
+ * Enregistre la carte IA.
+ *
+ * Contrairement aux réglages d'affichage (qui s'appliquent au changement), rien
+ * n'est écrit avant ce clic : la clé ne part qu'une fois, et le modèle a dû être
+ * choisi dans ce que le fournisseur annonce.
+ */
+async function saveAi() {
+  aiSave.value = { state: 'saving', message: '' }
+
+  try {
+    await $fetch('/api/config', { method: 'PUT', body: configBody(formAi()) })
+    aiSave.value = { state: 'ok', message: t('admin.saved') }
+    aiTouched.value = false
+    await loadResolvedRoot()
+    // Le bouton ✦ de la barre de recherche suit la configuration enregistrée.
+    void refreshAi()
+  } catch (e: any) {
+    aiSave.value = {
+      state: 'error',
+      message: e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('admin.saveFailed'),
     }
   }
 }
@@ -191,18 +263,64 @@ watch(
 )
 
 // …et pour la recherche assistée : la configuration appliquée réaligne le
-// formulaire, y compris la clé masquée.
+// formulaire, y compris la clé masquée. Un formulaire déjà touché est laissé
+// tranquille : sinon la première réponse du WebSocket effacerait la saisie en
+// cours (et remettrait `***` au milieu d'une clé fraîchement tapée).
 watch(
   () => data.value?.config?.ai,
   (server) => {
-    if (inFlight) return
+    if (aiTouched.value) return
     aiProvider.value = server?.provider ?? ''
     aiBaseUrl.value = server?.base_url ?? ''
     aiModel.value = server?.model ?? ''
     aiKey.value = server?.api_key ?? ''
+    // La liste voyage avec la configuration : la liste déroulante est donc
+    // remplie dès l'ouverture de la page, sans recliquer sur « Tester ».
+    aiModels.value = server?.models ?? []
   },
   { immediate: true },
 )
+
+/**
+ * Corps de configuration complet.
+ *
+ * Le bloc IA vient de l'appelant : les réglages d'affichage s'enregistrent au
+ * changement et ne doivent **pas** emporter une clé en cours de saisie, alors
+ * que le bouton « Enregistrer » de la carte IA fait précisément l'inverse.
+ */
+function configBody(ai: AiConfig) {
+  return {
+    models_root: data.value?.config?.models_root ?? null,
+    display: { mode: mode.value },
+    watch: { poll_seconds: pollValue.value },
+    ai,
+  }
+}
+
+/**
+ * Bloc IA **enregistré**, tel que le backend le connaît.
+ *
+ * La clé y est masquée (`***`) : la renvoyer telle quelle la conserve, et un
+ * bloc absent reste un bloc absent (rien à effacer).
+ */
+function storedAi(): AiConfig {
+  return data.value?.config?.ai ?? {}
+}
+
+/** Bloc IA du formulaire, prêt à être enregistré. */
+function formAi(): AiConfig {
+  return {
+    // `null` = pas de fournisseur : la clé est alors effacée côté backend.
+    provider: aiProvider.value || null,
+    base_url: aiBaseUrl.value.trim() || null,
+    model: aiModel.value || null,
+    // `***` = « garde la clé enregistrée », vide = « supprime-la ».
+    api_key: aiProvider.value ? aiKey.value.trim() : null,
+    // Les modèles annoncés sont enregistrés avec le reste : on choisit ensuite
+    // un autre modèle sans avoir à réinterroger le fournisseur.
+    models: aiModels.value,
+  }
+}
 
 /**
  * Écrit le réglage dans `config.yml`. Les clics rapprochés sont sérialisés :
@@ -223,30 +341,16 @@ async function persist() {
       try {
         await $fetch('/api/config', {
           method: 'PUT',
-          // La config complète est renvoyée : `models_root`, non exposé ici,
-          // est donc préservé tel quel.
-          body: {
-            models_root: data.value?.config?.models_root ?? null,
-            display: { mode: mode.value },
-            watch: { poll_seconds: pollValue.value },
-            ai: {
-              // `null` = pas de fournisseur : la clé est alors effacée côté
-              // backend (pas de secret conservé pour rien).
-              provider: aiProvider.value || null,
-              base_url: aiBaseUrl.value.trim() || null,
-              model: aiModel.value.trim() || null,
-              // `***` = « garde la clé enregistrée », vide = « supprime-la ».
-              api_key: aiProvider.value ? aiKey.value.trim() : null,
-            },
-          },
+          // Le bloc IA part tel qu'il est **enregistré** : ces réglages-ci ne
+          // touchent pas aux champs de la carte IA, qui ont leur propre bouton.
+          body: configBody(storedAi()),
         })
         saveState.value = 'ok'
         saveMessage.value = t('admin.saved')
         await loadResolvedRoot()
         // Le bouton de recherche de la barre d'outils suit : il s'active dès
         // qu'un fournisseur est choisi.
-        void refreshAi()
-      } catch (e: any) {
+        void refreshAi()      } catch (e: any) {
         saveState.value = 'error'
         saveMessage.value =
           e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('admin.saveFailed')
@@ -422,7 +526,7 @@ usePageHeader(() => ({
     <section class="admin__card">
       <h2 class="admin__title">{{ $t('ai.settings') }}</h2>
 
-      <div class="admin__field">
+      <div class="admin__field admin__field--ai">
         <label class="admin__label" for="ai-provider">{{ $t('ai.provider') }}</label>
         <div class="admin__row">
           <select
@@ -440,7 +544,7 @@ usePageHeader(() => ({
         <p class="admin__hint">{{ $t('ai.providerHint') }}</p>
       </div>
 
-      <div class="admin__field">
+      <div class="admin__field admin__field--ai">
         <label class="admin__label" for="ai-base-url">{{ $t('ai.baseUrl') }}</label>
         <div class="admin__row">
           <input
@@ -449,27 +553,13 @@ usePageHeader(() => ({
             class="admin__input"
             type="text"
             :placeholder="aiDefaults?.base_url ?? ''"
-            @change="persist"
+            @input="markAiTouched"
           />
         </div>
         <p class="admin__hint">{{ $t('ai.baseUrlHint') }}</p>
       </div>
 
-      <div class="admin__field">
-        <label class="admin__label" for="ai-model">{{ $t('ai.model') }}</label>
-        <div class="admin__row">
-          <input
-            id="ai-model"
-            v-model="aiModel"
-            class="admin__input"
-            type="text"
-            :placeholder="aiDefaults?.model ?? ''"
-            @change="persist"
-          />
-        </div>
-      </div>
-
-      <div class="admin__field">
+      <div class="admin__field admin__field--ai">
         <label class="admin__label" for="ai-key">{{ $t('ai.apiKey') }}</label>
         <div class="admin__row">
           <input
@@ -479,15 +569,20 @@ usePageHeader(() => ({
             type="password"
             autocomplete="off"
             :placeholder="aiNeedsKey ? 'sk-...' : $t('ai.noKeyNeeded')"
-            @change="persist"
+            @input="markAiTouched"
           />
           <button v-if="aiKey" type="button" class="admin__action" @click="clearAiKey">
             {{ $t('ai.apiKeyClear') }}
           </button>
+          <!--
+            « Tester » ne se contente pas de vérifier la clé : il demande au
+            fournisseur les modèles qu'elle ouvre, et remplit la liste de choix
+            ci-dessous. Rien n'est enregistré à ce stade.
+          -->
           <button
             type="button"
             class="admin__action"
-            :disabled="!aiProvider"
+            :disabled="!aiProvider || aiTest.state === 'running'"
             @click="testAi"
           >
             {{ aiTest.state === 'running' ? $t('ai.testing') : $t('ai.test') }}
@@ -499,8 +594,49 @@ usePageHeader(() => ({
           class="admin__hint"
           :class="aiTest.state === 'ok' ? 'admin__hint--rec' : 'admin__status--err'"
         >
-          {{ aiTest.state === 'ok' ? $t('ai.testOk', { message: aiTest.message }) : aiTest.message }}
+          {{ aiTest.message }}
         </p>
+      </div>
+
+      <div class="admin__field admin__field--ai">
+        <label class="admin__label" for="ai-model">{{ $t('ai.model') }}</label>
+        <div class="admin__row">
+          <select
+            id="ai-model"
+            v-model="aiModel"
+            class="admin__input"
+            @input="markAiTouched"
+          >
+            <option v-if="!aiModelOptions.length" value="">{{ $t('common.none') }}</option>
+            <option v-for="name in aiModelOptions" :key="name" :value="name">
+              {{ name }}
+            </option>
+          </select>
+        </div>
+        <p class="admin__hint">{{ $t('ai.modelHint') }}</p>
+      </div>
+
+      <!--
+        Enregistrement explicite : la clé ne part qu'ici, une fois, et après
+        avoir choisi un modèle dans ce que le fournisseur annonce.
+      -->
+      <div class="admin__field admin__field--actions">
+        <!-- Actif même sans fournisseur : c'est ainsi qu'on désactive la
+             recherche (le backend efface alors la clé enregistrée). -->
+        <button
+          type="button"
+          class="admin__action admin__action--primary"
+          :disabled="aiSave.state === 'saving'"
+          @click="saveAi"
+        >
+          {{ aiSave.state === 'saving' ? '…' : $t('ai.save') }}
+        </button>
+        <span v-if="aiSave.state === 'ok'" class="admin__status admin__status--ok">
+          {{ aiSave.message }}
+        </span>
+        <span v-else-if="aiSave.state === 'error'" class="admin__status admin__status--err">
+          {{ aiSave.message }}
+        </span>
       </div>
     </section>
 

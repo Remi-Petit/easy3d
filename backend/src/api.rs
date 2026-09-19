@@ -144,7 +144,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/ai/providers", get(ai_providers))
         .route("/ai/search", post(ai_search))
-        .route("/ai/test", post(ai_test))
+        .route("/ai/models", post(ai_models))
         .route("/ws", get(ws_models))
         .route("/collab/{*rel}", get(ws_collab))
         .nest_service("/mcp", mcp)
@@ -188,20 +188,49 @@ async fn ai_search(
         .map_err(ai_error)
 }
 
-/// Réponse du test de configuration.
+/// Réponse de `/ai/models`.
 #[derive(Serialize)]
-pub struct AiTestResponse {
-    /// Ce que le modèle a répondu (en principe « OK »).
-    pub message: String,
+pub struct AiModelsResponse {
+    /// Identifiants proposés par le fournisseur, dans son ordre.
+    pub models: Vec<String>,
 }
 
-/// Vérifie que le fournisseur configuré répond (bouton « Tester »).
-async fn ai_test(
+/// Demande de liste des modèles : les valeurs du formulaire d'administration.
+///
+/// Elles ne sont **pas** enregistrées : on interroge le fournisseur avant de
+/// valider, ce qui évite d'écrire une clé ou une adresse encore approximative.
+#[derive(Deserialize)]
+pub struct AiModelsRequest {
+    pub provider: Option<String>,
+    pub base_url: Option<String>,
+    /// Clé telle que l'interface la connaît : `***` (ou absente) signifie
+    /// « garde celle qui est enregistrée ».
+    pub api_key: Option<String>,
+}
+
+/// Liste les modèles accessibles avec la clé fournie.
+///
+/// C'est le bouton « Tester » de l'administration : il remplit la liste de choix
+/// du modèle, et vaut vérification de la clé (une clé refusée remonte le message
+/// du fournisseur).
+async fn ai_models(
     State(state): State<AppState>,
-) -> Result<Json<AiTestResponse>, (StatusCode, String)> {
-    ai::test(&state)
+    Json(request): Json<AiModelsRequest>,
+) -> Result<Json<AiModelsResponse>, (StatusCode, String)> {
+    // La clé enregistrée n'est jamais renvoyée à l'interface : `***` veut dire
+    // « celle que tu as », exactement comme pour `PUT /config`.
+    let stored = state.config().ai;
+    let ai = config::Ai {
+        provider: request.provider,
+        base_url: request.base_url,
+        model: None,
+        api_key: stored.merge_key(request.api_key.as_deref()),
+        models: Vec::new(),
+    };
+
+    ai::list_models(&ai)
         .await
-        .map(|message| Json(AiTestResponse { message }))
+        .map(|models| Json(AiModelsResponse { models }))
         .map_err(ai_error)
 }
 
@@ -347,10 +376,24 @@ pub fn apply_config(
     // La clé d'API ne revient jamais en clair depuis l'interface : le marqueur
     // signifie « garde celle que tu as », la chaîne vide « efface-la ».
     let mut config = config;
-    config.ai.api_key = state.config().ai.merge_key(config.ai.api_key.as_deref());
-    // Pas de clé orpheline : sans fournisseur, elle n'aurait aucun usage.
+    let stored = state.config();
+    config.ai.api_key = stored.ai.merge_key(config.ai.api_key.as_deref());
+    // La liste des modèles est nettoyée, et une liste vide veut dire « garde la
+    // précédente » — mais seulement pour le **même** fournisseur à la même
+    // adresse : une liste appartient à un point d'entrée, pas à l'application.
+    config.ai.models = config::Ai::normalized_models(&config.ai.models);
+    if config.ai.models.is_empty()
+        && config.ai.provider == stored.ai.provider
+        && config.ai.base_url == stored.ai.base_url
+    {
+        config.ai.models = stored.ai.models.clone();
+    }
+    // Sans fournisseur, rien à conserver : ni clé, ni adresse, ni modèle. Le
+    // bloc disparaît alors du YAML (`skip_serializing_if`), exactement comme
+    // s'il n'avait jamais été configuré — sinon un modèle du fournisseur
+    // précédent réapparaîtrait dans la liste au prochain paramétrage.
     if !config.ai.is_configured() {
-        config.ai.api_key = None;
+        config.ai = config::Ai::default();
     }
 
     // Refuse une config qui pointerait vers un dossier inexistant : le watcher
@@ -1317,13 +1360,69 @@ mod tests {
         assert!(state.config().ai.api_key.is_none());
     }
 
-    /// Pas de clé orpheline : sans fournisseur, elle n'a aucune raison d'être
-    /// conservée dans le fichier.
+    /// La liste des modèles voyage avec le reste : nettoyée à l'écriture, et
+    /// conservée tant qu'on reste sur le même fournisseur et la même adresse.
+    #[tokio::test]
+    async fn put_config_gere_la_liste_des_modeles() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = ai_state(dir.path(), "sk-secret");
+        let app = routes(state.clone());
+
+        let put = |body: serde_json::Value| {
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/config")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // Une liste reçue est nettoyée : espaces, doublons et entrées vides.
+        let res = put(serde_json::json!({
+            "models_root": ".",
+            "ai": { "provider": "openai", "models": ["gpt-4o", " gpt-4o ", "", "o3-mini"] }
+        }))
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(state.config().ai.models, vec!["gpt-4o", "o3-mini"]);
+
+        // Un enregistrement qui ne la contient pas la laisse tranquille.
+        let res = put(serde_json::json!({
+            "models_root": ".",
+            "ai": { "provider": "openai", "model": "o3-mini" }
+        }))
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(state.config().ai.models, vec!["gpt-4o", "o3-mini"]);
+
+        // Changer d'adresse repart d'une liste vide : elle appartenait à
+        // l'ancien point d'entrée.
+        let res = put(serde_json::json!({
+            "models_root": ".",
+            "ai": { "provider": "openai", "base_url": "http://127.0.0.1:9/v1" }
+        }))
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(state.config().ai.models.is_empty());
+    }
+
+    /// Pas de valeur orpheline : sans fournisseur, la clé **et** le modèle
+    /// disparaissent du fichier.
     #[tokio::test]
     async fn changer_de_fournisseur_sans_cle_efface_la_cle() {
         let dir = tempfile::tempdir().unwrap();
         let state = ai_state(dir.path(), "sk-secret");
         let app = routes(state.clone());
+
+        // Un modèle enregistré, comme le laisserait un paramétrage précédent.
+        state.config.write().unwrap().ai.model = Some("gpt-4o-mini".to_string());
 
         let res = app
             .oneshot(
@@ -1334,8 +1433,7 @@ mod tests {
                     .body(Body::from(
                         serde_json::json!({
                             "models_root": ".",
-                            "ai": { "provider": null, "api_key": "sk-orph"
-                            }
+                            "ai": { "provider": null, "api_key": "sk-orph", "model": "gpt-4o-mini" }
                         })
                         .to_string(),
                     ))
@@ -1345,8 +1443,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert!(state.config().ai.api_key.is_none());
-        assert!(!state.config().ai.is_configured());
+        let saved = state.config().ai;
+        assert!(saved.api_key.is_none());
+        assert!(saved.model.is_none());
+        assert!(!saved.is_configured());
     }
 
     /// Les fournisseurs sont annoncés par le backend : le frontend n'en connaît
@@ -1425,27 +1525,31 @@ mod tests {
         assert!(String::from_utf8_lossy(&body).contains("décris"));
     }
 
-    /// Le fournisseur est configuré mais ne répond pas : l'erreur d'appel
-    /// remonte telle quelle (ici, un port fermé).
+    /// Le fournisseur est injoignable : l'erreur d'appel remonte telle quelle
+    /// (ici, un port fermé), sans jamais citer la clé.
     #[tokio::test]
-    async fn le_test_de_configuration_remonte_l_erreur_du_fournisseur() {
+    async fn la_liste_des_modeles_remonte_l_erreur_du_fournisseur() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::default();
-        config.ai = config::Ai {
-            provider: Some("openai".to_string()),
-            base_url: Some("http://127.0.0.1:9/v1".to_string()),
-            api_key: Some("sk-secret".to_string()),
-            ..Default::default()
-        };
-        let (ws, _) = broadcast::channel::<String>(16);
-        let app = routes(AppState::new(".", ws, config).with_config_path(dir.path().join("c.yml")));
+        let state = ai_state(dir.path(), "sk-secret");
+        let app = routes(state);
 
         let res = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/ai/test")
-                    .body(Body::empty())
+                    .uri("/ai/models")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "provider": "openai",
+                            "base_url": "http://127.0.0.1:9/v1",
+                            // Le marqueur : la clé enregistrée est réutilisée,
+                            // sans jamais repasser par le navigateur.
+                            "api_key": config::KEY_PLACEHOLDER
+                        })
+                        .to_string(),
+                    ))
                     .unwrap(),
             )
             .await
@@ -1456,8 +1560,24 @@ mod tests {
         let message = String::from_utf8_lossy(&body);
         assert!(message.contains("impossible"), "{message}");
         assert!(message.contains("127.0.0.1:9"), "{message}");
-        // La clé ne doit jamais apparaître dans un message d'erreur.
         assert!(!message.contains("sk-secret"), "{message}");
+
+        // Sans fournisseur, la même route le dit avant tout appel réseau.
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/ai/models")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("fournisseur"));
     }
 
     #[tokio::test]

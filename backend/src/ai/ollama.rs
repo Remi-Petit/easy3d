@@ -43,13 +43,17 @@ impl Provider for Ollama {
         MODEL
     }
 
+    fn headers(&self, _cfg: &Resolved) -> Vec<(String, String)> {
+        // Pas d'en-tête d'autorisation : le service est local.
+        Vec::new()
+    }
+
     fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[Spec]) -> Request {
-        Request {
-            url: format!("{}/chat/completions", cfg.base_url),
-            // Pas d'en-tête d'autorisation : le service est local.
-            headers: Vec::new(),
-            body: openai::build_body(cfg, system, turns, tools),
-        }
+        Request::post(
+            format!("{}/chat/completions", cfg.base_url),
+            self.headers(cfg),
+            openai::build_body(cfg, system, turns, tools),
+        )
     }
 
     fn parse(&self, _status: u16, body: &str) -> Result<Reply, String> {
@@ -124,5 +128,23 @@ mod tests {
         let message = OLLAMA.error(500, "<html>connection refused</html>");
         assert!(message.contains("Ollama"), "{message}");
         assert!(message.contains("lancé"), "{message}");
+    }
+
+    #[test]
+    fn la_liste_des_modeles_locaux_se_passe_de_cle() {
+        let request = OLLAMA.models_request(&cfg());
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.url, "http://localhost:11434/v1/models");
+        assert!(request.headers.is_empty(), "{:?}", request.headers);
+    }
+
+    #[test]
+    fn les_modeles_locaux_sont_lus() {
+        let body = r#"{"data":[{"id":"qwen3:8b"},{"id":"llama3.2:3b"}]}"#;
+        assert_eq!(
+            OLLAMA.parse_models(200, body).unwrap(),
+            vec!["qwen3:8b", "llama3.2:3b"]
+        );
     }
 }

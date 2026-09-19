@@ -84,7 +84,18 @@ pub struct Ai {
     /// [`Ai::redacted`]), et jamais journalisée.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Modèles que le fournisseur a annoncés la dernière fois qu'on l'a
+    /// interrogé.
+    ///
+    /// Conservés pour éviter de retrouver une liste vide (un seul choix, donc)
+    /// à chaque visite de l'administration : on choisit alors un autre modèle
+    /// sans avoir à réinterroger le fournisseur.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
+
+/// Nombre maximal de modèles conservés (garde-fou d'écriture).
+const MODELS_MAX: usize = 500;
 
 impl Ai {
     /// `true` si un fournisseur est choisi : la recherche IA est utilisable.
@@ -100,6 +111,26 @@ impl Ai {
             && self.base_url.is_none()
             && self.model.is_none()
             && self.api_key.is_none()
+            && self.models.is_empty()
+    }
+
+    /// Liste de modèles propre : espaces retirés, doublons et vides écartés,
+    /// longueur bornée.
+    ///
+    /// Elle vient du formulaire : autant ne pas écrire dans `config.yml` ce
+    /// qu'on refuserait d'afficher.
+    pub fn normalized_models(incoming: &[String]) -> Vec<String> {
+        let mut clean: Vec<String> = Vec::new();
+        for model in incoming {
+            let name = model.trim();
+            if !name.is_empty() && !clean.iter().any(|known| known == name) {
+                clean.push(name.to_string());
+            }
+            if clean.len() == MODELS_MAX {
+                break;
+            }
+        }
+        clean
     }
 
     /// Copie où la clé est remplacée par [`KEY_PLACEHOLDER`] — ce que l'API peut
@@ -403,6 +434,49 @@ mod tests {
             serde_json::to_string(&DisplayMode::Image).unwrap(),
             "\"image\""
         );
+    }
+
+    /// La liste des modèles fait l'aller-retour par `config.yml` : c'est ce qui
+    /// évite de réinterroger le fournisseur à chaque visite de l'administration.
+    #[test]
+    fn la_liste_des_modeles_est_conservee() {
+        let ai = Ai {
+            provider: Some("openai".to_string()),
+            models: vec!["gpt-4o".to_string(), "o3-mini".to_string()],
+            ..Default::default()
+        };
+
+        let yaml = serde_yaml::to_string(&ai).unwrap();
+        assert!(yaml.contains("models:"), "{yaml}");
+        let relu: Ai = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(relu, ai);
+
+        // Sans liste, le bloc reste aussi court qu'avant (et `is_empty` garde
+        // tout le bloc hors du YAML quand rien n'est configuré).
+        let vide = Ai {
+            provider: Some("ollama".to_string()),
+            ..Default::default()
+        };
+        assert!(!serde_yaml::to_string(&vide).unwrap().contains("models"));
+        // Et une configuration sans IA n'écrit pas de bloc du tout.
+        let yaml = serde_yaml::to_string(&Config::default()).unwrap();
+        assert!(!yaml.contains("ai:"), "{yaml}");
+    }
+
+    #[test]
+    fn la_liste_des_modeles_est_nettoyee() {
+        let brut = [
+            " gpt-4o ".to_string(),
+            "gpt-4o".to_string(),
+            "".to_string(),
+            "   ".to_string(),
+            "o3-mini".to_string(),
+        ];
+        assert_eq!(Ai::normalized_models(&brut), vec!["gpt-4o", "o3-mini"]);
+
+        // Bornée : une liste absurde ne part pas dans le fichier.
+        let enorme: Vec<String> = (0..600).map(|i| format!("modele-{i}")).collect();
+        assert_eq!(Ai::normalized_models(&enorme).len(), 500);
     }
 
     #[test]

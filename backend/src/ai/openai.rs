@@ -36,16 +36,20 @@ impl Provider for OpenAi {
         MODEL
     }
 
-    fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[Spec]) -> Request {
-        Request {
-            url: format!("{}/chat/completions", cfg.base_url),
-            headers: match &cfg.api_key {
-                Some(key) => vec![("authorization".to_string(), format!("Bearer {key}"))],
-                // Service local sans authentification (Ollama).
-                None => Vec::new(),
-            },
-            body: build_body(cfg, system, turns, tools),
+    fn headers(&self, cfg: &Resolved) -> Vec<(String, String)> {
+        match &cfg.api_key {
+            Some(key) => vec![("authorization".to_string(), format!("Bearer {key}"))],
+            // Service local sans authentification (Ollama).
+            None => Vec::new(),
         }
+    }
+
+    fn build(&self, cfg: &Resolved, system: &str, turns: &[Turn], tools: &[Spec]) -> Request {
+        Request::post(
+            format!("{}/chat/completions", cfg.base_url),
+            self.headers(cfg),
+            build_body(cfg, system, turns, tools),
+        )
     }
 
     fn parse(&self, _status: u16, body: &str) -> Result<Reply, String> {
@@ -318,5 +322,53 @@ mod tests {
         let message = OPENAI.error(500, "<html>\n  <body>502</body>\n</html>");
         assert!(message.contains("<html>"), "{message}");
         assert!(!message.contains('\n'), "{message}");
+    }
+
+    #[test]
+    fn la_liste_des_modeles_est_un_get_authentifie() {
+        let request = OPENAI.models_request(&cfg());
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.url, "https://api.openai.com/v1/models");
+        assert_eq!(
+            request.headers[0],
+            ("authorization".to_string(), "Bearer sk-test".to_string())
+        );
+        // Un `GET` ne porte pas de corps : rien à sérialiser.
+        assert_eq!(request.body, serde_json::Value::Null);
+    }
+
+    /// La liste d'un fournisseur mêle conversations, embeddings et génération
+    /// d'images : on ne garde que ce qui peut tenir un échange.
+    #[test]
+    fn seuls_les_modeles_de_conversation_sont_proposes() {
+        let body = r#"{"data":[{"id":"gpt-4o"},{"id":"gpt-4o"},
+            {"id":"text-embedding-3-small"},{"id":"whisper-1"},
+            {"id":"dall-e-3"},{"id":"o3-mini"}]}"#;
+
+        let models = OPENAI.parse_models(200, body).unwrap();
+        assert_eq!(
+            models,
+            vec!["gpt-4o", "o3-mini"],
+            "doublons ou intrus restants"
+        );
+    }
+
+    #[test]
+    fn une_liste_vide_ou_refusee_est_dite() {
+        assert!(
+            OPENAI
+                .parse_models(200, r#"{"data":[]}"#)
+                .unwrap_err()
+                .contains("aucun modèle")
+        );
+
+        let message = OPENAI
+            .parse_models(401, r#"{"error":{"message":"Incorrect API key provided"}}"#)
+            .unwrap_err();
+        assert!(
+            message.contains("401") && message.contains("Incorrect API key"),
+            "{message}"
+        );
     }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aiConfigured, hitHref, type AiHit } from '~/utils/ai'
+import { aiConfigured, hitHref, modelOptions, type AiHit } from '~/utils/ai'
 
 /**
  * Recherche assistée : la seule logique pure côté interface.
@@ -41,5 +41,35 @@ describe('hitHref', () => {
       '/fichier/Boitier%20dema%20auto.stl',
     )
     expect(hitHref(hit('folder', 'Maison/étage 2'))).toBe('/dossiers/Maison%2F%C3%A9tage%202')
+  })
+})
+
+describe('modelOptions', () => {
+  it('propose ce que le fournisseur annonce, dans son ordre', () => {
+    expect(modelOptions(['gpt-4o', 'o3-mini'], '')).toEqual(['gpt-4o', 'o3-mini'])
+  })
+
+  it('garde le modèle retenu même s’il n’est pas annoncé', () => {
+    // Au chargement de la page, rien n'a encore été interrogé : sans cette
+    // règle, le champ apparaîtrait vide et l'enregistrement suivant effacerait
+    // le modèle.
+    expect(modelOptions([], 'deepseek-v4-flash')).toEqual(['deepseek-v4-flash'])
+    expect(modelOptions(['gpt-4o'], 'deepseek-v4-flash')).toEqual(['deepseek-v4-flash', 'gpt-4o'])
+  })
+
+  it('ne répète pas un modèle déjà proposé et ignore les valeurs vides', () => {
+    expect(modelOptions(['gpt-4o'], 'gpt-4o')).toEqual(['gpt-4o'])
+    expect(modelOptions(['', 'gpt-4o'], '   ')).toEqual(['gpt-4o'])
+  })
+
+  it('dédoublonne les deux sources', () => {
+    // La liste vient du fournisseur **et** de la configuration : la même entrée
+    // ne doit pas apparaître deux fois (c'est exactement ce qui arrivait quand
+    // le modèle enregistré était ajouté à une liste qui le contenait déjà).
+    expect(modelOptions(['fake-small', 'fake-large', 'fake-small'], 'fake-small')).toEqual([
+      'fake-small',
+      'fake-large',
+    ])
+    expect(modelOptions(['a', ' a '], 'a')).toEqual(['a'])
   })
 })
