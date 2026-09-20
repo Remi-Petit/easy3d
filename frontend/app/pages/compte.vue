@@ -8,12 +8,13 @@
  *
  * Les jetons servent aux **agents** (Claude Code, un script, une CI) qui n'ont
  * pas de navigateur : ils présentent le jeton en `Authorization: Bearer`, et il
- * hérite des droits du compte.
+ * hérite des droits du compte — avec une durée de vie au choix, pour qu'un jeton
+ * oublié finisse par mourir tout seul.
  */
+import { TOKEN_DEFAULT_DAYS, TOKEN_DURATIONS, durationKey, expiryKind } from '~/utils/tokens'
 const { t, te } = useI18n()
 const { status, ready, user } = useAuth()
 const jetons = useTokens()
-
 onMounted(() => {
   if (status.value.enabled) void jetons.refresh()
 })
@@ -68,11 +69,43 @@ async function changePassword() {
 
 // ── Jetons ───────────────────────────────────────────────────────────────
 const newTokenName = ref('')
+// Durée de vie choisie (0 = sans expiration) : le défaut est le plus sûr, un
+// agent qui s'arrête tout seul sans qu'on l'ait demandé serait une surprise.
+const newTokenDays = ref<number>(TOKEN_DEFAULT_DAYS)
 const copied = ref(false)
+
+/** Horloge partagée : les mentions « expire bientôt » se rafraîchissent seules. */
+const maintenant = useNow()
 
 async function createToken() {
   copied.value = false
-  if (await jetons.create(newTokenName.value)) newTokenName.value = ''
+  if (await jetons.create(newTokenName.value, newTokenDays.value)) newTokenName.value = ''
+}
+
+/** Libellé d'une durée proposée, avec repli sur le libellé générique. */
+function durationLabel(days: number): string {
+  const key = durationKey(days)
+  return te(key) ? t(key) : t('account.daysMany', { count: days })
+}
+
+/**
+ * Ce qu'on dit de la date de fin d'un jeton.
+ *
+ * `null` (sans expiration) et « expiré » ont chacun leur libellé : la liste doit
+ * dire ce qu'il en est sans qu'on ait à comparer des dates de tête.
+ */
+function expiryLabel(expiresAt: number | null): string {
+  const kind = expiryKind(expiresAt, Math.floor(maintenant.value.getTime() / 1000))
+  if (kind === 'never') return t('account.neverExpires')
+  if (kind === 'expired') return t('account.expired')
+  return t('account.expiresOn', { date: quand(expiresAt) })
+}
+
+/** Mise en avant des jetons qui vont s'arrêter (ou qui le sont déjà). */
+function expiryClass(expiresAt: number | null): string {
+  const kind = expiryKind(expiresAt, Math.floor(maintenant.value.getTime() / 1000))
+  if (kind === 'expired') return 'accounts__tag'
+  return kind === 'soon' ? 'accounts__tag accounts__tag--on' : ''
 }
 
 /** Copie le jeton affiché (le presse-papiers peut être refusé : on l'ignore). */
@@ -191,10 +224,19 @@ const quand = (valeur: number | null) =>
 
         <ul v-if="jetons.tokens.value.length" class="admin__list">
           <li v-for="token in jetons.tokens.value" :key="token.uuid" class="admin__item">
-            <span class="admin__item-label">{{ token.name }}</span>
+            <span class="admin__item-label">
+              {{ token.name }}
+              <!-- Un jeton qui va s'arrêter (ou qui l'est déjà) se voit tout de
+                   suite : c'est ce qui évite de chercher pourquoi un agent a
+                   cessé de fonctionner. -->
+              <span v-if="expiryClass(token.expires_at)" :class="expiryClass(token.expires_at)">
+                {{ expiryLabel(token.expires_at) }}
+              </span>
+            </span>
             <span class="admin__item-where">
               {{ t('account.lastUsed') }} {{ quand(token.last_used_at) }} ·
-              {{ t('account.created') }} {{ quand(token.created_at) }}
+              {{ t('account.created') }} {{ quand(token.created_at) }} ·
+              {{ expiryLabel(token.expires_at) }}
             </span>
             <div class="admin__field--actions">
               <button
@@ -228,6 +270,20 @@ const quand = (valeur: number | null) =>
               :placeholder="t('account.tokenName')"
               :aria-label="t('account.tokenName')"
             />
+            <!--
+              Durée de vie : `0` (en tête, et par défaut) veut dire « sans
+              expiration ». Le reste est proposé en jours — un agent qui s'arrête
+              tout seul est plus facile à comprendre quand on l'a choisi.
+            -->
+            <select
+              v-model.number="newTokenDays"
+              class="admin__input admin__input--short"
+              :aria-label="t('account.duration')"
+            >
+              <option v-for="days in TOKEN_DURATIONS" :key="days" :value="days">
+                {{ durationLabel(days) }}
+              </option>
+            </select>
             <button
               type="button"
               class="admin__action admin__action--primary"
@@ -237,6 +293,7 @@ const quand = (valeur: number | null) =>
               {{ t('account.create') }}
             </button>
           </div>
+          <p class="admin__hint">{{ t('account.durationHint') }}</p>
         </div>
 
         <p class="admin__hint">{{ t('account.mcpHint') }}</p>

@@ -56,6 +56,23 @@ pub fn new_token() -> String {
     )
 }
 
+/// Durée de vie maximale acceptée, en jours.
+///
+/// Dix ans : au-delà, soit on veut un jeton éternel (`0`), soit c'est une faute
+/// de frappe. La borne évite aussi de calculer une date absurde.
+const MAX_DAYS: i64 = 3650;
+
+/// Date d'expiration d'un jeton, à partir d'une durée en jours.
+///
+/// `None`, `0` et les valeurs négatives veulent dire **« n'expire jamais »** :
+/// c'est le cas de tous les jetons créés avant que ce réglage existe, et le
+/// rendre explicite vaut mieux qu'une date par défaut que personne n'attendait.
+///
+pub fn expiry_from_days(days: Option<i64>, now: i64) -> Option<i64> {
+    let jours = days?.clamp(0, MAX_DAYS);
+    (jours > 0).then(|| now + jours * 86_400)
+}
+
 /// Un jeton, tel que l'interface le montre (**jamais** sa valeur).
 #[derive(Debug, Clone, Serialize)]
 pub struct TokenView {
@@ -65,6 +82,8 @@ pub struct TokenView {
     /// `null` tant qu'il n'a jamais servi — c'est le signe qu'un jeton est
     /// oublié, et qu'on peut le révoquer sans rien casser.
     pub last_used_at: Option<i64>,
+    /// `null` = sans expiration.
+    pub expires_at: Option<i64>,
 }
 
 impl From<&db::ApiToken> for TokenView {
@@ -74,6 +93,7 @@ impl From<&db::ApiToken> for TokenView {
             name: token.name.clone(),
             created_at: token.created_at,
             last_used_at: token.last_used_at,
+            expires_at: token.expires_at,
         }
     }
 }
@@ -86,21 +106,30 @@ pub struct CreatedToken {
     pub uuid: String,
     pub name: String,
     pub created_at: i64,
+    /// `null` = sans expiration.
+    pub expires_at: Option<i64>,
 }
 
 /// Demande de création d'un jeton.
 #[derive(Debug, Deserialize)]
 pub struct NewToken {
     pub name: String,
+    /// Durée de vie en jours : `0` (ou absent) = sans expiration.
+    #[serde(default)]
+    pub expires_in_days: Option<i64>,
 }
 
 impl Auth {
     /// Délivre un jeton pour ce compte et renvoie sa valeur en clair, avec la
     /// ligne créée (son UUID est celui que l'interface montrera).
+    ///
+    /// `expires_at` vient de [`expiry_from_days`] : la date est décidée par
+    /// l'appelant, qui seul sait ce que l'utilisateur a demandé.
     pub fn issue_token(
         &self,
         user_uuid: &str,
         name: &str,
+        expires_at: Option<i64>,
     ) -> Result<(String, db::ApiToken), String> {
         let token = new_token();
         let hash = hash(&token);
@@ -108,7 +137,13 @@ impl Auth {
         let name = name.trim().to_string();
         let created = db::now();
 
-        self.db(|conn| db::insert_token(conn, &uuid, user_uuid, &name, &hash))?;
+        self.db(|conn| {
+            // Ménage au passage : un jeton expiré n'a plus rien à faire dans la
+            // liste, et la ligne ne sert plus à rien. C'est le seul moment où
+            // l'occasion se présente sans requête supplémentaire périodique.
+            db::purge_expired_tokens(conn)?;
+            db::insert_token(conn, &uuid, user_uuid, &name, &hash, expires_at)
+        })?;
         Ok((
             token,
             db::ApiToken {
@@ -116,15 +151,15 @@ impl Auth {
                 name,
                 created_at: created,
                 last_used_at: None,
-                expires_at: None,
+                expires_at,
             },
         ))
     }
 
     /// Compte associé à un jeton présenté en `Authorization: Bearer`.
     ///
-    /// Renvoie `None` si le jeton est inconnu, ou si le compte est désactivé —
-    /// couper l'accès à quelqu'un doit arrêter aussi ses agents.
+    /// Renvoie `None` si le jeton est inconnu, **expiré**, ou si le compte est
+    /// désactivé — couper l'accès à quelqu'un doit arrêter aussi ses agents.
     pub fn resolve_token(&self, token: &str) -> Option<db::User> {
         if !self.is_enabled() || token.trim().is_empty() {
             return None;
@@ -133,6 +168,14 @@ impl Auth {
             .db(|conn| db::find_token(conn, &hash(token)))
             .ok()
             .flatten()?;
+
+        // La date fait foi **à chaque appel**, et pas seulement au ménage : une
+        // ligne encore présente (le ménage n'a pas encore tourné) ne doit pas
+        // ouvrir l'accès, sinon la durée de vie dépendrait du hasard du
+        // nettoyage.
+        if ticket.expires_at.is_some_and(|fin| fin <= db::now()) {
+            return None;
+        }
 
         let user = self
             .db(|conn| db::find_by_uuid(conn, &user_uuid))
@@ -170,6 +213,11 @@ pub async fn list(State(state): State<AppState>, caller: AuthUser) -> Response {
 }
 
 /// `POST /tokens` — créer un jeton, avec un nom qui dit à quoi il sert.
+///
+/// `expires_in_days` est facultatif : `0` (ou absent) veut dire « n'expire
+/// jamais ». C'est le choix le plus sûr par défaut — un agent qui s'arrête tout
+/// seul au bout de trois mois sans que personne ne l'ait demandé serait une
+/// surprise désagréable — et l'interface propose les durées usuelles.
 pub async fn create(
     State(state): State<AppState>,
     caller: AuthUser,
@@ -180,7 +228,8 @@ pub async fn create(
         return auth::error(StatusCode::BAD_REQUEST, "name_required");
     }
 
-    match state.auth.issue_token(&caller.0.uuid, name) {
+    let expires_at = expiry_from_days(request.expires_in_days, db::now());
+    match state.auth.issue_token(&caller.0.uuid, name, expires_at) {
         Ok((token, created)) => (
             StatusCode::CREATED,
             Json(CreatedToken {
@@ -188,6 +237,7 @@ pub async fn create(
                 uuid: created.uuid,
                 name: created.name,
                 created_at: created.created_at,
+                expires_at: created.expires_at,
             }),
         )
             .into_response(),
@@ -239,5 +289,54 @@ mod tests {
         assert_eq!(empreinte, hash(&token), "même jeton, même empreinte");
         assert!(!empreinte.contains(PREFIX), "l'empreinte ne dit rien du jeton");
         assert_ne!(empreinte, hash(&new_token()), "deux jetons, deux empreintes");
+    }
+
+    #[test]
+    fn la_duree_de_vie_se_traduit_en_date() {
+        // Absent, zéro ou négatif : le jeton n'expire jamais. C'est le
+        // comportement des jetons créés avant que le réglage existe.
+        assert_eq!(expiry_from_days(None, 1_000), None);
+        assert_eq!(expiry_from_days(Some(0), 1_000), None);
+        assert_eq!(expiry_from_days(Some(-5), 1_000), None);
+
+        assert_eq!(expiry_from_days(Some(1), 1_000), Some(1_000 + 86_400));
+        assert_eq!(expiry_from_days(Some(30), 1_000), Some(1_000 + 30 * 86_400));
+
+        // Plafond : au-delà de dix ans, c'est « jamais » ou une faute de
+        // frappe — et une date absurde ne doit pas être écrite.
+        assert_eq!(
+            expiry_from_days(Some(1_000_000), 1_000),
+            Some(1_000 + MAX_DAYS * 86_400)
+        );
+    }
+
+    #[test]
+    fn un_jeton_expire_ne_vaut_plus_rien() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        auth.db(db::ensure_builtin_roles).unwrap();
+        let user = db::NewUser::new("remi", "remi@exemple.fr", None);
+        auth.db(|conn| db::insert_user(conn, &user)).unwrap();
+
+        // Période passée : le jeton est refusé **même si la ligne est encore
+        // là** (le ménage n'a pas forcément tourné).
+        let (perime, _) = auth
+            .issue_token(&user.uuid, "vieil agent", Some(db::now() - 1))
+            .unwrap();
+        assert!(auth.resolve_token(&perime).is_none());
+
+        // Encore valable, et sans expiration : les deux passent.
+        let (frais, _) = auth
+            .issue_token(&user.uuid, "agent", Some(db::now() + 3_600))
+            .unwrap();
+        assert!(auth.resolve_token(&frais).is_some());
+        let (sans_fin, _) = auth.issue_token(&user.uuid, "éternel", None).unwrap();
+        assert!(auth.resolve_token(&sans_fin).is_some());
+
+        // Le ménage (à la création suivante) emporte la ligne expirée.
+        auth.issue_token(&user.uuid, "suivant", None).unwrap();
+        let restants = auth.tokens_of(&user.uuid).unwrap();
+        assert_eq!(restants.len(), 3, "la ligne expirée est retirée : {restants:?}");
+        assert!(restants.iter().all(|t| t.name != "vieil agent"));
     }
 }

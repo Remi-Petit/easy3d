@@ -44,7 +44,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 356 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 367 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -246,6 +246,12 @@ Code, un script ou une CI) et les révoque d'un clic. La valeur du jeton n'est
 affichée **qu'une fois**, à sa création : le serveur n'en garde qu'une empreinte,
 comme pour un mot de passe. Un jeton se présente ensuite en en-tête
 `Authorization: Bearer e3d_…`, et sa révocation prend effet à l'appel suivant.
+
+Chaque jeton a une **durée de vie** choisie à sa création (`0` = sans
+expiration, c'est le défaut proposé : un agent ne doit pas s'arrêter tout seul
+sans qu'on l'ait demandé). L'échéance est vérifiée **à chaque appel** — un jeton
+périmé vaut un jeton révoqué, même si sa ligne traîne encore en base — et la
+liste affiche la date, en signalant ceux qui arrivent à terme.
 
 ### Connexion par un fournisseur d'identité (SSO)
 
