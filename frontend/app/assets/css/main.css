@@ -1690,7 +1690,9 @@ select.admin__input option {
   cursor: not-allowed;
 }
 
-/* Panneau de résultats : il remplace le catalogue tant que le mode est ouvert. */
+/* Panneau de résultats : il remplace le catalogue tant que le mode est ouvert.
+   C'est un encart, donc il porte lui-même les marges que `.page` applique en
+   padding (il remplace le contenu de la page, pas la page). */
 .ai {
   display: flex;
   flex-direction: column;
@@ -1699,6 +1701,15 @@ select.admin__input option {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+  margin: 4px 24px 48px;
+}
+
+/* Même règle étroite que `.page` — et après la règle de base, sinon la marge
+   desktop l'emporterait à spécificité égale. */
+@media (max-width: 640px) {
+  .ai {
+    margin: 4px 16px 40px;
+  }
 }
 
 .ai__head {
