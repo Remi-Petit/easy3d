@@ -179,6 +179,8 @@ pub struct NewAccount {
 /// `POST /users` — création d'un compte par un administrateur.
 pub async fn create_user(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
     Json(request): Json<NewAccount>,
 ) -> Response {
     let username = request.username.trim().to_string();
@@ -221,11 +223,20 @@ pub async fn create_user(
 
     let user = db::NewUser::new(&username, &email, hash);
     match insert_account(&state.auth, user, &roles, &direct) {
-        Ok(created) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "uuid": created.uuid })),
-        )
-            .into_response(),
+        Ok(created) => {
+            state.auth.log(
+                &headers,
+                "account_created",
+                Some(&caller.0.uuid),
+                &created.username,
+                &created.uuid,
+            );
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "uuid": created.uuid })),
+            )
+                .into_response()
+        }
         Err(e) => conflict_or_internal(&e),
     }
 }
@@ -276,6 +287,8 @@ pub struct UpdateAccount {
 pub async fn update_user(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
     Json(request): Json<UpdateAccount>,
 ) -> Response {
     let Some(target) = (match state.auth.db(|conn| db::find_by_uuid(conn, &uuid)) {
@@ -318,6 +331,10 @@ pub async fn update_user(
         // Une seule connexion, protégée par un `Mutex` : vérifier puis écrire
         // dans le même bloc est donc atomique (aucun autre handler ne peut
         // s'intercaler).
+        //
+        // Au passage, ce qui change est noté : c'est ce que le journal d'audit
+        // écrira (un « compte modifié » sans détail n'apprendrait rien).
+        let mut changes: Vec<&str> = Vec::new();
         let was_admin = db::has_role(conn, &uuid, db::ADMIN_ROLE)? && !target.disabled;
         let stays_admin = roles
             .as_ref()
@@ -330,12 +347,17 @@ pub async fn update_user(
 
         if let (Some(username), Some(email)) = (&request.username, &request.email) {
             db::update_identity(conn, &uuid, username, email)?;
+            changes.push("identity");
         }
         if let Some(hash) = &hash {
             db::set_password_hash(conn, &uuid, hash)?;
+            changes.push("password");
         }
         if let Some(disabled) = request.disabled {
             db::set_disabled(conn, &uuid, disabled)?;
+            // C'est l' information la plus intéressante du journal : couper
+            // l'accès de quelqu'un est un acte, et son contraire aussi.
+            changes.push(if disabled { "disabled" } else { "enabled" });
             if disabled {
                 // Un compte désactivé ne doit plus rien pouvoir : ses sessions
                 // ouvertes cessent immédiatement d'être valables (`session_user`
@@ -345,15 +367,28 @@ pub async fn update_user(
         }
         if let Some(roles) = &roles {
             db::set_user_roles(conn, &uuid, roles)?;
+            changes.push("roles");
         }
         if let Some(direct) = &direct {
             db::set_user_permissions(conn, &uuid, direct)?;
+            changes.push("permissions");
         }
-        Ok(())
+        // Le nom et le détail sortent **de la fermeture** : c'est là que les
+        // changements sont connus, et le journal s'écrit après.
+        Ok((target.username.clone(), changes.join(",")))
     });
 
     match result {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok((nom, detail)) => {
+            state.auth.log(
+                &headers,
+                "account_updated",
+                Some(&caller.0.uuid),
+                &nom,
+                &detail,
+            );
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
         Err(e) => conflict_or_internal(&e),
     }
@@ -363,6 +398,7 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
+    headers: axum::http::HeaderMap,
     caller: AuthUser,
 ) -> Response {
     if caller.0.uuid == uuid {
@@ -373,19 +409,27 @@ pub async fn delete_user(
 
     let result = state.auth.db(|conn| {
         let Some(target) = db::find_by_uuid(conn, &uuid)? else {
-            return Ok(false);
+            return Ok(None);
         };
         if db::has_role(conn, &uuid, db::ADMIN_ROLE)? && !target.disabled && db::count_admins(conn)? <= 1
         {
             return Err("last_admin".to_string());
         }
+        // Le nom est relevé **avant** la suppression : après, il n'existe plus
+        // de quoi écrire une ligne lisible au journal.
+        let nom = target.username.clone();
         db::delete_user(conn, &uuid)?;
-        Ok(true)
+        Ok(Some(nom))
     });
 
     match result {
-        Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(false) => auth::error(StatusCode::NOT_FOUND, "not_found"),
+        Ok(Some(nom)) => {
+            state
+                .auth
+                .log(&headers, "account_deleted", Some(&caller.0.uuid), &nom, &uuid);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Ok(None) => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
         Err(e) => auth::internal(&e),
     }
@@ -444,7 +488,12 @@ pub struct NewRole {
 }
 
 /// `POST /roles` — création (ou clonage) d'un rôle.
-pub async fn create_role(State(state): State<AppState>, Json(request): Json<NewRole>) -> Response {
+pub async fn create_role(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
+    Json(request): Json<NewRole>,
+) -> Response {
     let name = request.name.trim().to_string();
     if name.is_empty() {
         return auth::error(StatusCode::BAD_REQUEST, "name_required");
@@ -471,11 +520,16 @@ pub async fn create_role(State(state): State<AppState>, Json(request): Json<NewR
     });
 
     match result {
-        Ok(uuid) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "uuid": uuid })),
-        )
-            .into_response(),
+        Ok(uuid) => {
+            state
+                .auth
+                .log(&headers, "role_created", Some(&caller.0.uuid), &name, &uuid);
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({ "uuid": uuid })),
+            )
+                .into_response()
+        }
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
         Err(e) => conflict_or_internal(&e),
     }
@@ -493,6 +547,8 @@ pub struct UpdateRole {
 pub async fn update_role(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
     Json(request): Json<UpdateRole>,
 ) -> Response {
     let result = state.auth.db(|conn| {
@@ -518,11 +574,16 @@ pub async fn update_role(
                 .unwrap_or_else(|| role.description.clone());
             db::update_role(conn, &uuid, &name, &description)?;
         }
-        Ok(())
+        Ok(role.name.clone())
     });
 
     match result {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(nom) => {
+            state
+                .auth
+                .log(&headers, "role_updated", Some(&caller.0.uuid), &nom, &uuid);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) if e == "not_found" => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
         Err(e) => conflict_or_internal(&e),
@@ -530,7 +591,12 @@ pub async fn update_role(
 }
 
 /// `DELETE /roles/{uuid}` — supprime un rôle **non livré**.
-pub async fn delete_role(State(state): State<AppState>, Path(uuid): Path<String>) -> Response {
+pub async fn delete_role(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
+) -> Response {
     let result = state.auth.db(|conn| {
         let Some(role) = db::find_role(conn, &uuid)? else {
             return Err("not_found".to_string());
@@ -544,11 +610,16 @@ pub async fn delete_role(State(state): State<AppState>, Path(uuid): Path<String>
         if db::setting(conn, db::DEFAULT_ROLE)?.as_deref() == Some(uuid.as_str()) {
             db::set_setting(conn, db::DEFAULT_ROLE, None)?;
         }
-        Ok(())
+        Ok(role.name.clone())
     });
 
     match result {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(nom) => {
+            state
+                .auth
+                .log(&headers, "role_deleted", Some(&caller.0.uuid), &nom, &uuid);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) if e == "not_found" => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
         Err(e) => auth::internal(&e),
@@ -643,6 +714,13 @@ pub async fn change_password(
     }) {
         return auth::internal(&e);
     }
+    state.auth.log(
+        &headers,
+        "password_changed",
+        Some(&uuid),
+        &caller.0.username,
+        "",
+    );
 
     let token = match state.auth.start_session(&uuid, &headers) {
         Ok(token) => token,

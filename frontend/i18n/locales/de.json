@@ -10,6 +10,7 @@
     "models": "Models",
     "admin": "Administration",
     "accounts": "Konten",
+    "journal": "Audit-Log",
     "account": "Mein Konto"
   },
   "status": {
@@ -379,10 +380,57 @@
       "forbidden": "Dein Konto darf das nicht.",
       "unauthenticated": "Sitzung abgelaufen: bitte erneut anmelden.",
       "not_found": "Token nicht gefunden.",
-      "name_required": "Ein Name ist erforderlich.",
-      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
+      "name_required": "Ein Name ist erforderlich.",      "name_too_long": "Der Name ist zu lang (höchstens 80 Zeichen).",      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
       "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
       "invalid_credentials": "Aktuelles Passwort ist falsch."
+    }
+  },
+  "journal": {
+    "title": "Audit-Log",
+    "hint": "Die letzten Aktionen: Anmeldungen, Ablehnungen, erstellte oder widerrufene Token, Rechteänderungen. Nur lesbar und begrenzt (die ältesten Einträge fallen weg).",
+    "empty": "Nichts zu melden.",
+    "days": "{count} Tage",
+    "neverExpires": "kein Ablauf",
+    "errors": {
+      "load": "Das Log konnte nicht gelesen werden."
+    },
+    "kind": {
+      "login_ok": "Anmeldung",
+      "login_failed": "Anmeldung abgelehnt",
+      "login_blocked": "Anmeldung blockiert",
+      "logout": "Abmeldung",
+      "password_changed": "Passwort geändert",
+      "sso_login": "SSO-Anmeldung",
+      "sso_refused": "SSO abgelehnt",
+      "token_created": "Token erstellt",
+      "token_revoked": "Token widerrufen",
+      "account_created": "Konto erstellt",
+      "account_updated": "Konto geändert",
+      "account_deleted": "Konto gelöscht",
+      "role_created": "Rolle erstellt",
+      "role_updated": "Rolle geändert",
+      "role_deleted": "Rolle gelöscht"
+    },
+    "detail": {
+      "password": "mit Passwort",
+      "invalid_credentials": "Benutzername oder Passwort falsch",
+      "rate_limited": "zu viele Versuche",
+      "auto": "automatisch angelegt",
+      "manual": "vorbereitetes Konto",
+      "approval": "noch freizugeben",
+      "oidc_no_email": "der Anbieter liefert keine E-Mail-Adresse",
+      "oidc_not_provisioned": "kein passendes Konto",
+      "oidc_conflict": "bereits mit einer anderen Identität verknüpft",
+      "pending_approval": "wartet auf Freigabe",
+      "account_disabled": "Konto deaktiviert"
+    },
+    "change": {
+      "identity": "Identität",
+      "password": "Passwort",
+      "disabled": "deaktiviert",
+      "enabled": "reaktiviert",
+      "roles": "Rollen",
+      "permissions": "Rechte"
     }
   },
   "accounts": {

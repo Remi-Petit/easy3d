@@ -10,6 +10,7 @@
     "models": "Models",
     "admin": "Administración",
     "accounts": "Cuentas",
+    "journal": "Registro",
     "account": "Mi cuenta"
   },
   "status": {
@@ -379,10 +380,57 @@
       "forbidden": "Tu cuenta no tiene permiso para eso.",
       "unauthenticated": "Sesión caducada: vuelve a entrar.",
       "not_found": "Clave no encontrada.",
-      "name_required": "El nombre es obligatorio.",
-      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
+      "name_required": "El nombre es obligatorio.",      "name_too_long": "El nombre es demasiado largo (80 caracteres como máximo).",      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
       "invalid_credentials": "La contraseña actual es incorrecta."
+    }
+  },
+  "journal": {
+    "title": "Registro de auditoría",
+    "hint": "Las últimas acciones: conexiones, rechazos, claves creadas o revocadas, cambios de permisos. Solo lectura y acotado (las entradas más antiguas se descartan).",
+    "empty": "Nada que señalar.",
+    "days": "{count} días",
+    "neverExpires": "sin caducidad",
+    "errors": {
+      "load": "No se pudo leer el registro."
+    },
+    "kind": {
+      "login_ok": "Conexión",
+      "login_failed": "Conexión rechazada",
+      "login_blocked": "Conexión bloqueada",
+      "logout": "Desconexión",
+      "password_changed": "Contraseña cambiada",
+      "sso_login": "Conexión SSO",
+      "sso_refused": "SSO rechazado",
+      "token_created": "Clave creada",
+      "token_revoked": "Clave revocada",
+      "account_created": "Cuenta creada",
+      "account_updated": "Cuenta modificada",
+      "account_deleted": "Cuenta eliminada",
+      "role_created": "Rol creado",
+      "role_updated": "Rol modificado",
+      "role_deleted": "Rol eliminado"
+    },
+    "detail": {
+      "password": "con contraseña",
+      "invalid_credentials": "usuario o contraseña incorrectos",
+      "rate_limited": "demasiados intentos",
+      "auto": "creada al vuelo",
+      "manual": "cuenta preparada",
+      "approval": "pendiente de validación",
+      "oidc_no_email": "el proveedor no envía correo",
+      "oidc_not_provisioned": "ninguna cuenta corresponde",
+      "oidc_conflict": "ya vinculada a otra identidad",
+      "pending_approval": "esperando validación",
+      "account_disabled": "cuenta desactivada"
+    },
+    "change": {
+      "identity": "identidad",
+      "password": "contraseña",
+      "disabled": "desactivada",
+      "enabled": "reactivada",
+      "roles": "roles",
+      "permissions": "permisos"
     }
   },
   "accounts": {

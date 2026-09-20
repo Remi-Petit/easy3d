@@ -40,7 +40,7 @@ pub const ADMIN_ROLE: &str = "0199e3d0-0000-7000-8000-000000000001";
 pub const READER_ROLE: &str = "0199e3d0-0000-7000-8000-000000000002";
 
 /// Version du schéma. À incrémenter en ajoutant une table ou une colonne.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Schéma initial (v1).
 const SCHEMA_V1: &str = r#"
@@ -119,6 +119,35 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 "#;
 
+/// Schéma v2 : **journal d'audit**.
+///
+/// Qui a fait quoi, et quand : les connexions (réussies, refusées, bloquées),
+/// les jetons créés ou révoqués, et les changements de droits. C'est ce qu'on
+/// cherche le jour où un accès surprend — un serveur qui ne garde que des
+/// traces de console n'a rien à montrer.
+///
+/// Ce qui n'y est **pas**, volontairement : ni les valeurs de jeton (jamais
+/// stockées en clair), ni le détail du catalogue consulté (bruit inutile).
+const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS auth_events (
+    uuid       TEXT PRIMARY KEY,
+    at         INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    -- Qui agit : NULL quand il n'y a pas de compte (connexion refusée) ou que
+    -- l'acteur a disparu depuis.
+    actor_uuid TEXT,
+    -- Sur quoi / sur qui : identifiant essayé, compte visé, nom de rôle…
+    subject    TEXT NOT NULL DEFAULT '',
+    -- Précision courte et **stable** (code d'erreur), traduite par l'interface.
+    detail     TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS auth_events_at ON auth_events(at DESC);
+CREATE INDEX IF NOT EXISTS auth_events_actor ON auth_events(actor_uuid);
+"#;
+
 /// Horodatage courant, en secondes depuis l'époque.
 ///
 /// Les dates sont stockées en entier (et non en texte ISO) : les comparaisons
@@ -169,19 +198,25 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     }
 
     // Ré-exécutable sans risque (`IF NOT EXISTS`) : une interruption au milieu
-    // de la première migration laisse la base dans un état qui se rattrape au
-    // démarrage suivant.
-    conn.execute_batch(SCHEMA_V1).map_err(err)?;
+    // d'une migration laisse la base dans un état qui se rattrape au démarrage
+    // suivant.
+    if version < 1 {
+        conn.execute_batch(SCHEMA_V1).map_err(err)?;
+
+        // Une installation neuve part avec `lecteur` comme rôle par défaut : un
+        // compte créé sans rôle explicite (par l'administrateur ou par OIDC)
+        // sait alors consulter le catalogue, au lieu d'arriver sans aucun droit
+        // et sans explication. Le remplissage est **ici**, dans la migration, et
+        // non à chaque démarrage : un administrateur qui remet le réglage à
+        // « aucun » ne doit pas le voir ressusciter au redémarrage suivant.
+        set_setting(conn, DEFAULT_ROLE, Some(READER_ROLE))?;
+    }
+    if version < 2 {
+        conn.execute_batch(SCHEMA_V2).map_err(err)?;
+    }
+
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(err)?;
-
-    // Une installation neuve part avec `lecteur` comme rôle par défaut : un
-    // compte créé sans rôle explicite (par l'administrateur ou par OIDC) sait
-    // alors consulter le catalogue, au lieu d'arriver sans aucun droit et sans
-    // explication. Le remplissage est **ici**, dans la migration, et non à
-    // chaque démarrage : un administrateur qui remet le réglage à « aucun » ne
-    // doit pas le voir ressusciter au redémarrage suivant.
-    set_setting(conn, DEFAULT_ROLE, Some(READER_ROLE))?;
     Ok(())
 }
 
@@ -894,6 +929,110 @@ pub fn purge_expired_tokens(conn: &Connection) -> Result<usize, String> {
     .map_err(err)
 }
 
+// ── Journal d'audit ────────────────────────────────────────────────────
+
+/// Nombre d'événements conservés (garde-fou d'écriture).
+///
+/// Assez pour retrouver « qui s'est connecté la semaine dernière » sur une
+/// petite installation, assez peu pour que le fichier reste modeste. Au-delà,
+/// les plus anciens partent : un journal sans borne finirait par peser plus
+/// lourd que les comptes eux-mêmes.
+const MAX_EVENTS: i64 = 5000;
+
+/// Un événement du journal, tel qu'il est stocké.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthEvent {
+    pub uuid: String,
+    pub at: i64,
+    /// Code stable (`login_ok`, `token_created`…) — l'interface traduit.
+    pub kind: String,
+    pub actor_uuid: Option<String>,
+    /// Identifiant essayé, compte visé, nom de rôle…
+    pub subject: String,
+    /// Précision courte : code d'erreur, mode de provisionnement…
+    pub detail: String,
+    pub ip: String,
+    pub user_agent: String,
+}
+
+const EVENT_COLUMNS: &str = "uuid, at, kind, actor_uuid, subject, detail, ip, user_agent";
+
+fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthEvent> {
+    Ok(AuthEvent {
+        uuid: row.get(0)?,
+        at: row.get(1)?,
+        kind: row.get(2)?,
+        actor_uuid: row.get(3)?,
+        subject: row.get(4)?,
+        detail: row.get(5)?,
+        ip: row.get(6)?,
+        user_agent: row.get(7)?,
+    })
+}
+
+/// Écrit un événement, et écarte les plus anciens si le journal est plein.
+///
+/// L'écriture ne doit **jamais** faire échouer l'action qu'elle raconte : un
+/// journal est un témoin, pas une condition. Les appelants ignorent donc le
+/// résultat (`let _ = …`), et une erreur ici se contente d'un avertissement.
+///
+/// ⚠️ Les dates sont en **secondes**, comme partout ailleurs : deux événements de
+/// la même seconde peuvent donc revenir dans n'importe quel ordre entre eux.
+/// C'est sans conséquence pour ce qu'on vient y chercher (qui, quoi, quand), et
+/// cela évite une colonne de plus pour un ordre que personne ne lit.
+pub fn log_event(
+    conn: &Connection,
+    kind: &str,
+    actor_uuid: Option<&str>,
+    subject: &str,
+    detail: &str,
+    ip: &str,
+    user_agent: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO auth_events (uuid, at, kind, actor_uuid, subject, detail, ip, user_agent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            uuid::Uuid::now_v7().to_string(),
+            now(),
+            kind,
+            actor_uuid,
+            subject,
+            detail,
+            ip,
+            user_agent
+        ],
+    )
+    .map_err(err)?;
+
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM auth_events", [], |row| row.get(0))
+        .map_err(err)?;
+    if total > MAX_EVENTS {
+        conn.execute(
+            "DELETE FROM auth_events WHERE uuid IN (
+                 SELECT uuid FROM auth_events ORDER BY at ASC, uuid ASC LIMIT ?1
+             )",
+            params![total - MAX_EVENTS],
+        )
+        .map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Derniers événements, du plus récent au plus ancien.
+pub fn list_events(conn: &Connection, limit: i64) -> Result<Vec<AuthEvent>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {EVENT_COLUMNS} FROM auth_events ORDER BY at DESC, uuid DESC LIMIT ?1"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![limit.clamp(1, 500)], row_to_event)
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,5 +1177,77 @@ mod tests {
     fn le_chemin_par_defaut_est_a_cote_de_la_configuration() {
         let path = default_path(Path::new("/config/config.yml"));
         assert_eq!(path, PathBuf::from("/config/easy3d.db"));
+    }
+
+    #[test]
+    fn le_journal_rend_les_evenements_du_plus_recent_au_plus_ancien() {
+        let (_dir, conn) = base();
+        log_event(
+            &conn,
+            "login_failed",
+            None,
+            "inconnu",
+            "invalid_credentials",
+            "10.0.0.1",
+            "curl",
+        )
+        .unwrap();
+        log_event(&conn, "login_ok", Some("u-1"), "remi", "password", "10.0.0.1", "firefox")
+            .unwrap();
+        log_event(&conn, "token_created", Some("u-1"), "ci", "30", "", "").unwrap();
+
+        let events = list_events(&conn, 10).unwrap();
+        assert_eq!(events.len(), 3);
+        // Le plus récent d'abord : c'est ce qu'on vient lire.
+        assert_eq!(events[0].kind, "token_created");
+        assert_eq!(events[2].kind, "login_failed");
+        assert_eq!(events[0].actor_uuid.as_deref(), Some("u-1"));
+        assert_eq!(events[0].subject, "ci");
+        assert_eq!(events[0].detail, "30");
+        // Une tentative refusée n'a pas d'acteur : elle dit **qui a été essayé**.
+        assert_eq!(events[2].actor_uuid, None);
+        assert_eq!(events[2].subject, "inconnu");
+        assert_eq!(events[2].ip, "10.0.0.1");
+
+        // La lecture reste bornée : on ne demande jamais « tout le journal ».
+        assert_eq!(list_events(&conn, 5000).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn le_journal_ne_grandit_pas_sans_fin() {
+        let (_dir, conn) = base();
+        // Une rafale de tentatives ratées, dans **une** transaction : c'est ce
+        // que produirait une attaque, et le journal doit rester borné.
+        conn.execute("BEGIN", []).unwrap();
+        for i in 0..(MAX_EVENTS + 5) {
+            log_event(&conn, "login_failed", None, &format!("tentative {i}"), "", "", "")
+                .unwrap();
+        }
+        conn.execute("COMMIT", []).unwrap();
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM auth_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(total, MAX_EVENTS, "le journal est plafonné");
+
+        // Les plus anciens sont partis, les derniers sont là. L'ordre **entre**
+        // événements de la même seconde n'est pas garanti : on ne teste donc que
+        // l'appartenance.
+        let gardes = list_events(&conn, 500).unwrap();
+        assert!(
+            gardes
+                .iter()
+                .any(|e| e.subject == format!("tentative {}", MAX_EVENTS + 4))
+        );
+        assert!(gardes.iter().all(|e| e.subject != "tentative 0"));
+    }
+
+    #[test]
+    fn un_evenement_rate_n_empeche_pas_l_action() {
+        let (_dir, conn) = base();
+        // Table absente (base d'avant la v2) : l'appelant ignore l'échec, et
+        // l'action racontée continue. C'est le contrat de `log_event`.
+        conn.execute("DROP TABLE auth_events", []).unwrap();
+        assert!(log_event(&conn, "login_ok", Some("u"), "remi", "", "", "").is_err());
     }
 }

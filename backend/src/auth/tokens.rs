@@ -56,6 +56,13 @@ pub fn new_token() -> String {
     )
 }
 
+/// Longueur maximale d'un nom de jeton.
+///
+/// Le nom sert à se reconnaître (« CI », « portable ») : au-delà de quelques
+/// mots, c'est une note qu'on écrit ailleurs. La borne évite qu'un texte
+/// arbitrairement long se retrouve stocké, listé et affiché.
+pub const NAME_MAX: usize = 80;
+
 /// Durée de vie maximale acceptée, en jours.
 ///
 /// Dix ans : au-delà, soit on veut un jeton éternel (`0`), soit c'est une faute
@@ -221,26 +228,43 @@ pub async fn list(State(state): State<AppState>, caller: AuthUser) -> Response {
 pub async fn create(
     State(state): State<AppState>,
     caller: AuthUser,
+    headers: axum::http::HeaderMap,
     Json(request): Json<NewToken>,
 ) -> Response {
     let name = request.name.trim();
     if name.is_empty() {
         return auth::error(StatusCode::BAD_REQUEST, "name_required");
     }
+    // Compté en **caractères** (et non en octets) : la limite doit dire la même
+    // chose pour un nom accentué et pour un nom ASCII.
+    if name.chars().count() > NAME_MAX {
+        return auth::error(StatusCode::BAD_REQUEST, "name_too_long");
+    }
 
     let expires_at = expiry_from_days(request.expires_in_days, db::now());
     match state.auth.issue_token(&caller.0.uuid, name, expires_at) {
-        Ok((token, created)) => (
-            StatusCode::CREATED,
-            Json(CreatedToken {
-                token,
-                uuid: created.uuid,
-                name: created.name,
-                created_at: created.created_at,
-                expires_at: created.expires_at,
-            }),
-        )
-            .into_response(),
+        Ok((token, created)) => {
+            // Le nom du jeton, jamais le jeton : le journal n'a pas à devenir un
+            // second endroit où un secret dort.
+            state.auth.log(
+                &headers,
+                "token_created",
+                Some(&caller.0.uuid),
+                name,
+                &request.expires_in_days.unwrap_or(0).clamp(0, u32::MAX as i64).to_string(),
+            );
+            (
+                StatusCode::CREATED,
+                Json(CreatedToken {
+                    token,
+                    uuid: created.uuid,
+                    name: created.name,
+                    created_at: created.created_at,
+                    expires_at: created.expires_at,
+                }),
+            )
+                .into_response()
+        }
         Err(e) => auth::internal(&e),
     }
 }
@@ -249,10 +273,16 @@ pub async fn create(
 pub async fn revoke(
     State(state): State<AppState>,
     caller: AuthUser,
+    headers: axum::http::HeaderMap,
     Path(uuid): Path<String>,
 ) -> Response {
     match state.auth.revoke_token(&caller.0.uuid, &uuid) {
-        Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(true) => {
+            state
+                .auth
+                .log(&headers, "token_revoked", Some(&caller.0.uuid), &uuid, "");
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Ok(false) => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) => auth::internal(&e),
     }

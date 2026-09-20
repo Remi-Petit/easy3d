@@ -312,7 +312,11 @@ pub fn routes(state: AppState) -> Router {
         .route("/tokens/{uuid}", axum::routing::delete(auth::tokens::revoke));
 
     let accounts_read = gated(
-        Router::new().route("/users", get(auth::rbac::list_users)),
+        Router::new()
+            .route("/users", get(auth::rbac::list_users))
+            // Le journal d'audit se lit avec les comptes : c'est le même sujet,
+            // et il ne doit pas être lisible par un simple lecteur du catalogue.
+            .route("/journal", get(auth::journal::list)),
         &state,
         auth::permissions::USERS_READ,
     );
@@ -4061,5 +4065,240 @@ mod tests {
 
         let v = body_json(get_with(&app, "/auth/me", None).await).await;
         assert_eq!(v["oidc"]["label"], "env.exemple.fr");
+    }
+
+    // ── Journal d'audit ─────────────────────────────────────────────────────
+
+    /// Événements du journal, du plus récent au plus ancien.
+    async fn journal(app: &Router, cookie: &str) -> Vec<serde_json::Value> {
+        body_json(get_with(app, "/journal", Some(cookie)).await)
+            .await
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    /// Le premier événement de ce type, ou une panne explicite.
+    fn evenement<'a>(events: &'a [serde_json::Value], kind: &str) -> &'a serde_json::Value {
+        events
+            .iter()
+            .find(|e| e["kind"] == kind)
+            .unwrap_or_else(|| panic!("aucun événement « {kind} » dans {events:#?}"))
+    }
+
+    /// L'identifiant d'un compte, par son nom (`/users`).
+    async fn compte_uuid(app: &Router, cookie: &str, username: &str) -> String {
+        let v = body_json(get_with(app, "/users", Some(cookie)).await).await;
+        v["users"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|user| user["username"] == username)
+            .unwrap_or_else(|| panic!("compte « {username} » absent"))["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn le_journal_retient_les_connexions_et_les_refus() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        // Refus : l'identifiant **essayé** est noté, même s'il n'existe pas — et
+        // l'événement n'a pas d'acteur, puisque personne n'est entré.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "inconnu", "password": "peu-importe" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let events = journal(&app, &admin).await;
+
+        let refus = evenement(&events, "login_failed");
+        assert_eq!(refus["subject"], "inconnu");
+        assert_eq!(refus["detail"], "invalid_credentials");
+        assert!(refus["actor"].is_null(), "{refus}");
+
+        let ok = evenement(&events, "login_ok");
+        assert_eq!(ok["actor"], "remi");
+        assert_eq!(ok["subject"], "remi");
+        assert_eq!(ok["detail"], "password");
+
+        // Déconnexion : elle laisse sa trace, puis on rouvre une session pour
+        // pouvoir relire le journal.
+        assert_eq!(
+            post_json(&app, "/auth/logout", serde_json::json!({}), Some(&admin))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        assert!(evenement(&journal(&app, &admin).await, "logout")["actor"] == "remi");
+    }
+
+    #[tokio::test]
+    async fn le_journal_demande_le_droit_de_voir_les_comptes() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        assert_eq!(
+            cree_compte(&app, &admin, "lecteur", vec![lecteur]).await.status(),
+            StatusCode::CREATED
+        );
+
+        // Un lecteur du catalogue n'a rien à faire dans un journal de sécurité.
+        let cookie = connecte(&app, "lecteur", "motdepasse").await;
+        let res = get_with(&app, "/journal", Some(&cookie)).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(body_text(res).await, "forbidden");
+
+        // Et sans session, rien du tout.
+        assert_eq!(
+            get_with(&app, "/journal", None).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn le_journal_retient_les_jetons_et_les_changements_de_droits() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        assert_eq!(
+            post_json(
+                &app,
+                "/roles",
+                serde_json::json!({ "name": "imprimeur", "permissions": ["catalog.read"] }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::CREATED
+        );
+        let role = role_uuid(&app, &admin, "imprimeur").await;
+        assert_eq!(
+            cree_compte(&app, &admin, "imprimeur", vec![role.clone()]).await.status(),
+            StatusCode::CREATED
+        );
+        let compte = compte_uuid(&app, &admin, "imprimeur").await;
+        assert_eq!(
+            put_json(
+                &app,
+                &format!("/users/{compte}"),
+                serde_json::json!({ "disabled": true }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        let jeton = cree_jeton(&app, &admin, "ci").await;
+        let uuid = body_json(get_with(&app, "/tokens", Some(&admin)).await).await[0]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            delete_with(&app, &format!("/tokens/{uuid}"), Some(&admin))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+
+        let events = journal(&app, &admin).await;
+        assert_eq!(evenement(&events, "role_created")["subject"], "imprimeur");
+        assert_eq!(evenement(&events, "account_created")["subject"], "imprimeur");
+
+        // Ce qui a changé est écrit : « compte modifié » tout court
+        // n'apprendrait rien.
+        let maj = evenement(&events, "account_updated");
+        assert_eq!(maj["subject"], "imprimeur");
+        assert_eq!(maj["detail"], "disabled");
+
+        assert_eq!(evenement(&events, "token_created")["subject"], "ci");
+        assert_eq!(
+            evenement(&events, "token_revoked")["subject"].as_str(),
+            Some(uuid.as_str())
+        );
+
+        // ⚠️ Le contrôle qui compte : **aucun** événement ne contient la valeur
+        // d'un jeton. Le journal est un témoin, pas un second endroit où un
+        // secret dort.
+        let brut = serde_json::to_string(&events).unwrap();
+        assert!(!brut.contains("e3d_"), "{brut}");
+        let _ = jeton;
+    }
+
+    #[tokio::test]
+    async fn un_nom_de_jeton_est_borne_a_quatre_vingts_caracteres() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "a".repeat(81) }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "name_too_long");
+
+        // 80 exactement : accepté (la borne est inclusive), et compté en
+        // **caractères** — 80 accents passent aussi.
+        for nom in ["a".repeat(80), "é".repeat(80)] {
+            let res = post_json(
+                &app,
+                "/tokens",
+                serde_json::json!({ "name": nom }),
+                Some(&admin),
+            )
+            .await;
+            assert_eq!(res.status(), StatusCode::CREATED, "nom de 80 caractères");
+        }
+    }
+
+    #[tokio::test]
+    async fn un_jeton_peut_avoir_une_duree_de_vie() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "ci", "expires_in_days": 30 }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let v = body_json(res).await;
+        let fin = v["expires_at"].as_i64().expect("date d'expiration");
+        let attendu = auth::db::now() + 30 * 86_400;
+        assert!(
+            (fin - attendu).abs() < 60,
+            "expiration à {fin}, attendue vers {attendu}"
+        );
+
+        // Sans durée (ou à zéro) : pas de date, donc pas d'expiration.
+        for corps in [
+            serde_json::json!({ "name": "eternel" }),
+            serde_json::json!({ "name": "eternel-zero", "expires_in_days": 0 }),
+        ] {
+            let v = body_json(post_json(&app, "/tokens", corps, Some(&admin)).await).await;
+            assert!(v["expires_at"].is_null(), "{v}");
+        }
+
+        // Le journal note la durée **demandée** (0 = sans expiration) : on
+        // cherche l'événement du jeton de 30 jours, pas le dernier écrit.
+        let events = journal(&app, &admin).await;
+        let creation = events
+            .iter()
+            .find(|e| e["kind"] == "token_created" && e["subject"] == "ci")
+            .unwrap_or_else(|| panic!("création du jeton « ci » absente : {events:#?}"));
+        assert_eq!(creation["detail"], "30");
     }
 }

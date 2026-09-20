@@ -10,6 +10,7 @@
     "models": "Models",
     "admin": "Administration",
     "accounts": "Accounts",
+    "journal": "Audit log",
     "account": "My account"
   },
   "status": {
@@ -380,9 +381,58 @@
       "unauthenticated": "Session expired: sign in again.",
       "not_found": "Token not found.",
       "name_required": "A name is required.",
+      "name_too_long": "The name is too long (80 characters maximum).",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
       "invalid_credentials": "Wrong current password."
+    }
+  },
+  "journal": {
+    "title": "Audit log",
+    "hint": "The latest actions: sign-ins, refusals, tokens created or revoked, permission changes. Read-only, and bounded (the oldest entries are dropped).",
+    "empty": "Nothing to report.",
+    "days": "{count} days",
+    "neverExpires": "no expiry",
+    "errors": {
+      "load": "Could not read the log."
+    },
+    "kind": {
+      "login_ok": "Sign-in",
+      "login_failed": "Sign-in refused",
+      "login_blocked": "Sign-in blocked",
+      "logout": "Sign-out",
+      "password_changed": "Password changed",
+      "sso_login": "SSO sign-in",
+      "sso_refused": "SSO refused",
+      "token_created": "Token created",
+      "token_revoked": "Token revoked",
+      "account_created": "Account created",
+      "account_updated": "Account updated",
+      "account_deleted": "Account deleted",
+      "role_created": "Role created",
+      "role_updated": "Role updated",
+      "role_deleted": "Role deleted"
+    },
+    "detail": {
+      "password": "with a password",
+      "invalid_credentials": "wrong username or password",
+      "rate_limited": "too many attempts",
+      "auto": "created on the fly",
+      "manual": "prepared account",
+      "approval": "awaiting approval",
+      "oidc_no_email": "the provider sends no e-mail address",
+      "oidc_not_provisioned": "no matching account",
+      "oidc_conflict": "already linked to another identity",
+      "pending_approval": "waiting for approval",
+      "account_disabled": "account disabled"
+    },
+    "change": {
+      "identity": "identity",
+      "password": "password",
+      "disabled": "disabled",
+      "enabled": "re-enabled",
+      "roles": "roles",
+      "permissions": "permissions"
     }
   },
   "accounts": {

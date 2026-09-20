@@ -1,5 +1,6 @@
 import { createError, proxyRequest, type H3Event, getQuery } from 'h3'
 import { useRuntimeConfig } from '#imports'
+import { callerHeaders } from '../../../utils/backend'
 
 /**
  * Retour du fournisseur d'identité : le backend échange le code, rattache le
@@ -25,6 +26,7 @@ export default defineEventHandler(async (event: H3Event) => {
 
   try {
     return await proxyRequest(event, url.toString(), {
+      headers: callerHeaders(event),
       fetchOptions: { redirect: 'manual' },
     })
   } catch (err: any) {

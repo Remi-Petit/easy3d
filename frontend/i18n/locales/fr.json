@@ -10,6 +10,7 @@
     "models": "Models",
     "admin": "Administration",
     "accounts": "Comptes",
+    "journal": "Journal",
     "account": "Mon compte"
   },
   "status": {
@@ -380,9 +381,58 @@
       "unauthenticated": "Session expirée : reconnectez-vous.",
       "not_found": "Jeton introuvable.",
       "name_required": "Le nom est obligatoire.",
+      "name_too_long": "Le nom est trop long (80 caractères maximum).",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
       "invalid_credentials": "Mot de passe actuel incorrect."
+    }
+  },
+  "journal": {
+    "title": "Journal d’audit",
+    "hint": "Les dernières actions : connexions, refus, jetons créés ou révoqués, changements de droits. En lecture seule, et borné (les plus anciens partent).",
+    "empty": "Rien à signaler.",
+    "days": "{count} jours",
+    "neverExpires": "sans expiration",
+    "errors": {
+      "load": "Lecture du journal impossible."
+    },
+    "kind": {
+      "login_ok": "Connexion",
+      "login_failed": "Connexion refusée",
+      "login_blocked": "Connexion bloquée",
+      "logout": "Déconnexion",
+      "password_changed": "Mot de passe changé",
+      "sso_login": "Connexion SSO",
+      "sso_refused": "SSO refusé",
+      "token_created": "Jeton créé",
+      "token_revoked": "Jeton révoqué",
+      "account_created": "Compte créé",
+      "account_updated": "Compte modifié",
+      "account_deleted": "Compte supprimé",
+      "role_created": "Rôle créé",
+      "role_updated": "Rôle modifié",
+      "role_deleted": "Rôle supprimé"
+    },
+    "detail": {
+      "password": "par mot de passe",
+      "invalid_credentials": "identifiant ou mot de passe incorrect",
+      "rate_limited": "trop de tentatives",
+      "auto": "création automatique",
+      "manual": "compte préparé",
+      "approval": "à valider",
+      "oidc_no_email": "le fournisseur ne donne pas d’adresse e-mail",
+      "oidc_not_provisioned": "aucun compte correspondant",
+      "oidc_conflict": "déjà rattaché à une autre identité",
+      "pending_approval": "en attente de validation",
+      "account_disabled": "compte désactivé"
+    },
+    "change": {
+      "identity": "identité",
+      "password": "mot de passe",
+      "disabled": "désactivé",
+      "enabled": "réactivé",
+      "roles": "rôles",
+      "permissions": "droits"
     }
   },
   "accounts": {
