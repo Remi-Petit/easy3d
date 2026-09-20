@@ -29,6 +29,10 @@ services:
       # dossier est sur un montage virtualisé ou réseau
       # (`config::watch_poll_recommendation`).
       - ./models:/models
+      # Configuration : `config.yml` (réécrit par /admin) et `ai-presets.yml`,
+      # les adresses connues des fournisseurs d'IA — relu à chaud lui aussi.
+      # Pour les éditer dans un éditeur plutôt que dans le navigateur, remplacer
+      # ce volume par un montage de dossier (`- ./config:/config`).
       - easy3d-config:/config # configuration, réécrite par la page /admin
 
 volumes:

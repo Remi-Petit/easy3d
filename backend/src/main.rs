@@ -1,7 +1,7 @@
-use easy3d::{api, config, formats, thumbnail, watcher};
+use easy3d::{ai, api, config, formats, thumbnail, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -17,6 +17,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Charge la configuration YAML (mode d'affichage, dossier des modèles…).
     let config = config::Config::load();
+
+    // Adresses connues des fournisseurs d'IA (`ai-presets.yml`, à côté de la
+    // config) : un fichier **à part**, que l'on édite à la main et qui est relu
+    // à chaud — c'est de la donnée, pas du code (voir `ai::presets`).
+    let presets_path = ai::presets::path();
+    match ai::presets::ensure_file(&presets_path) {
+        Ok(true) => println!("Adresses connues créées : {}", presets_path.display()),
+        Ok(false) => {}
+        Err(e) => eprintln!("⚠️  {} non créé : {e}", presets_path.display()),
+    }
+    let presets = match ai::presets::load(&presets_path) {
+        Ok(presets) => presets,
+        Err(e) => {
+            eprintln!("⚠️  {e} — les adresses livrées sont utilisées.");
+            ai::presets::defaults()
+        }
+    };
+    warn_unknown(&presets_path, &presets);
+    println!(
+        "Adresses connues des fournisseurs : {} (relu à chaud).",
+        presets_path.display()
+    );
 
     // Chemin du fichier de config, résolu une fois (surveillé ensuite à chaud).
     // Canonicalisé quand possible : les chemins d'événements du watcher sont
@@ -53,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
 
-    let state = api::AppState::new(root.clone(), ws_tx, config);
+    let state = api::AppState::new(root.clone(), ws_tx, config).with_presets(presets);
 
     // API → tâche async sur le pool Tokio (multi-thread).
     let server = tokio::spawn({
@@ -72,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn({
         let state = state.clone();
         move || {
-            if let Err(e) = watch_dir(root, config_path, state) {
+            if let Err(e) = watch_dir(root, config_path, presets_path, state) {
                 eprintln!("Erreur watcher : {e}");
             }
         }
@@ -84,19 +106,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Surveille le dossier des modèles **et** le fichier de configuration.
+/// Signale les identifiants de fournisseurs présents dans le fichier mais
+/// inconnus du binaire : une faute de frappe dans une clé ne se voit autrement
+/// nulle part (l'entrée est simplement ignorée).
+fn warn_unknown(path: &Path, presets: &ai::presets::Presets) {
+    for id in ai::presets::unknown(presets) {
+        eprintln!(
+            "⚠️  {} : fournisseur inconnu « {id} » (connus : {}). Entrée ignorée.",
+            path.display(),
+            ai::presets::known_ids().join(", ")
+        );
+    }
+}
+
+/// Relit le fichier des adresses s'il a bougé, et l'installe dans l'état.
+///
+/// Retourne `true` si les adresses ont changé (le frontend est alors
+/// rediffusé). Un fichier illisible — c'est le cas normal pendant qu'on
+/// l'édite — **conserve** les adresses en cours : une faute de frappe ne doit
+/// pas vider les puces de l'interface.
+fn reload_presets(
+    state: &api::AppState,
+    reloader: &mut ai::presets::Reloader,
+    path: &Path,
+) -> bool {
+    match reloader.poll() {
+        ai::presets::Reload::Unchanged => false,
+        ai::presets::Reload::Changed(presets) => {
+            warn_unknown(path, &presets);
+            *state.presets.write().unwrap() = presets;
+            println!("Adresses connues rechargées ({}).", path.display());
+            true
+        }
+        ai::presets::Reload::Invalid(e) => {
+            eprintln!("⚠️  {e} — adresses précédentes conservées.");
+            false
+        }
+    }
+}
+
+/// Surveille le dossier des modèles **et** les fichiers de configuration.
 ///
 /// - Changement dans les modèles → aperçus mis à jour + nouvelle liste diffusée.
 /// - Changement de la config → rechargée à chaud (mode d'affichage, dossier des
 ///   modèles). Si `models_root` change, la surveillance bascule sur le nouveau
-///   dossier. Dans tous les cas, un snapshot complet est diffusé aux clients WS
-///   pour rafraîchir le frontend sans recharger la page.
+///   dossier.
+/// - Changement des adresses connues (`ai-presets.yml`) → relues à chaud.
+///
+/// Dans tous les cas, un snapshot complet est diffusé aux clients WS pour
+/// rafraîchir le frontend sans recharger la page.
 fn watch_dir(
     models_root: PathBuf,
     config_path: PathBuf,
+    presets_path: PathBuf,
     state: api::AppState,
 ) -> notify::Result<()> {
     let (tx, rx) = channel();
+    // Suit le fichier des adresses : rien à relire tant que son empreinte n'a
+    // pas bougé (voir `ai::presets::Reloader`).
+    let mut presets = ai::presets::Reloader::new(&presets_path);
 
     // notify-debouncer-full regroupe la rafale d'événements et n'émet qu'un
     // résultat stable après le timeout (50ms = quasi instantané).
@@ -190,6 +258,13 @@ fn watch_dir(
                 if api::refresh_if_changed(&state) {
                     println!("Re-scan périodique : le catalogue a changé, liste rediffusée.");
                 }
+                // Les adresses connues aussi, mais pour une autre raison : un
+                // montage virtualisé (Docker Desktop) ne signale **pas** une
+                // modification faite depuis l'hôte, et c'est justement le cas
+                // de ce fichier — on le relit donc à chaque tour.
+                if reload_presets(&state, &mut presets, &presets_path) {
+                    api::broadcast_snapshot(&state);
+                }
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => break,
@@ -197,6 +272,14 @@ fn watch_dir(
 
         let mut models_changed = false;
         let mut config_changed = false;
+
+        // Les adresses connues vivent dans le même dossier que la config : on
+        // les distingue ici, le lot pouvant porter sur l'un ou l'autre.
+        let presets_reloaded = if watcher::touches_file(&events, &presets_path) {
+            reload_presets(&state, &mut presets, &presets_path)
+        } else {
+            false
+        };
 
         // L'interprétation des événements vit dans `watcher` (testable) : ici on
         // ne fait que router le résultat du lot.
@@ -248,10 +331,12 @@ fn watch_dir(
                 };
                 println!("Configuration rechargée (mode d'affichage : {mode}).");
             }
+        }
 
-            // Même si la config est identique, on rafraîchit le front.
-            api::broadcast_snapshot(&state);
-        } else if models_changed {
+        // Un seul rafraîchissement, quelle que soit la cause : le frontend
+        // remplace son état à chaque message, donc deux diffusions coup sur
+        // coup seraient du travail pour rien.
+        if config_changed || models_changed || presets_reloaded {
             api::broadcast_snapshot(&state);
         }
     }

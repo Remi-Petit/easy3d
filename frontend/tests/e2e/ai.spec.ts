@@ -99,8 +99,16 @@ test('recherche IA : une adresse connue remplit le champ, qui reste libre', asyn
   await expect(puces.locator('.admin__choice--on')).toHaveCount(1)
 
   // Le point d'entrée propose aussi son modèle : il sera remplacé par ce que le
-  // fournisseur annonce au premier « Tester ».
-  await expect(page.locator('select#ai-model')).toHaveValue('deepseek-chat')
+  // fournisseur annonce au premier « Tester ». L'attendu est lu **à la source**
+  // (`ai-presets.yml`, via l'API) : ce fichier est fait pour être modifié, un
+  // test ne doit donc pas figer un nom de modèle.
+  const suggere = await page.evaluate(async () => {
+    const providers = await fetch('/api/ai/providers').then((r) => r.json())
+    const openai = providers.find((p) => p.id === 'openai')
+    return openai.presets.find((p) => p.label === 'DeepSeek')?.model ?? ''
+  })
+  expect(suggere).not.toBe('')
+  await expect(page.locator('select#ai-model')).toHaveValue(suggere)
 
   // Le champ reste maître : une adresse intermédiaire n'appartient à aucune
   // puce, donc plus rien n'est marqué.

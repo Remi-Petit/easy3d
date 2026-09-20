@@ -1,6 +1,6 @@
-import type { AiOutcome, AiProvider } from '~/utils/ai'
+import type { AiOutcome, AiPreset, AiPresets, AiProvider } from '~/utils/ai'
+import { aiConfigured, providersWithPresets } from '~/utils/ai'
 import type { ConfigResponse } from '~/composables/useModels'
-import { aiConfigured } from '~/utils/ai'
 
 /**
  * Recherche assistée : état **partagé** (barre de recherche, panneau de
@@ -18,7 +18,18 @@ export function useAiSearch() {
   const { t } = useI18n()
 
   /** Fournisseurs proposés par le backend (aucune liste en dur ici). */
-  const providers = useState<AiProvider[]>('easy3d:ai:providers', () => [])
+  const rawProviders = useState<AiProvider[]>('easy3d:ai:providers', () => [])
+  /**
+   * Adresses connues, poussées par le backend avec le catalogue (même état que
+   * celui publié par `useModels`).
+   *
+   * Elles sont **relues à chaud** côté serveur (`ai-presets.yml`) : les garder
+   * telles quelles depuis le premier chargement les périmerait dès qu'on édite
+   * le fichier, alors que l'administration reste ouverte.
+   */
+  const livePresets = useState<AiPresets>('easy3d:ai:presets', () => ({}))
+  /** Fournisseurs, avec les adresses à jour. */
+  const providers = computed(() => providersWithPresets(rawProviders.value, livePresets.value))
   /** `true` si un fournisseur est choisi : le bouton de recherche s'active. */
   const configured = useState<boolean>('easy3d:ai:configured', () => false)
   /** Le mode « recherche assistée » est ouvert (le catalogue est masqué). */
@@ -42,8 +53,8 @@ export function useAiSearch() {
       const config = await $fetch<ConfigResponse>('/api/config')
       configured.value = aiConfigured(config.config?.ai)
 
-      if (!providers.value.length) {
-        providers.value = await $fetch<AiProvider[]>('/api/ai/providers')
+      if (!rawProviders.value.length) {
+        rawProviders.value = await $fetch<AiProvider[]>('/api/ai/providers')
       }
     } catch {
       configured.value = false

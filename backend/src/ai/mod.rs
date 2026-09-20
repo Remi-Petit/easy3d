@@ -26,11 +26,12 @@
 mod anthropic;
 mod ollama;
 mod openai;
+pub mod presets;
 pub mod tools;
 
 use crate::api::AppState;
 use crate::config::Ai;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -126,18 +127,19 @@ pub struct Resolved {
 /// tel quel (DeepSeek, OpenRouter, Groq…), et l'utilisateur n'a pas à retenir
 /// leur adresse.
 ///
-/// Elle vit ici, et non dans l'interface : c'est le backend qui sait quels
-/// services parlent son protocole, et une adresse n'a de sens qu'avec lui.
-#[derive(Debug, Serialize)]
+/// Elle vient du fichier [`presets`], pas du code : c'est de la donnée, que l'on
+/// modifie — et ajoute — sans recompiler.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preset {
     /// Nom du service, tel qu'il s'affiche sur la puce.
-    pub label: &'static str,
+    pub label: String,
     /// Adresse à écrire dans le champ correspondant.
-    pub base_url: &'static str,
+    pub base_url: String,
     /// Modèle conseillé, **vide** quand il n'y a rien à conseiller (un serveur
     /// local n'a que les modèles que l'utilisateur y a installés). Ce n'est
     /// jamais qu'une proposition : la vraie liste vient de « Tester ».
-    pub model: &'static str,
+    #[serde(default)]
+    pub model: String,
 }
 
 /// Description d'un fournisseur, pour l'écran d'administration.
@@ -150,8 +152,8 @@ pub struct ProviderInfo {
     pub base_url: &'static str,
     pub model: &'static str,
     /// Adresses connues de ce fournisseur, **la sienne en premier** (voir
-    /// [`Preset`]).
-    pub presets: &'static [Preset],
+    /// [`Preset`] et [`presets`]).
+    pub presets: Vec<Preset>,
 }
 
 /// Interface commune aux fournisseurs de modèles.
@@ -169,15 +171,6 @@ pub trait Provider: Sync {
     }
     fn default_base_url(&self) -> &'static str;
     fn default_model(&self) -> &'static str;
-
-    /// Adresses connues qui parlent ce protocole, la sienne en premier.
-    ///
-    /// Vide par défaut : seule l'implémentation sait quels services imitent son
-    /// API. L'interface ne propose donc jamais une adresse qu'elle aurait
-    /// inventée — au pire elle n'en propose qu'une, celle du fournisseur.
-    fn presets(&self) -> &'static [Preset] {
-        &[]
-    }
 
     /// En-têtes d'authentification (et de version), communs à tous les appels.
     fn headers(&self, cfg: &Resolved) -> Vec<(String, String)>;
@@ -268,7 +261,11 @@ pub fn provider_for(id: &str) -> Option<&'static (dyn Provider + Sync)> {
 }
 
 /// Catalogue des fournisseurs, pour l'écran d'administration.
-pub fn describe() -> Vec<ProviderInfo> {
+///
+/// Les adresses connues viennent du fichier [`presets`] (relu à chaud) :
+/// `presets` est donc l'état courant, pas une constante. Un fournisseur absent
+/// du fichier n'en a aucune — l'interface se contente alors du champ libre.
+pub fn describe(presets: &presets::Presets) -> Vec<ProviderInfo> {
     PROVIDERS
         .iter()
         .map(|p| ProviderInfo {
@@ -277,7 +274,7 @@ pub fn describe() -> Vec<ProviderInfo> {
             needs_key: p.needs_key(),
             base_url: p.default_base_url(),
             model: p.default_model(),
-            presets: p.presets(),
+            presets: presets.get(p.id()).cloned().unwrap_or_default(),
         })
         .collect()
 }
@@ -660,60 +657,30 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(ids.len(), sorted.len(), "identifiants en double : {ids:?}");
-        assert!(describe().iter().all(|p| !p.label.is_empty()));
+        assert!(
+            describe(&presets::defaults())
+                .iter()
+                .all(|p| !p.label.is_empty())
+        );
     }
 
-    /// Les adresses proposées à l'utilisateur doivent être utilisables telles
-    /// quelles : complètes, distinctes, et la première doit être celle du
-    /// fournisseur (le champ vide veut dire « l'adresse par défaut », donc la
-    /// même chose, et la puce correspondante doit s'allumer).
+    /// Les adresses servies à l'interface sont celles du fichier courant, et un
+    /// fournisseur qu'il ignore n'en propose simplement aucune.
     #[test]
-    fn les_adresses_proposees_sont_utilisables() {
-        for provider in PROVIDERS {
-            let presets = provider.presets();
-            assert!(
-                !presets.is_empty(),
-                "{} ne propose aucune adresse",
-                provider.id()
-            );
+    fn le_catalogue_sert_les_adresses_du_fichier() {
+        let mut known = presets::defaults();
+        known.get_mut("ollama").unwrap().push(Preset {
+            label: "Passerelle".to_string(),
+            base_url: "https://gw.interne/v1".to_string(),
+            model: String::new(),
+        });
+        known.remove("anthropic");
 
-            for preset in presets {
-                assert!(!preset.label.is_empty());
-                assert!(
-                    preset.base_url.starts_with("http"),
-                    "adresse incomplète : {}",
-                    preset.base_url
-                );
-            }
-
-            let urls: Vec<&str> = presets.iter().map(|p| p.base_url).collect();
-            let mut unique = urls.clone();
-            unique.sort_unstable();
-            unique.dedup();
-            assert_eq!(urls.len(), unique.len(), "adresses en double : {urls:?}");
-
-            assert_eq!(presets[0].base_url, provider.default_base_url());
-            assert_eq!(presets[0].model, provider.default_model());
-        }
-    }
-
-    /// Les services qui imitent l'API d'OpenAI sont annoncés avec lui : c'est
-    /// tout l'intérêt de la liste, et ce que l'utilisateur vient chercher.
-    #[test]
-    fn openai_annonce_les_services_qui_l_imitent() {
-        let openai = describe()
-            .into_iter()
-            .find(|p| p.id == "openai")
-            .expect("le fournisseur openai existe");
-
-        let labels: Vec<&str> = openai.presets.iter().map(|p| p.label).collect();
-        for expected in ["OpenAI", "DeepSeek", "OpenRouter"] {
-            assert!(labels.contains(&expected), "absent de {labels:?}");
-        }
-
-        // Chaque service annonce une adresse **et** un modèle : sans modèle, la
-        // puce remplirait l'adresse sans rien proposer à interroger.
-        assert!(openai.presets.iter().all(|p| !p.model.is_empty()));
+        let described = describe(&known);
+        let ollama = described.iter().find(|p| p.id == "ollama").unwrap();
+        assert!(ollama.presets.iter().any(|p| p.label == "Passerelle"));
+        let anthropic = described.iter().find(|p| p.id == "anthropic").unwrap();
+        assert!(anthropic.presets.is_empty());
     }
 
     #[test]

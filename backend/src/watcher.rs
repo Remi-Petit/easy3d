@@ -21,6 +21,17 @@ pub fn is_content_change(event: &DebouncedEvent) -> bool {
     }
 }
 
+/// `true` si un lot contient un **vrai** changement visant ce fichier précis.
+///
+/// Sert aux fichiers qui vivent à côté de `config.yml` (les adresses connues des
+/// fournisseurs d'IA) : ils sont surveillés par le même dossier, mais ne
+/// déclenchent pas la même relecture.
+pub fn touches_file(events: &[DebouncedEvent], path: &Path) -> bool {
+    events
+        .iter()
+        .any(|e| is_content_change(e) && e.paths.iter().any(|p| p == path))
+}
+
 /// Traduit un événement en message lisible : ajout / modification / suppression.
 ///
 /// Retourne `None` pour les événements à ignorer (accès, métadonnées seules,

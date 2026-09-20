@@ -28,6 +28,12 @@ RUN mkdir -p src \
     && cargo build --release
 
 COPY backend/src ./src
+# Les adresses connues des fournisseurs sont **embarquées** dans le binaire
+# (`include_str!`, voir `ai/presets.rs`) : le fichier fait donc partie des
+# sources à compiler, pas seulement de l'exécution. Les commentaires du fichier
+# partent avec : c'est le mode d'emploi écrit dans le dossier de configuration
+# au premier démarrage.
+COPY backend/ai-presets.yml ./
 # `touch` : les vraies sources doivent paraître plus récentes que la crate vide.
 RUN touch src/lib.rs src/main.rs && cargo build --release
 
