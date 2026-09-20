@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
+import { PERM } from '~/utils/permissions'
 
 // Layout global : coquille « dashboard » fournie par Nuxt UI (sidebar +
 // panneau), habillée avec les tokens de l'app (voir `main.css`).
@@ -45,11 +46,25 @@ onMounted(() => {
   void refreshAi()
 })
 
+// Compte connecté : la gestion des comptes est **facultative**, donc le bloc du
+// pied de sidebar n'apparaît que si le serveur l'applique et qu'un compte est
+// ouvert. L'état est déjà à jour — la garde `auth.global.ts` l'a interrogé avant
+// d'afficher la page — inutile de redemander.
+const { user: authUser, status: authStatus, signOut, can } = useAuth()
+
+/** `true` sur la page des comptes (`/admin/comptes`). */
+const isAccounts = computed(() => route.path.startsWith('/admin/comptes'))
+
+/** `true` sur « mon compte » (`/compte`). */
+const isCompte = computed(() => route.path.startsWith('/compte'))
+
 /** `true` sur la page d'administration : section distincte du catalogue. */
 const isAdmin = computed(() => route.path.startsWith('/admin'))
 
 /** Titre de la page courante, déduit de la route (pas de flash à l'hydratation). */
 const title = computed(() => {
+  if (isCompte.value) return t('nav.account')
+  if (isAccounts.value) return t('nav.accounts')
   if (isAdmin.value) return t('nav.admin')
   // Dossiers et fichiers sont désignés par un chemin relatif : le titre de la
   // page est le **dernier** segment (un sous-dossier ne réaffiche pas sa parenté).
@@ -84,12 +99,15 @@ const uploadFolder = computed(() =>
  *
  * `dragenter`/`dragleave` se déclenchent aussi pour chaque élément survolé :
  * un compteur évite que le voile clignote au passage d'un enfant à l'autre.
+ * Le droit d'ajouter des fichiers est vérifié **ici** : sans lui, le voile
+ * n'apparaît pas et un dépôt est simplement ignoré.
  */
 const dragging = ref(false)
 let dragDepth = 0
 
 /** Seuls les fichiers nous intéressent (pas un texte ni un lien glissé). */
 function droppingFiles(event: DragEvent) {
+  if (!can(PERM.modelUpload)) return false
   return Array.from(event.dataTransfer?.types ?? []).includes('Files')
 }
 
@@ -155,13 +173,48 @@ function isActive(to: string) {
 /**
  * Navigation : une seule section pour l'instant (le catalogue) ; ajouter une
  * page = ajouter une entrée ici.
+ *
+ * La section « Système » n'apparaît qu'avec les droits correspondants : les
+ * gardes de `/admin` renvoient de toute façon au catalogue, mais proposer une
+ * entrée qui mène à un refus est la pire façon d'annoncer un droit manquant.
  */
-const navItems = computed<NavigationMenuItem[]>(() => [
-  { type: 'label', label: t('nav.catalog') },
-  { label: t('nav.models'), icon: 'i-lucide-box', to: '/', active: isActive('/') },
-  { type: 'label', label: t('nav.system') },
-  { label: t('nav.admin'), icon: 'i-lucide-settings', to: '/admin', active: isAdmin.value },
-])
+const navItems = computed<NavigationMenuItem[]>(() => {
+  const items: NavigationMenuItem[] = [
+    { type: 'label', label: t('nav.catalog') },
+    { label: t('nav.models'), icon: 'i-lucide-box', to: '/', active: isActive('/') },
+  ]
+
+  const systeme: NavigationMenuItem[] = []
+  if (can(PERM.configRead)) {
+    systeme.push({
+      label: t('nav.admin'),
+      icon: 'i-lucide-settings',
+      to: '/admin',
+      active: isAdmin.value && !isAccounts.value,
+    })
+  }
+  if (can(PERM.usersRead) || can(PERM.rolesRead)) {
+    systeme.push({
+      label: t('nav.accounts'),
+      icon: 'i-lucide-users',
+      to: '/admin/comptes',
+      active: isAccounts.value,
+    })
+  }
+  // « Mon compte » n'a de sens qu'avec des comptes : c'est là qu'on change son
+  // mot de passe et qu'on crée ses jetons d'API.
+  if (authStatus.value.enabled) {
+    systeme.push({
+      label: t('nav.account'),
+      icon: 'i-lucide-user',
+      to: '/compte',
+      active: isCompte.value,
+    })
+  }
+  if (systeme.length) items.push({ type: 'label', label: t('nav.system') }, ...systeme)
+
+  return items
+})
 
 /** Langues du sélecteur : nom affiché + code (`locales` peut être mixte). */
 const languageItems = computed(() =>
@@ -223,7 +276,22 @@ const navUi = {
       <!-- État du backend + langue de l'interface. -->
       <template #footer>
         <div class="foot">
-          
+
+          <!-- Compte connecté (`EASY3D_AUTH`). Absent d'une installation sans
+               comptes : le pied de sidebar est alors celui d'avant. -->
+          <div v-if="authUser" class="account">
+            <span class="account__who" :title="authUser.email">{{ authUser.username }}</span>
+            <button
+              type="button"
+              class="account__out"
+              :title="$t('auth.signOut')"
+              :aria-label="$t('auth.signOut')"
+              @click="signOut()"
+            >
+              <UIcon name="i-lucide-log-out" />
+            </button>
+          </div>
+
           <div class="stats">
             <span class="pill">
               <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
@@ -355,7 +423,7 @@ const navUi = {
 
             <!-- Ajout de fichiers/dossiers dans le catalogue (le dossier
                  courant sert d'accueil quand on est dans un dossier). -->
-            <UploadButton v-if="!aiMode" :folder="uploadFolder" />
+            <UploadButton v-if="!aiMode && can(PERM.modelUpload)" :folder="uploadFolder" />
           </div>
 
           <!-- Filtre par type : formats détectés dans la vue courante. -->

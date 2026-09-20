@@ -10,9 +10,11 @@
 //! - [`mcp`] : serveur MCP (agents) monté sur `/mcp`, même process.
 //! - [`notes`] : notes Markdown associées aux dossiers et fichiers.
 //! - [`collab`] : édition collaborative des notes (CRDT Yjs).
+//! - [`auth`] : comptes utilisateurs, sessions (facultatif, `EASY3D_AUTH`).
 
 pub mod ai;
 pub mod api;
+pub mod auth;
 pub mod collab;
 pub mod config;
 pub mod formats;

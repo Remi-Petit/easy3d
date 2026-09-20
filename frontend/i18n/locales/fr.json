@@ -8,7 +8,9 @@
     "catalog": "Catalogue",
     "system": "Système",
     "models": "Models",
-    "admin": "Administration"
+    "admin": "Administration",
+    "accounts": "Comptes",
+    "account": "Mon compte"
   },
   "status": {
     "live": "temps réel",
@@ -27,6 +29,64 @@
   "language": {
     "label": "Langue",
     "choose": "Choisir la langue"
+  },
+  "auth": {
+    "title": "Connexion",
+    "hint": "Identifiez-vous pour accéder au catalogue.",
+    "login": "Identifiant ou e-mail",
+    "password": "Mot de passe",
+    "submit": "Se connecter",
+    "or": "ou",
+    "sso": "Continuer avec {provider}",
+    "oidc": "Fournisseur d’identité",
+    "signOut": "Se déconnecter",
+    "errors": {
+      "unknown": "Connexion impossible.",
+      "auth_disabled": "L’authentification n’est pas activée sur ce serveur.",
+      "invalid_credentials": "Identifiant ou mot de passe incorrect.",
+      "rate_limited": "Trop de tentatives : réessayez dans une minute.",
+      "password_too_short": "Mot de passe trop court (8 caractères minimum).",
+      "password_too_long": "Mot de passe trop long (256 caractères maximum).",
+      "internal_error": "Erreur du serveur.",
+      "oidc_denied": "La connexion a été refusée chez le fournisseur d’identité.",
+      "invalid_state": "Cette connexion a expiré : recommencez.",
+      "oidc_no_email": "Votre fournisseur ne transmet pas d’adresse e-mail : elle est nécessaire pour rattacher le compte.",
+      "oidc_not_provisioned": "Aucun compte ne correspond : demandez à un administrateur de le créer.",
+      "oidc_conflict": "Ce compte est déjà rattaché à une autre identité.",
+      "pending_approval": "Votre compte attend la validation d’un administrateur.",
+      "account_disabled": "Ce compte est désactivé."
+    }
+  },
+  "permGroup": {
+    "catalog": "Catalogue",
+    "ai": "Recherche assistée",
+    "settings": "Réglages",
+    "accounts": "Comptes"
+  },
+  "perm": {
+    "catalog": { "read": "Voir le catalogue et télécharger les modèles" },
+    "model": {
+      "upload": "Ajouter des fichiers",
+      "rename": "Renommer",
+      "delete": "Supprimer"
+    },
+    "note": { "write": "Écrire les notes" },
+    "ai": {
+      "use": "Lancer une recherche assistée",
+      "config": "Choisir le fournisseur et sa clé"
+    },
+    "config": {
+      "read": "Voir les réglages",
+      "write": "Modifier les réglages"
+    },
+    "users": {
+      "read": "Voir les comptes",
+      "write": "Créer et modifier les comptes"
+    },
+    "roles": {
+      "read": "Voir les rôles",
+      "write": "Créer et modifier les rôles"
+    }
   },
   "upload": {
     "add": "Ajouter",
@@ -217,6 +277,39 @@
     "watchLocal": "Système de fichiers « {fs} » : local, les modifications sont détectées en temps réel.",
     "watchVirtual": "Système de fichiers « {fs} », virtualisé : il ne remonte pas les fichiers déposés depuis ta machine, d'où un re-scan recommandé toutes les {seconds} s.",
     "watchUnknown": "Système de fichiers local : les modifications sont détectées en temps réel.",
+    "sso": "Fournisseur d’identité (SSO)",
+    "ssoEnable": "Autoriser la connexion par le fournisseur d’identité",
+    "ssoEnableHint": "Une seconde façon de se connecter : les comptes et mots de passe locaux continuent de fonctionner. Les comptes créés par le SSO reçoivent le rôle par défaut.",
+    "ssoLocked": "Certains champs sont imposés par l’environnement (EASY3D_OIDC_*) : ils sont grisés ici.",
+    "ssoIssuer": "Adresse de l’émetteur",
+    "ssoIssuerHint": "Celle que le fournisseur annonce comme son « issuer ». La configuration est découverte à partir de là.",
+    "ssoClientId": "Identifiant client",
+    "ssoClientSecret": "Secret client",
+    "ssoClientSecretHint": "Jamais renvoyé en clair : le champ contient *** quand un secret est enregistré, et le vider l’efface.",
+    "ssoScopes": "Portées",
+    "ssoScopesHint": "Séparées par des espaces. Vide = openid email profile — l’adresse e-mail est indispensable pour rattacher un compte préparé à la main.",
+    "ssoProvisioning": "Première connexion",
+    "ssoRedirect": "Adresse de retour à déclarer chez le fournisseur",
+    "ssoCheckOk": "Fournisseur joignable ({issuer}).",
+    "ssoMissing": {
+      "issuer": "Configuration incomplète : l’adresse de l’émetteur manque.",
+      "client_id": "Configuration incomplète : l’identifiant client manque.",
+      "client_secret": "Configuration incomplète : le secret client manque."
+    },
+    "ssoMode": {
+      "auto": {
+        "label": "Créer le compte automatiquement",
+        "hint": "Toute personne authentifiée chez le fournisseur obtient un compte, avec le rôle par défaut. Simple, mais l’annuaire du fournisseur fait foi."
+      },
+      "manual": {
+        "label": "Seulement les comptes préparés",
+        "hint": "L’administrateur crée le compte ici (même adresse e-mail) : le premier login le rattache et enregistre l’identité du fournisseur. Personne ne peut entrer sans compte."
+      },
+      "approval": {
+        "label": "Créer, puis valider",
+        "hint": "Le compte est créé désactivé à la première connexion : la page Comptes sert d’écran de validation. La personne est prévenue que son compte attend."
+      }
+    },
     "notes": "Notes",
     "noItems": "Aucun élément.",
     "whereFolder": "dossier",
@@ -239,6 +332,103 @@
     "whatFolder": "« {name} » et son {count} fichier seront supprimés définitivement. | « {name} » et ses {count} fichiers seront supprimés définitivement.",
     "done": "« {name} » supprimé.",
     "failed": "Suppression impossible."
+  },
+  "account": {
+    "identity": "Identité",
+    "userName": "Nom d’utilisateur",
+    "email": "Adresse e-mail",
+    "roles": "Rôles",
+    "noRole": "aucun rôle",
+    "password": "Mot de passe",
+    "currentPassword": "Mot de passe actuel",
+    "newPassword": "Nouveau mot de passe",
+    "repeatPassword": "Répéter le nouveau mot de passe",
+    "change": "Changer",
+    "mismatch": "Les deux saisies ne correspondent pas.",
+    "changed": "Mot de passe changé. Les autres sessions ont été fermées.",
+    "passwordHint": "8 caractères minimum. Le changement ferme les autres sessions : les appareils restés ouverts devront se reconnecter.",
+    "tokens": "Jetons d’API",
+    "tokensHint": "Pour les agents (Claude Code, un script, une CI) : ils s’identifient avec un jeton plutôt qu’un cookie, et n’ont jamais plus de droits que vous.",
+    "tokenOnce": "Copiez ce jeton maintenant : il ne sera plus affiché.",
+    "copy": "Copier",
+    "copied": "Copié",
+    "done": "C’est fait",
+    "lastUsed": "dernier usage",
+    "created": "créé le",
+    "neverUsed": "jamais utilisé",
+    "revoke": "Révoquer",
+    "confirm": "Confirmer ?",
+    "noToken": "Aucun jeton.",
+    "newToken": "Nouveau jeton",
+    "tokenName": "Nom (ex. « portable », « CI »)",
+    "create": "Créer",
+    "mcpHint": "Pour un agent MCP : l’adresse du serveur, et ce jeton en en-tête Authorization: Bearer.",
+    "errors": {
+      "unknown": "Opération impossible.",
+      "forbidden": "Votre compte n’a pas le droit de faire cela.",
+      "unauthenticated": "Session expirée : reconnectez-vous.",
+      "not_found": "Jeton introuvable.",
+      "name_required": "Le nom est obligatoire.",
+      "password_too_short": "Mot de passe trop court (8 caractères minimum).",
+      "password_too_long": "Mot de passe trop long (256 caractères maximum).",
+      "invalid_credentials": "Mot de passe actuel incorrect."
+    }
+  },
+  "accounts": {
+    "roles": "Rôles",
+    "rolesHint": "Les rôles livrés sont figés : clonez-les pour partir de quelque chose.",
+    "users": "Comptes",
+    "newRole": "Nouveau rôle",
+    "newUser": "Nouveau compte",
+    "roleName": "Nom du rôle",
+    "roleDescription": "Description",
+    "userName": "Nom d’utilisateur",
+    "email": "Adresse e-mail",
+    "password": "Mot de passe",
+    "passwordHint": "Facultatif : sans mot de passe, le compte ne se connecte que par le fournisseur d’identité (SSO).",
+    "oidc": "SSO",
+    "newPassword": "Nouveau mot de passe (vide = inchangé)",
+    "rolesOf": "Rôles",
+    "direct": "Droits accordés à ce compte",
+    "create": "Créer",
+    "clone": "Cloner",
+    "cloneFrom": "Rôle à cloner",
+    "cloneNone": "Partir d’un rôle vide",
+    "cloneHint": "Créer un rôle vide, ou en cloner un : ses droits sont recopiés. C’est le motif habituel pour un rôle sur mesure.",
+    "save": "Enregistrer",
+    "remove": "Supprimer",
+    "confirm": "Confirmer ?",
+    "setDefault": "Par défaut",
+    "byDefault": "par défaut",
+    "builtin": "livré",
+    "disabled": "désactivé",
+    "disable": "Désactiver",
+    "enable": "Réactiver",
+    "frozen": "Rôle livré : figé. Clonez-le pour en modifier les droits.",
+    "superuser": "Superutilisateur : tous les droits, par construction.",
+    "members": "{count} compte | {count} comptes",
+    "noRole": "aucun rôle",
+    "noUser": "Aucun compte.",
+    "hint": "Un droit coché ici s’ajoute à ceux des rôles. Le dernier administrateur ne peut être ni désactivé ni supprimé.",
+    "defaultHint": "Sans rôle coché, le rôle par défaut de l’installation s’applique.",
+    "errors": {
+      "unknown": "Opération impossible.",
+      "forbidden": "Votre compte n’a pas le droit de faire cela.",
+      "unauthenticated": "Session expirée : reconnectez-vous.",
+      "not_found": "Élément introuvable.",
+      "last_admin": "Le dernier administrateur ne peut pas être retiré.",
+      "cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte.",
+      "unknown_permission": "Droit inconnu du serveur.",
+      "unknown_role": "Rôle inconnu.",
+      "role_frozen": "Un rôle livré ne peut pas être modifié : clonez-le.",
+      "name_required": "Le nom est obligatoire.",
+      "username_taken": "Ce nom d’utilisateur est déjà pris.",
+      "email_taken": "Cette adresse e-mail est déjà utilisée.",
+      "name_taken": "Ce nom est déjà utilisé.",
+      "password_too_short": "Mot de passe trop court (8 caractères minimum).",
+      "password_too_long": "Mot de passe trop long (256 caractères maximum).",
+      "invalid_credentials": "Mot de passe actuel incorrect."
+    }
   },
   "time": {
     "now": "à l’instant",

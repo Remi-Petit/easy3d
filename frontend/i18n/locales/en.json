@@ -8,7 +8,9 @@
     "catalog": "Catalog",
     "system": "System",
     "models": "Models",
-    "admin": "Administration"
+    "admin": "Administration",
+    "accounts": "Accounts",
+    "account": "My account"
   },
   "status": {
     "live": "live",
@@ -27,6 +29,64 @@
   "language": {
     "label": "Language",
     "choose": "Choose language"
+  },
+  "auth": {
+    "title": "Sign in",
+    "hint": "Sign in to reach the catalogue.",
+    "login": "Username or e-mail",
+    "password": "Password",
+    "submit": "Sign in",
+    "or": "or",
+    "sso": "Continue with {provider}",
+    "oidc": "Identity provider",
+    "signOut": "Sign out",
+    "errors": {
+      "unknown": "Sign-in failed.",
+      "auth_disabled": "Authentication is not enabled on this server.",
+      "invalid_credentials": "Wrong username or password.",
+      "rate_limited": "Too many attempts: try again in a minute.",
+      "password_too_short": "Password too short (8 characters minimum).",
+      "password_too_long": "Password too long (256 characters maximum).",
+      "internal_error": "Server error.",
+      "oidc_denied": "The identity provider refused the sign-in.",
+      "invalid_state": "This sign-in has expired: please start again.",
+      "oidc_no_email": "Your provider does not send an e-mail address, which is required to match the account.",
+      "oidc_not_provisioned": "No matching account: ask an administrator to create it.",
+      "oidc_conflict": "This account is already linked to another identity.",
+      "pending_approval": "Your account is waiting for an administrator's approval.",
+      "account_disabled": "This account is disabled."
+    }
+  },
+  "permGroup": {
+    "catalog": "Catalogue",
+    "ai": "AI search",
+    "settings": "Settings",
+    "accounts": "Accounts"
+  },
+  "perm": {
+    "catalog": { "read": "View the catalogue and download models" },
+    "model": {
+      "upload": "Add files",
+      "rename": "Rename",
+      "delete": "Delete"
+    },
+    "note": { "write": "Write notes" },
+    "ai": {
+      "use": "Run an AI search",
+      "config": "Choose the provider and its key"
+    },
+    "config": {
+      "read": "View the settings",
+      "write": "Change the settings"
+    },
+    "users": {
+      "read": "View accounts",
+      "write": "Create and edit accounts"
+    },
+    "roles": {
+      "read": "View roles",
+      "write": "Create and edit roles"
+    }
   },
   "upload": {
     "add": "Add",
@@ -217,6 +277,39 @@
     "watchLocal": "“{fs}” filesystem: local, changes are detected in real time.",
     "watchVirtual": "“{fs}” filesystem, virtualised: it does not report files dropped from your machine, hence a re-scan recommended every {seconds} s.",
     "watchUnknown": "Local filesystem: changes are detected in real time.",
+    "sso": "Identity provider (SSO)",
+    "ssoEnable": "Allow signing in through the identity provider",
+    "ssoEnableHint": "A second way in: local accounts and passwords keep working. Accounts created by the SSO get the default role.",
+    "ssoLocked": "Some fields are set by the environment (EASY3D_OIDC_*) and are greyed out here.",
+    "ssoIssuer": "Issuer URL",
+    "ssoIssuerHint": "The one the provider announces as its \"issuer\". Configuration is discovered from there.",
+    "ssoClientId": "Client ID",
+    "ssoClientSecret": "Client secret",
+    "ssoClientSecretHint": "Never sent back in the clear: the field holds *** when a secret is stored, and clearing it removes it.",
+    "ssoScopes": "Scopes",
+    "ssoScopesHint": "Space separated. Empty = openid email profile — the e-mail address is required to match a manually prepared account.",
+    "ssoProvisioning": "First sign-in",
+    "ssoRedirect": "Redirect URL to declare at the provider",
+    "ssoCheckOk": "Provider reachable ({issuer}).",
+    "ssoMissing": {
+      "issuer": "Incomplete configuration: the issuer URL is missing.",
+      "client_id": "Incomplete configuration: the client ID is missing.",
+      "client_secret": "Incomplete configuration: the client secret is missing."
+    },
+    "ssoMode": {
+      "auto": {
+        "label": "Create the account automatically",
+        "hint": "Anyone authenticated at the provider gets an account, with the default role. Simple, but the provider directory has the final say."
+      },
+      "manual": {
+        "label": "Prepared accounts only",
+        "hint": "An administrator creates the account here (same e-mail address): the first sign-in links it and stores the provider identity. Nobody gets in without an account."
+      },
+      "approval": {
+        "label": "Create, then approve",
+        "hint": "The account is created disabled on first sign-in: the Accounts page is the approval screen. The person is told the account is waiting."
+      }
+    },
     "notes": "Notes",
     "noItems": "No item.",
     "whereFolder": "folder",
@@ -239,6 +332,101 @@
     "whatFolder": "“{name}” and its {count} file will be permanently deleted. | “{name}” and its {count} files will be permanently deleted.",
     "done": "“{name}” deleted.",
     "failed": "Delete failed."
+  },
+  "account": {
+    "identity": "Identity",
+    "userName": "Username",
+    "email": "E-mail address",
+    "roles": "Roles",
+    "noRole": "no role",
+    "password": "Password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "repeatPassword": "Repeat the new password",
+    "change": "Change",
+    "mismatch": "The two entries do not match.",
+    "changed": "Password changed. The other sessions have been closed.",
+    "passwordHint": "8 characters minimum. Changing it closes the other sessions: devices left open will have to sign in again.",
+    "tokens": "API tokens",
+    "tokensHint": "For agents (Claude Code, a script, a CI): they identify themselves with a token rather than a cookie, and never have more rights than you.",
+    "tokenOnce": "Copy this token now: it will not be shown again.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "done": "Done",
+    "lastUsed": "last used",
+    "created": "created",
+    "neverUsed": "never used",
+    "revoke": "Revoke",
+    "confirm": "Confirm?",
+    "noToken": "No token.",
+    "newToken": "New token",
+    "tokenName": "Name (e.g. “laptop”, “CI”)",
+    "create": "Create",
+    "mcpHint": "For an MCP agent: the server address, and this token as an Authorization: Bearer header.",
+    "errors": {
+      "unknown": "Could not do that.",
+      "forbidden": "Your account is not allowed to do that.",
+      "unauthenticated": "Session expired: sign in again.",
+      "not_found": "Token not found.",
+      "name_required": "A name is required.",
+      "password_too_short": "Password too short (8 characters minimum).",
+      "password_too_long": "Password too long (256 characters maximum).",
+      "invalid_credentials": "Wrong current password."
+    }
+  },
+  "accounts": {
+    "roles": "Roles",
+    "rolesHint": "The built-in roles are frozen: clone one to start from something.",
+    "users": "Accounts",
+    "newRole": "New role",
+    "newUser": "New account",
+    "roleName": "Role name",
+    "roleDescription": "Description",
+    "userName": "Username",
+    "email": "E-mail address",
+    "password": "Password",    "passwordHint": "Optional: without a password, the account can only sign in through the identity provider (SSO).",
+    "oidc": "SSO",    "newPassword": "New password (blank = unchanged)",
+    "rolesOf": "Roles",
+    "direct": "Permissions granted to this account",
+    "create": "Create",
+    "clone": "Clone",
+    "cloneFrom": "Role to clone",
+    "cloneNone": "Start from an empty role",
+    "cloneHint": "Create an empty role, or clone one: its permissions are copied over. That is the usual way to build a role to measure.",
+    "save": "Save",
+    "remove": "Delete",
+    "confirm": "Confirm?",
+    "setDefault": "Make default",
+    "byDefault": "default",
+    "builtin": "built-in",
+    "disabled": "disabled",
+    "disable": "Disable",
+    "enable": "Re-enable",
+    "frozen": "Built-in role: frozen. Clone it to change its permissions.",
+    "superuser": "Superuser: every permission, by construction.",
+    "members": "{count} account | {count} accounts",
+    "noRole": "no role",
+    "noUser": "No account.",
+    "hint": "A permission ticked here adds to the ones from the roles. The last administrator cannot be disabled or deleted.",
+    "defaultHint": "With no role ticked, the installation's default role applies.",
+    "errors": {
+      "unknown": "Could not do that.",
+      "forbidden": "Your account is not allowed to do that.",
+      "unauthenticated": "Session expired: sign in again.",
+      "not_found": "Not found.",
+      "last_admin": "The last administrator cannot be removed.",
+      "cannot_delete_self": "You cannot delete your own account.",
+      "unknown_permission": "Permission unknown to the server.",
+      "unknown_role": "Unknown role.",
+      "role_frozen": "A built-in role cannot be changed: clone it.",
+      "name_required": "A name is required.",
+      "username_taken": "This username is already taken.",
+      "email_taken": "This e-mail address is already used.",
+      "name_taken": "This name is already used.",
+      "password_too_short": "Password too short (8 characters minimum).",
+      "password_too_long": "Password too long (256 characters maximum).",
+      "invalid_credentials": "Wrong current password."
+    }
   },
   "time": {
     "now": "just now",

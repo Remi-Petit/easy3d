@@ -4,6 +4,13 @@ Cargo.lock
 # backend — fichiers d'environnement locaux (secrets / ports)
 backend/.env
 
+# base des comptes utilisateurs (créée au premier démarrage en mode authentifié) :
+# des données locales, jamais versionnées. Le dossier `config/` du conteneur est
+# déjà ignoré plus haut ; ces deux lignes couvrent l'exécution directe depuis
+# `backend/`, où la base se pose à côté de `config.yml`.
+backend/easy3d.db
+backend/easy3d.db-journal
+
 # garder le dossier models dans le repo, mais pas son contenu
 models/*
 !models/.gitkeep

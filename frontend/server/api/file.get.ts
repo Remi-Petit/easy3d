@@ -37,6 +37,7 @@ export default defineEventHandler(async (event) => {
       headers: {
         ...(ifNoneMatch ? { 'if-none-match': ifNoneMatch } : {}),
         ...(ifModifiedSince ? { 'if-modified-since': ifModifiedSince } : {}),
+        ...backendHeaders(event),
       },
     })
 

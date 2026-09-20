@@ -100,6 +100,18 @@ const editorId = editorIdFor(props.rel)
 const { text, connected, synced, peers, beginEdit } = useCollabNote(props.rel)
 
 const editing = ref(false)
+
+// `can` vient de `useAuth()` (pas d'auto-import).
+const { can } = useAuth()
+
+/**
+ * `true` si le compte peut écrire les notes.
+ *
+ * Sans ce droit, l'aperçu reste affiché (le Markdown accompagne le catalogue)
+ * mais le bouton d'édition disparaît : l'écriture passe par le canal CRDT, qui
+ * n'est ouvert qu'aux comptes autorisés à écrire (`POST /collab/*`).
+ */
+const canWrite = computed(() => can(PERM.noteWrite))
 /** Langue de l'éditeur : elle suit celle de l'app (voir `config()` plus haut). */
 const { locale } = useI18n()
 const mdLanguage = computed(() => locale.value)
@@ -141,6 +153,7 @@ function toggleEdit() {
           {{ connected ? (peers > 0 ? $t('notes.peers', { count: peers + 1 }) : $t('notes.connected')) : $t('notes.offline') }}
         </span>
         <button
+          v-if="canWrite"
           type="button"
           class="note__btn"
           :class="{ 'note__btn--primary': editing }"

@@ -9,7 +9,11 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
 
   try {
-    return await $fetch(`${base}/config`, { method: 'PUT', body })
+    return await $fetch(`${base}/config`, {
+      method: 'PUT',
+      body,
+      headers: backendHeaders(event),
+    })
   } catch (err: any) {
     // 400 « dossier introuvable » : on remonte le message métier tel quel.
     const status: number = err?.response?.status ?? 502

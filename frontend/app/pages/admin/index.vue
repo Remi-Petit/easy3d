@@ -2,6 +2,17 @@
 import type { DisplayMode, FileInfo, ConfigResponse, WatchInfo } from '~/composables/useModels'
 import { modelOptions, presetFor } from '~/utils/ai'
 import type { AiConfig, AiModelsResponse, AiPreset } from '~/utils/ai'
+import {
+  PROVISIONING_MODES,
+  emptyOidc,
+  oidcBody,
+  oidcUsable,
+  redirectUri,
+  type OidcConfig,
+  type OidcField,
+  type OidcInfo,
+  type ProvisioningMode,
+} from '~/utils/oidc'
 
 // Page d'administration : réglages de l'application (écrits dans `config.yml`
 // via `PUT /api/config`) et gestion des notes.
@@ -9,6 +20,10 @@ import type { AiConfig, AiModelsResponse, AiPreset } from '~/utils/ai'
 // Les notes passent par le **même** éditeur que les pages de détail
 // (`NotePanel`, CRDT Yjs) : on n'écrit jamais un `.md` directement, sinon on
 // écrase le travail d'une autre session en cours.
+//
+// `admin.ts` vérifie le droit d'entrée (`config.read`) : un compte qui ne l'a pas
+// est renvoyé au catalogue plutôt que de découvrir un écran en lecture seule.
+definePageMeta({ middleware: 'admin' })
 const { data, error, live } = useModels()
 const { t } = useI18n()
 
@@ -23,6 +38,13 @@ const saveMessage = ref('')
 // Re-scan périodique : `null` (champ vide) = automatique, `0` = désactivé.
 const pollSeconds = ref<number | string | null>(null)
 const watchInfo = ref<WatchInfo | null>(null)
+
+/**
+ * État du SSO annoncé par le backend : champs figés par l'environnement
+ * (`locked`) et configuration incomplète (`problem`). Le formulaire du
+ * fournisseur d'identité vit plus bas ; ceci n'est que ce que le serveur en dit.
+ */
+const oidcStatus = ref<OidcInfo | null>(null)
 
 /** Mode **appliqué** par le backend : la référence, pas notre sélection. */
 const appliedMode = computed(() => data.value?.config?.display?.mode ?? '3d')
@@ -54,9 +76,11 @@ async function loadResolvedRoot() {
     const res = await $fetch<ConfigResponse>('/api/config')
     resolvedRoot.value = res.models_root
     watchInfo.value = res.watch
+    oidcStatus.value = res.oidc ?? null
   } catch {
     resolvedRoot.value = ''
     watchInfo.value = null
+    oidcStatus.value = null
   }
 }
 
@@ -215,7 +239,7 @@ async function saveAi() {
   aiSave.value = { state: 'saving', message: '' }
 
   try {
-    await $fetch('/api/config', { method: 'PUT', body: configBody(formAi()) })
+    await $fetch('/api/config', { method: 'PUT', body: configBody(formAi(), storedOidc()) })
     aiSave.value = { state: 'ok', message: t('admin.saved') }
     aiTouched.value = false
     await loadResolvedRoot()
@@ -314,16 +338,18 @@ watch(
 /**
  * Corps de configuration complet.
  *
- * Le bloc IA vient de l'appelant : les réglages d'affichage s'enregistrent au
- * changement et ne doivent **pas** emporter une clé en cours de saisie, alors
- * que le bouton « Enregistrer » de la carte IA fait précisément l'inverse.
+ * Les blocs IA et SSO viennent de l'appelant : les réglages d'affichage
+ * s'enregistrent au changement et ne doivent **pas** emporter une clé ou un
+ * secret en cours de saisie, alors que les boutons « Enregistrer » font
+ * précisément le contraire.
  */
-function configBody(ai: AiConfig) {
+function configBody(ai: AiConfig, oidc: OidcConfig) {
   return {
     models_root: data.value?.config?.models_root ?? null,
     display: { mode: mode.value },
     watch: { poll_seconds: pollValue.value },
     ai,
+    oidc,
   }
 }
 
@@ -371,9 +397,10 @@ async function persist() {
       try {
         await $fetch('/api/config', {
           method: 'PUT',
-          // Le bloc IA part tel qu'il est **enregistré** : ces réglages-ci ne
-          // touchent pas aux champs de la carte IA, qui ont leur propre bouton.
-          body: configBody(storedAi()),
+          // Les blocs IA et SSO partent tels qu'ils sont **enregistrés** : ces
+          // réglages-ci ne touchent pas à leurs champs, qui ont leur propre
+          // bouton.
+          body: configBody(storedAi(), storedOidc()),
         })
         saveState.value = 'ok'
         saveMessage.value = t('admin.saved')
@@ -388,6 +415,136 @@ async function persist() {
     } while (queued)
   } finally {
     inFlight = false
+  }
+}
+
+// ── Fournisseur d'identité (SSO) ─────────────────────────────────────────────
+// Un compte peut se connecter par mot de passe **ou** par le fournisseur
+// d'identité de l'organisation : ce bloc règle le second. Tout est enregistré par
+// un bouton explicite (comme la carte IA) — un émetteur à moitié saisi ne doit
+// pas partir.
+//
+// Chaque champ peut être **figé par l'environnement** (`EASY3D_OIDC_*`), auquel
+// cas il est grisé : il n'y a rien à y faire depuis l'interface, et l'écrire
+// donnerait l'illusion d'un réglage.
+const oidcIssuer = ref('')
+const oidcClientId = ref('')
+const oidcClientSecret = ref('')
+const oidcScopes = ref('')
+const oidcEnabled = ref(false)
+const oidcProvisioning = ref<ProvisioningMode>('auto')
+const oidcTouched = ref(false)
+const oidcSave = ref<{ state: 'idle' | 'saving' | 'ok' | 'error'; message: string }>({
+  state: 'idle',
+  message: '',
+})
+const oidcCheck = ref<{ state: 'idle' | 'running' | 'ok' | 'error'; message: string }>({
+  state: 'idle',
+  message: '',
+})
+
+/**
+ * Le formulaire suit la configuration **appliquée**, y compris le secret masqué
+ * (`***`), qui est justement la valeur à renvoyer pour le conserver.
+ *
+ * Un formulaire déjà touché est laissé tranquille : sinon le premier message du
+ * WebSocket effacerait un émetteur en cours de saisie. Ce `watch` est déclaré
+ * **après** les `ref` qu'il remplit (avec `immediate`, il s'exécute pendant le
+ * `setup` : les déclarer plus bas les laisserait en zone morte).
+ */
+watch(
+  () => data.value?.config?.oidc,
+  (server) => {
+    if (oidcTouched.value) return
+    const bloc = { ...emptyOidc(), ...(server ?? {}) }
+    oidcEnabled.value = !!bloc.enabled
+    oidcIssuer.value = bloc.issuer ?? ''
+    oidcClientId.value = bloc.client_id ?? ''
+    oidcClientSecret.value = bloc.client_secret ?? ''
+    oidcScopes.value = (bloc.scopes ?? []).join(' ')
+    oidcProvisioning.value = PROVISIONING_MODES.includes(bloc.provisioning as ProvisioningMode)
+      ? (bloc.provisioning as ProvisioningMode)
+      : 'auto'
+  },
+  { immediate: true },
+)
+
+/** Le champ est-il imposé par l'environnement ? (grisé, et expliqué) */
+function oidcLocked(field: OidcField): boolean {
+  return oidcStatus.value?.locked?.includes(field) ?? false
+}
+
+/** Adresse de retour à déclarer chez le fournisseur, telle qu'elle sera envoyée. */
+const oidcRedirect = redirectUri(useRequestURL().origin)
+
+/** Ce qui manque à un SSO allumé : un **code** (`issuer`…), traduit ici. */
+const oidcProblem = computed(() => {
+  const code = oidcStatus.value?.problem
+  return code ? t(`admin.ssoMissing.${code}`) : ''
+})
+
+/** Bloc `oidc` enregistré, tel que le backend le connaît (secret masqué). */
+function storedOidc(): OidcConfig {
+  return data.value?.config?.oidc ?? emptyOidc()
+}
+
+/** Bloc `oidc` du formulaire, prêt à être enregistré. */
+function formOidc(): OidcConfig {
+  return oidcBody(
+    {
+      enabled: oidcEnabled.value,
+      issuer: oidcIssuer.value.trim() || null,
+      client_id: oidcClientId.value.trim() || null,
+      // `***` = « garde le secret enregistré », vide = « supprime-le ».
+      client_secret: oidcClientSecret.value.trim() || null,
+      scopes: oidcScopes.value.split(/\s+/).filter(Boolean),
+      provisioning: oidcProvisioning.value,
+    },
+    oidcStatus.value?.locked ?? [],
+  )
+}
+
+function markOidcTouched() {
+  oidcTouched.value = true
+  oidcSave.value = { state: 'idle', message: '' }
+  oidcCheck.value = { state: 'idle', message: '' }
+}
+
+/** Enregistre le bloc SSO (config.yml), puis relit l'état appliqué. */
+async function saveOidc() {
+  oidcSave.value = { state: 'saving', message: '' }
+
+  try {
+    await $fetch('/api/config', { method: 'PUT', body: configBody(storedAi(), formOidc()) })
+    oidcSave.value = { state: 'ok', message: t('admin.saved') }
+    oidcTouched.value = false
+    await loadResolvedRoot()
+  } catch (e: any) {
+    oidcSave.value = {
+      state: 'error',
+      message: e?.data?.message ?? e?.data?.cause ?? e?.message ?? t('admin.saveFailed'),
+    }
+  }
+}
+
+/**
+ * Demande au backend d'interroger le fournisseur (découverte OIDC).
+ *
+ * C'est le seul moyen de savoir **tout de suite** qu'une adresse d'émetteur est
+ * fausse : autrement, l'erreur n'apparaît qu'au premier utilisateur qui essaie de
+ * se connecter, sur une page qui ne nous appartient pas.
+ */
+async function testOidc() {
+  oidcCheck.value = { state: 'running', message: '' }
+
+  try {
+    const res = await $fetch<{ issuer: string }>('/api/auth/oidc/check')
+    oidcCheck.value = { state: 'ok', message: t('admin.ssoCheckOk', { issuer: res.issuer }) }
+  } catch (e: any) {
+    oidcCheck.value = {
+      state: 'error',
+      message: typeof e?.data === 'string' ? e.data : (e?.message ?? t('common.unknownError')),
+    }
   }
 }
 
@@ -713,6 +870,168 @@ usePageHeader(() => ({
           </span>
           <span v-else-if="aiSave.state === 'error'" class="admin__status admin__status--err">
             {{ aiSave.message }}
+          </span>
+        </div>
+      </section>
+
+      <!--
+        Fournisseur d'identité (SSO) : une **seconde** façon de se connecter,
+        qui ne remplace pas le mot de passe — un compte local continue de
+        fonctionner. Les réglages passent par `config.yml`… sauf ceux que
+        l'environnement impose (`EASY3D_OIDC_*`), qui sont alors grisés.
+      -->
+      <section class="admin__card">
+        <h2 class="admin__title">{{ $t('admin.sso') }}</h2>
+
+        <div class="admin__field">
+          <label class="admin__choice" :class="{ 'admin__choice--on': oidcEnabled }">
+            <input
+              v-model="oidcEnabled"
+              type="checkbox"
+              :disabled="oidcLocked('enabled')"
+              @change="markOidcTouched"
+            />
+            <span>{{ $t('admin.ssoEnable') }}</span>
+          </label>
+          <p class="admin__hint">{{ $t('admin.ssoEnableHint') }}</p>
+          <!-- Un SSO allumé mais incomplet : on dit ce qui manque, au lieu de
+               laisser chercher pourquoi le bouton n'apparaît pas. -->
+          <p v-if="oidcProblem" class="admin__status admin__status--err">{{ oidcProblem }}</p>
+          <p v-if="oidcStatus?.locked?.length" class="admin__hint admin__hint--rec">
+            {{ $t('admin.ssoLocked') }}
+          </p>
+        </div>
+
+        <div class="admin__field">
+          <label class="admin__label" for="oidc-issuer">{{ $t('admin.ssoIssuer') }}</label>
+          <div class="admin__row">
+            <input
+              id="oidc-issuer"
+              v-model="oidcIssuer"
+              class="admin__input"
+              type="text"
+              placeholder="https://sso.exemple.fr/realms/moi"
+              :disabled="oidcLocked('issuer')"
+              @input="markOidcTouched"
+            />
+          </div>
+          <p class="admin__hint">{{ $t('admin.ssoIssuerHint') }}</p>
+        </div>
+
+        <div class="admin__field">
+          <label class="admin__label" for="oidc-client-id">{{ $t('admin.ssoClientId') }}</label>
+          <div class="admin__row">
+            <input
+              id="oidc-client-id"
+              v-model="oidcClientId"
+              class="admin__input"
+              type="text"
+              :disabled="oidcLocked('client_id')"
+              @input="markOidcTouched"
+            />
+          </div>
+        </div>
+
+        <div class="admin__field">
+          <label class="admin__label" for="oidc-client-secret">
+            {{ $t('admin.ssoClientSecret') }}
+          </label>
+          <div class="admin__row">
+            <input
+              id="oidc-client-secret"
+              v-model="oidcClientSecret"
+              class="admin__input"
+              type="password"
+              autocomplete="off"
+              :disabled="oidcLocked('client_secret')"
+              @input="markOidcTouched"
+            />
+            <button
+              v-if="oidcClientSecret"
+              type="button"
+              class="admin__action"
+              :disabled="oidcLocked('client_secret')"
+              @click="
+                oidcClientSecret = '';
+                markOidcTouched()
+              "
+            >
+              {{ $t('ai.apiKeyClear') }}
+            </button>
+          </div>
+          <p class="admin__hint">{{ $t('admin.ssoClientSecretHint') }}</p>
+        </div>
+
+        <div class="admin__field">
+          <label class="admin__label" for="oidc-scopes">{{ $t('admin.ssoScopes') }}</label>
+          <div class="admin__row">
+            <input
+              id="oidc-scopes"
+              v-model="oidcScopes"
+              class="admin__input"
+              type="text"
+              placeholder="openid email profile"
+              :disabled="oidcLocked('scopes')"
+              @input="markOidcTouched"
+            />
+          </div>
+          <p class="admin__hint">{{ $t('admin.ssoScopesHint') }}</p>
+        </div>
+
+        <div class="admin__field">
+          <label class="admin__label" for="oidc-provisioning">
+            {{ $t('admin.ssoProvisioning') }}
+          </label>
+          <div class="admin__row">
+            <select
+              id="oidc-provisioning"
+              v-model="oidcProvisioning"
+              class="admin__input"
+              :disabled="oidcLocked('provisioning')"
+              @change="markOidcTouched"
+            >
+              <option v-for="mode in PROVISIONING_MODES" :key="mode" :value="mode">
+                {{ $t(`admin.ssoMode.${mode}.label`) }}
+              </option>
+            </select>
+          </div>
+          <p class="admin__hint">{{ $t(`admin.ssoMode.${oidcProvisioning}.hint`) }}</p>
+        </div>
+
+        <!-- L'adresse à déclarer chez le fournisseur : elle ne se devine pas, et
+             une valeur approchante est refusée par les fournisseurs. -->
+        <div class="admin__field">
+          <span class="admin__label">{{ $t('admin.ssoRedirect') }}</span>
+          <p class="admin__hint">
+            <code>{{ oidcRedirect }}</code>
+          </p>
+        </div>
+
+        <div class="admin__field admin__field--actions">
+          <button
+            type="button"
+            class="admin__action admin__action--primary"
+            :disabled="oidcSave.state === 'saving'"
+            @click="saveOidc"
+          >
+            {{ oidcSave.state === 'saving' ? '…' : $t('ai.save') }}
+          </button>
+          <button
+            type="button"
+            class="admin__action"
+            :disabled="oidcCheck.state === 'running' || !oidcUsable(oidcStatus)"
+            @click="testOidc"
+          >
+            {{ oidcCheck.state === 'running' ? $t('ai.testing') : $t('ai.test') }}
+          </button>
+          <span v-if="oidcSave.state === 'ok'" class="admin__status admin__status--ok">
+            {{ oidcSave.message }}
+          </span>
+          <span v-else-if="oidcSave.state === 'error'" class="admin__status admin__status--err">
+            {{ oidcSave.message }}
+          </span>
+          <span v-if="oidcCheck.message" class="admin__status" :class="oidcCheck.state === 'ok' ? 'admin__status--ok' : 'admin__status--err'">
+            {{ oidcCheck.message }}
           </span>
         </div>
       </section>

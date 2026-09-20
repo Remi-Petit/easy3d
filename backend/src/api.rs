@@ -1,26 +1,28 @@
 use crate::ai;
-use crate::collab;
-use crate::config::{self, Config};
+use crate::auth;
+use crate::collab;use crate::config::{self, Config};
 use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
 use crate::thumbnail;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{DefaultBodyLimit, Query, State};
+use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post, put};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
+use tower::ServiceExt;
 
 /// État partagé par les handlers HTTP et WebSocket.
 ///
@@ -50,6 +52,21 @@ pub struct AppState {
     /// chaque tic rediffuserait un contenu identique et le frontend, qui
     /// remplace son état à chaque message, se re-rendrait pour rien.
     pub last_snapshot: Arc<RwLock<String>>,
+    /// Comptes utilisateurs et sessions.
+    ///
+    /// **Éteint par défaut** ([`auth::Auth::disabled`]) : sans `EASY3D_AUTH`, le
+    /// middleware laisse passer tout le monde et le serveur se comporte comme
+    /// avant l'existence des comptes.
+    pub auth: Arc<auth::Auth>,
+    /// Réglages SSO venus de l'**environnement** (`EASY3D_OIDC_*`).
+    ///
+    /// Ils gagnent sur `config.yml` : voir [`auth::oidc::Env`]. Vide par défaut
+    /// — comme [`AppState::auth`], c'est un champ de l'état (rempli par `main`)
+    /// et non une lecture d'environnement à chaque requête, ce qui rend le flux
+    /// testable.
+    pub oidc: Arc<auth::oidc::Env>,
+    /// Un service MCP **par compte** (voir [`AppState::mcp_service`]).
+    pub mcp: Arc<Mutex<HashMap<String, StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager>>>>,
 }
 
 impl AppState {
@@ -65,7 +82,57 @@ impl AppState {
             // configuration les remplace s'il existe (voir `main.rs`).
             presets: Arc::new(RwLock::new(ai::presets::defaults())),
             last_snapshot: Arc::new(RwLock::new(String::new())),
+            auth: Arc::new(auth::Auth::disabled()),
+            oidc: Arc::new(auth::oidc::Env::empty()),
+            mcp: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Service MCP d'un compte, créé à sa première utilisation.
+    ///
+    /// La fabrique de rmcp ne reçoit **pas** la requête HTTP (elle ne prend aucun
+    /// argument) : l'identité doit donc être capturée au moment où le service est
+    /// créé. Un service par compte est de toute façon le bon découpage — chaque
+    /// agent garde ses propres sessions, et l'un ne peut pas hériter de celles de
+    /// l'autre.
+    ///
+    /// Le service est **conservé** : ses sessions doivent survivre d'une requête
+    /// à l'autre, c'est ainsi que fonctionne le transport Streamable HTTP.
+    pub fn mcp_service(
+        &self,
+        user: Option<String>,
+    ) -> StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager> {
+        // Clé vide = installation sans comptes : un seul service, comme avant.
+        let cle = user.clone().unwrap_or_default();
+        if let Some(service) = self.mcp.lock().unwrap().get(&cle) {
+            return service.clone();
+        }
+
+        let state = self.clone();
+        let service = StreamableHttpService::new(
+            move || Ok(crate::mcp::Easy3dMcp::for_user(state.clone(), user.clone())),
+            Arc::new(LocalSessionManager::default()),
+            StreamableHttpServerConfig::default(),
+        );
+        self.mcp.lock().unwrap().insert(cle, service.clone());
+        service
+    }
+
+    /// Active la gestion des comptes (voir `auth::Auth::from_env`).
+    ///
+    /// Passer par un champ de l'état — et non par une variable d'environnement
+    /// relue à chaque requête — est ce qui rend l'authentification **testable**
+    /// sans jouer avec l'environnement du processus (même choix que les
+    /// permissions du serveur MCP).
+    pub fn with_auth(mut self, auth: auth::Auth) -> Self {
+        self.auth = Arc::new(auth);
+        self
+    }
+
+    /// Fixe les réglages SSO venus de l'environnement (voir [`auth::oidc::Env`]).
+    pub fn with_oidc(mut self, oidc: auth::oidc::Env) -> Self {
+        self.oidc = Arc::new(oidc);
+        self
     }
 
     /// Remplace les adresses connues (démarrage, ou relecture à chaud).
@@ -136,38 +203,203 @@ pub async fn serve(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
 /// Extraite de [`serve`] pour que les tests montent exactement le même
 /// serveur que la production.
 pub fn routes(state: AppState) -> Router {
-    // Serveur MCP monté sur `/mcp` (transport Streamable HTTP, voir `crate::mcp`).
-    // Il partage l'état : les outils lisent le catalogue courant et écrivent la
-    // configuration et les notes par les mêmes chemins que l'interface.
-    let mcp: StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager> =
-        StreamableHttpService::new(
-            {
-                let state = state.clone();
-                move || Ok(crate::mcp::Easy3dMcp::new(state.clone()))
-            },
-            Arc::new(LocalSessionManager::default()),
-            StreamableHttpServerConfig::default(),
-        );
+    // Routes **publiques** : la santé, et de quoi se connecter. Sans ces
+    // dernières, un serveur fermé le resterait pour tout le monde.
+    let public = Router::new()
+        .route("/health", get(health))
+        .route("/auth/me", get(auth::me))
+        .route("/auth/login", post(auth::login))
+        .route("/auth/logout", post(auth::logout))
+        // SSO : le navigateur part d'ici et revient sur `…/callback`. Les deux
+        // doivent être publiques par nature — on n'est pas encore authentifié.
+        .route("/auth/oidc/start", get(auth::oidc::start))
+        .route("/auth/oidc/callback", get(auth::oidc::callback));
 
-    Router::new()
-        .route("/models", get(list_models))
-        .route("/config", get(get_config).put(put_config))
-        .route("/file", get(get_file))
-        .route(
+    // Les routes protégées sont groupées **par droit exigé** : un groupe, un
+    // droit, une ligne ([`gated`]). La table des routes se lit donc comme la
+    // liste des droits (`auth::permissions`) : un droit ajouté se voit ici tout
+    // de suite, et un droit oublié aussi.
+    //
+    // Le serveur MCP reste derrière `require_auth` seul : ses outils ont des
+    // droits différents et seront vérifiés **outil par outil** (étape des jetons
+    // d'API), ce qu'un chemin unique ne permet pas de faire.
+    let catalogue = gated(
+        Router::new()
+            .route("/models", get(list_models))
+            .route("/file", get(get_file))
+            .route("/note", get(get_note))
+            .route("/ws", get(ws_models)),
+        &state,
+        auth::permissions::CATALOG_READ,
+    );
+
+    // Les notes sont dans le catalogue **en aperçu** (le JSON diffusé porte le
+    // Markdown rendu) : écrire dans l'éditeur temps réel demande donc le droit
+    // d'écriture, pas celui de lecture. Le canal CRDT ne sait pas distinguer une
+    // lecture d'une écriture — c'est le prix, assumé, de l'édition collaborative.
+    let notes = gated(
+        Router::new().route("/collab/{*rel}", get(ws_collab)),
+        &state,
+        auth::permissions::NOTE_WRITE,
+    );
+
+    let uploads = gated(
+        Router::new().route(
             "/upload",
             post(post_upload).layer(DefaultBodyLimit::max(UPLOAD_MAX_BYTES)),
+        ),
+        &state,
+        auth::permissions::MODEL_UPLOAD,
+    );
+    let renames = gated(
+        Router::new().route("/rename", post(post_rename)),
+        &state,
+        auth::permissions::MODEL_RENAME,
+    );
+    let deletes = gated(
+        Router::new().route("/delete", post(post_delete)),
+        &state,
+        auth::permissions::MODEL_DELETE,
+    );
+
+    // `/config` apparaît deux fois : lire les réglages et les modifier sont deux
+    // droits distincts, et axum fusionne sans problème les méthodes d'un même
+    // chemin.
+    let settings_read = gated(
+        Router::new().route("/config", get(get_config)),
+        &state,
+        auth::permissions::CONFIG_READ,
+    );
+    let settings_write = gated(
+        Router::new()
+            .route("/config", put(put_config))
+            // Contrôle du fournisseur d'identité : il fait partir une requête
+            // vers l'adresse enregistrée, donc il appartient à qui peut écrire
+            // la configuration.
+            .route("/auth/oidc/check", get(auth::oidc::check)),
+        &state,
+        auth::permissions::CONFIG_WRITE,
+    );
+
+    // Les adresses connues des fournisseurs accompagnent l'écran de recherche :
+    // il faut pouvoir chercher pour en avoir besoin.
+    let ai = gated(
+        Router::new()
+            .route("/ai/providers", get(ai_providers))
+            .route("/ai/search", post(ai_search)),
+        &state,
+        auth::permissions::AI_USE,
+    );
+    let ai_config = gated(
+        Router::new().route("/ai/models", post(ai_models)),
+        &state,
+        auth::permissions::AI_CONFIG,
+    );
+
+    // Ce qui ne demande qu'être **connecté** : son propre mot de passe, et le
+    // catalogue des droits (l'interface en a besoin pour construire ses cases à
+    // cocher ; la liste est publique dans le binaire).
+    let authenticated = Router::new()
+        .route("/auth/ws-ticket", post(auth::ws_ticket))
+        .route("/auth/password", post(auth::rbac::change_password))
+        .route("/permissions", get(auth::rbac::list_permissions))
+        // Les jetons d'API sont **personnels** : chacun gère les siens, il n'y a
+        // donc aucun droit à exiger (ceux des autres ne sont jamais montrés).
+        .route(
+            "/tokens",
+            get(auth::tokens::list).post(auth::tokens::create),
         )
-        .route("/rename", post(post_rename))
-        .route("/delete", post(post_delete))
-        .route("/note", get(get_note))
-        .route("/health", get(health))
-        .route("/ai/providers", get(ai_providers))
-        .route("/ai/search", post(ai_search))
-        .route("/ai/models", post(ai_models))
-        .route("/ws", get(ws_models))
-        .route("/collab/{*rel}", get(ws_collab))
-        .nest_service("/mcp", mcp)
-        .with_state(state)
+        .route("/tokens/{uuid}", axum::routing::delete(auth::tokens::revoke));
+
+    let accounts_read = gated(
+        Router::new().route("/users", get(auth::rbac::list_users)),
+        &state,
+        auth::permissions::USERS_READ,
+    );
+    let roles_read = gated(
+        Router::new().route("/roles", get(auth::rbac::list_roles)),
+        &state,
+        auth::permissions::ROLES_READ,
+    );
+    let accounts_write = gated(
+        Router::new()
+            .route("/users", post(auth::rbac::create_user))
+            .route(
+                "/users/{uuid}",
+                put(auth::rbac::update_user).delete(auth::rbac::delete_user),
+            ),
+        &state,
+        auth::permissions::USERS_WRITE,
+    );
+    let roles_write = gated(
+        Router::new()
+            .route("/roles", post(auth::rbac::create_role))
+            .route("/roles/default", put(auth::rbac::set_default_role))
+            .route(
+                "/roles/{uuid}",
+                put(auth::rbac::update_role).delete(auth::rbac::delete_role),
+            ),
+        &state,
+        auth::permissions::ROLES_WRITE,
+    );
+
+    let protected = Router::new()
+        .merge(catalogue)
+        .merge(notes)
+        .merge(uploads)
+        .merge(renames)
+        .merge(deletes)
+        .merge(settings_read)
+        .merge(settings_write)
+        .merge(ai)
+        .merge(ai_config)
+        .merge(authenticated)
+        .merge(accounts_read)
+        .merge(roles_read)
+        .merge(accounts_write)
+        .merge(roles_write)
+        // Le serveur MCP n'est pas monté par `nest_service` : il faut choisir le
+        // service **du compte** à chaque requête (voir `AppState::mcp_service`).
+        .route("/mcp", any(mcp))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
+
+    public.merge(protected).with_state(state)
+}
+
+/// Point d'entrée du serveur MCP (`/mcp`).
+///
+/// L'identité est celle que `require_auth` a résolue — cookie de session ou
+/// **jeton d'API** — et chaque compte a son propre service MCP : les outils
+/// savent donc à qui ils parlent, et chacun vérifie le droit qu'il exige
+/// (`permissions::for_tool`).
+async fn mcp(
+    State(state): State<AppState>,
+    auth: Option<auth::AuthUser>,
+    request: Request,
+) -> Response {
+    let user = auth.map(|auth::AuthUser(user)| user.uuid);
+    let service = state.mcp_service(user);
+
+    match service.oneshot(request).await {
+        Ok(response) => response.map(axum::body::Body::new).into_response(),
+        // `Infallible` : le service ne peut pas échouer autrement qu'en répondant.
+        Err(never) => match never {},
+    }
+}
+
+/// Ajoute à un groupe de routes le contrôle du droit exigé.
+///
+/// Cette petite fonction existe parce que la couche renvoyée par
+/// `middleware::from_fn_with_state` n'a pas de type nommable : on la fabrique
+/// ici, une fois, au lieu de répéter le tuple dans chaque groupe.
+fn gated(routes: Router<AppState>, state: &AppState, permission: &'static str) -> Router<AppState> {
+    routes.route_layer(middleware::from_fn_with_state(
+        (state.clone(), permission),
+        auth::require_permission,
+    ))
 }
 
 /// Point de santé : renvoie `ok` (200).
@@ -326,6 +558,22 @@ pub struct ConfigResponse {
     /// Surveillance du dossier : de quoi expliquer, dans l'interface, *pourquoi*
     /// la valeur recommandée est celle-là.
     pub watch: WatchInfo,
+    /// État du SSO : ce que `config.yml` ne peut plus régler, et ce qui manque.
+    pub oidc: OidcInfo,
+}
+
+/// Ce que l'interface doit savoir du SSO.
+#[derive(Serialize)]
+pub struct OidcInfo {
+    /// Champs du bloc `oidc` **figés par l'environnement** (`EASY3D_OIDC_*`) :
+    /// l'interface les montre grisés, avec la raison.
+    pub locked: Vec<&'static str>,
+    /// `true` si le SSO est réellement utilisable.
+    pub active: bool,
+    /// Ce qui manque, quand le SSO est demandé sans être configurable :
+    /// `issuer`, `client_id` ou `client_secret` (l'interface traduit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
 }
 
 /// Ce que l'interface doit savoir sur le re-scan périodique.
@@ -343,7 +591,13 @@ pub struct WatchInfo {
 }
 
 impl ConfigResponse {
-    fn of(config: Config) -> Self {
+    /// Réponse pour l'état courant : c'est lui qui sait ce que l'environnement
+    /// impose (voir [`auth::oidc::Env`]).
+    fn of_state(state: &AppState) -> Self {
+        Self::of(&state.config(), &state.oidc)
+    }
+
+    fn of(config: &Config, oidc_env: &auth::oidc::Env) -> Self {
         // Canonicalisé quand c'est possible : le chemin affiché dans
         // l'interface ne doit pas contenir de `..` (ex : `backend/../models`).
         let path = config.resolve_models_root();
@@ -354,17 +608,33 @@ impl ConfigResponse {
         // sous Linux alors que le dossier vient de Windows.
         let (recommended, filesystem) = config::watch_poll_recommendation(&models_root);
         let effective =
-            config::watch_poll_interval(&config, &models_root).map_or(0, |d| d.as_secs());
+            config::watch_poll_interval(config, &models_root).map_or(0, |d| d.as_secs());
+
+        // Le SSO peut être demandé sans être configurable : l'interface doit le
+        // dire (sinon elle afficherait un interrupteur qui ne fait rien). Le
+        // code — et non une phrase — pour que le message suive la langue de
+        // l'interface.
+        let (active, problem) = match auth::oidc::resolve(&config.oidc, oidc_env) {
+            Ok(Some(_)) => (true, None),
+            Ok(None) => (false, None),
+            Err(manque) => (false, Some(manque.id().to_string())),
+        };
 
         Self {
-            // Configuration telle qu'elle peut être montrée : la clé d'API y est
-            // remplacée par un marqueur (voir [`config::KEY_PLACEHOLDER`]).
+            // Configuration telle qu'elle peut être montrée : les secrets (clé
+            // d'API, secret client OIDC) y sont remplacés par un marqueur (voir
+            // [`config::KEY_PLACEHOLDER`]).
             config: config.redacted(),
             models_root: tidy_path(&models_root),
             watch: WatchInfo {
                 recommended,
                 effective,
                 filesystem,
+            },
+            oidc: OidcInfo {
+                locked: oidc_env.locked(),
+                active,
+                problem,
             },
         }
     }
@@ -379,7 +649,7 @@ pub fn tidy_path(path: &Path) -> String {
 
 /// Renvoie la configuration **appliquée** (celle de l'état, pas du fichier).
 async fn get_config(State(state): State<AppState>) -> Json<ConfigResponse> {
-    Json(ConfigResponse::of(state.config()))
+    Json(ConfigResponse::of_state(&state))
 }
 
 /// Remplace la configuration : écrit le YAML, que le watcher recharge à chaud.
@@ -430,6 +700,13 @@ pub fn apply_config(
         config.ai = config::Ai::default();
     }
 
+    // Le secret client OIDC suit la même convention que la clé d'API : `***`
+    // veut dire « garde le secret enregistré », la chaîne vide « efface-le ».
+    // Sans ça, enregistrer un changement d'émetteur effacerait le secret.
+    config.oidc.client_secret = stored
+        .oidc
+        .merge_secret(config.oidc.client_secret.as_deref());
+
     // Refuse une config qui pointerait vers un dossier inexistant : le watcher
     // basculerait dessus et le catalogue se viderait.
     let root = config.resolve_models_root();
@@ -443,7 +720,7 @@ pub fn apply_config(
     // Rien à écrire si rien n'a changé : ça évite de réécrire le fichier (et de
     // perdre ses commentaires) pour rien.
     if config == state.config() {
-        return Ok(ConfigResponse::of(config));
+        return Ok(ConfigResponse::of(&config, &state.oidc));
     }
 
     let path = state.config_path.as_ref();
@@ -466,7 +743,7 @@ pub fn apply_config(
         broadcast_snapshot(state);
     }
 
-    Ok(ConfigResponse::of(config))
+    Ok(ConfigResponse::of(&config, &state.oidc))
 }
 
 /// Erreur interne (écriture du fichier, sérialisation) → 500 avec le message.
@@ -2549,5 +2826,1240 @@ mod tests {
         let msg = socket.next().await.unwrap().unwrap();
         let v: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
         assert_eq!(v["files"][0]["note"], "la note");
+    }
+
+    // ── Comptes utilisateurs ────────────────────────────────────────────────
+    //
+    // Les tests parlent à la même table de routes que la production : c'est
+    // elle qui décide ce qui est public, pas une variante de test.
+
+    /// Application dont l'authentification **est active**, avec un compte
+    /// administrateur créé comme au démarrage du serveur.
+    ///
+    /// `prepare` reçoit la base ouverte pour les cas particuliers (compte
+    /// désactivé, second compte…). Le dossier temporaire est rendu à l'appelant
+    /// pour rester vivant pendant le test.
+    fn app_avec_comptes(prepare: impl FnOnce(&auth::Auth)) -> (Router, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        // Catalogue à part : les tests qui écrivent ou suppriment ne doivent pas
+        // toucher aux dossiers du dépôt.
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        let comptes = auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        let seed = auth::AdminSeed {
+            username: "remi".into(),
+            email: "remi@exemple.fr".into(),
+            password: "motdepasse".into(),
+        };
+        auth::bootstrap_admin(&comptes, Some(seed)).unwrap();
+        prepare(&comptes);
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(models, ws, Config::default()).with_auth(comptes);
+        (routes(state), dir)
+    }
+
+    /// `POST` JSON, avec un cookie de session en option.
+    async fn post_json(
+        app: &Router,
+        uri: &str,
+        body: serde_json::Value,
+        cookie: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        app.clone()
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// `GET`, avec un cookie de session en option.
+    async fn get_with(app: &Router, uri: &str, cookie: Option<&str>) -> Response {
+        let mut request = Request::builder().uri(uri);
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        app.clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// Cookie `nom=valeur` posé par une réponse (sans ses attributs).
+    fn cookie_de(res: &Response) -> String {
+        res.headers()
+            .get(header::SET_COOKIE)
+            .expect("la réponse doit poser un cookie de session")
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn body_text(res: Response) -> String {
+        String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
+    }
+
+    async fn body_json(res: Response) -> serde_json::Value {
+        serde_json::from_str(&body_text(res).await).unwrap()
+    }
+
+    /// Le test de non-régression le plus important du lot : **sans**
+    /// `EASY3D_AUTH`, le serveur se comporte exactement comme avant.
+    #[tokio::test]
+    async fn sans_authentification_le_catalogue_reste_ouvert() {
+        let app = test_app(".");
+
+        let res = get_with(&app, "/models", None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Et la route de connexion ne devient pas une porte dérobée : elle dit
+        // qu'il n'y a rien à quoi se connecter.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "auth_disabled");
+
+        let res = get_with(&app, "/auth/me", None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let v = body_json(res).await;
+        assert_eq!(v["enabled"], false);
+        assert!(v["user"].is_null());
+    }
+
+    #[tokio::test]
+    async fn avec_authentification_tout_est_ferme_sans_cookie() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        for uri in ["/models", "/config", "/note?path=x"] {
+            let res = get_with(&app, uri, None).await;
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "uri : {uri}");
+            assert_eq!(body_text(res).await, "unauthenticated");
+        }
+
+        // Le serveur MCP est protégé lui aussi : c'est la route qui écrit dans
+        // les notes, elle ne doit pas rester ouverte aux anonymes. Un agent
+        // s'authentifiera par jeton (étape suivante), pas par cookie.
+        let res = post_json(&app, "/mcp", serde_json::json!({}), None).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn la_connexion_ouvre_l_acces_et_la_deconnexion_le_referme() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        // Connexion par **e-mail** (le nom d'utilisateur marche aussi).
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi@exemple.fr", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = cookie_de(&res);
+        assert!(cookie.starts_with("easy3d_session="));
+
+        let v = body_json(res).await;
+        assert_eq!(v["username"], "remi");
+        assert_eq!(v["roles"][0], "admin");
+        assert!(v.get("password_hash").is_none(), "json : {v}");
+
+        // Le catalogue s'ouvre avec le cookie de session.
+        let res = get_with(&app, "/models", Some(&cookie)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = get_with(&app, "/auth/me", Some(&cookie)).await;
+        let v = body_json(res).await;
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["user"]["username"], "remi");
+
+        // Déconnexion : la session est fermée **côté serveur** (le cookie volé
+        // ne vaut plus rien) et effacée côté navigateur.
+        let res = post_json(
+            &app,
+            "/auth/logout",
+            serde_json::json!({}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        // Le cookie de fermeture garde les mêmes attributs et expire tout de
+        // suite : le navigateur l'oublie.
+        let ferme = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("la déconnexion doit effacer le cookie")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ferme.contains("Max-Age=0"), "cookie : {ferme}");
+        assert!(ferme.contains("HttpOnly"), "cookie : {ferme}");
+
+        let res = get_with(&app, "/models", Some(&cookie)).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn un_mauvais_mot_de_passe_et_un_compte_inconnu_donnent_le_meme_refus() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        let connu = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "mauvais" }),
+            None,
+        )
+        .await;
+        assert_eq!(connu.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            connu.headers().get(header::SET_COOKIE).is_none(),
+            "un échec ne doit jamais ouvrir de session"
+        );
+        let corps = body_text(connu).await;
+
+        let inconnu = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "personne", "password": "mauvais" }),
+            None,
+        )
+        .await;
+        assert_eq!(inconnu.status(), StatusCode::UNAUTHORIZED);
+        // Même code, donc même message : rien ne dit si le compte existe.
+        assert_eq!(body_text(inconnu).await, corps);
+        assert_eq!(corps, "invalid_credentials");
+    }
+
+    #[tokio::test]
+    async fn un_compte_desactive_ne_peut_plus_se_connecter() {
+        let (app, _dir) = app_avec_comptes(|comptes| {
+            comptes
+                .db(|conn| {
+                    conn.execute("UPDATE users SET disabled = 1", [])
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                })
+                .unwrap();
+        });
+
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert!(res.headers().get(header::SET_COOKIE).is_none());
+    }
+
+    #[tokio::test]
+    async fn trop_de_connexions_ratees_finissent_en_429() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        for essai in 1..=5 {
+            let res = post_json(
+                &app,
+                "/auth/login",
+                serde_json::json!({ "login": "remi", "password": "mauvais" }),
+                None,
+            )
+            .await;
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "essai {essai}");
+        }
+
+        // Le mot de passe **correct** non plus n'a plus le droit de passer : le
+        // blocage porte sur l'identifiant, pas sur ce qui a été essayé.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body_text(res).await, "rate_limited");
+    }
+
+    /// Sans authentification, le relais n'a rien à demander : il se connecte
+    /// directement, comme avant l'existence des comptes.
+    #[tokio::test]
+    async fn sans_authentification_aucun_ticket_n_est_necessaire() {
+        let app = test_app(".");
+        let res = post_json(&app, "/auth/ws-ticket", serde_json::json!({}), None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["ticket"], serde_json::Value::Null);
+    }
+
+    /// Le ticket est ce qui permet au relais Nitro (qui ne peut pas joindre le
+    /// cookie du navigateur à la connexion amont) d'ouvrir `/ws` et
+    /// `/collab/*`. Il doit donc valoir à la place du cookie — et seulement pour
+    /// un compte authentifié.
+    #[tokio::test]
+    async fn le_ticket_ouvre_l_acces_sans_cookie() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        // Sans compte, pas de ticket.
+        let res = post_json(&app, "/auth/ws-ticket", serde_json::json!({}), None).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        let cookie = cookie_de(&res);
+
+        let res = post_json(
+            &app,
+            "/auth/ws-ticket",
+            serde_json::json!({}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let ticket = body_json(res).await["ticket"]
+            .as_str()
+            .expect("un ticket pour une connexion authentifiée")
+            .to_string();
+        assert_eq!(ticket.len(), 64);
+
+        // Le ticket vaut à la place du cookie…
+        let res = get_with(&app, &format!("/models?ticket={ticket}"), None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // …et un ticket inventé ne vaut rien.
+        let res = get_with(&app, "/models?ticket=0000", None).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // Un paramètre vide non plus (il ne doit pas faire passer pour absent).
+        let res = get_with(&app, "/models?ticket=", None).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// `PUT` JSON, avec un cookie de session en option.
+    async fn put_json(
+        app: &Router,
+        uri: &str,
+        body: serde_json::Value,
+        cookie: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method("PUT")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        app.clone()
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// `DELETE`, avec un cookie de session en option.
+    async fn delete_with(app: &Router, uri: &str, cookie: Option<&str>) -> Response {
+        let mut request = Request::builder().method("DELETE").uri(uri);
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        app.clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    /// Connexion d'un compte ; renvoie son cookie de session.
+    async fn connecte(app: &Router, login: &str, password: &str) -> String {
+        let res = post_json(
+            app,
+            "/auth/login",
+            serde_json::json!({ "login": login, "password": password }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK, "connexion de {login}");
+        cookie_de(&res)
+    }
+
+    /// UUID d'un rôle, par son nom.
+    async fn role_uuid(app: &Router, cookie: &str, name: &str) -> String {
+        let v = body_json(get_with(app, "/roles", Some(cookie)).await).await;
+        v["roles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|role| role["name"] == name)
+            .unwrap_or_else(|| panic!("rôle « {name} » absent"))["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Crée un compte avec les rôles donnés (par leur UUID).
+    async fn cree_compte(
+        app: &Router,
+        admin: &str,
+        username: &str,
+        roles: Vec<String>,
+    ) -> Response {
+        post_json(
+            app,
+            "/users",
+            serde_json::json!({
+                "username": username,
+                "email": format!("{username}@exemple.fr"),
+                "password": "motdepasse",
+                "roles": roles,
+            }),
+            Some(admin),
+        )
+        .await
+    }
+
+    /// L'administrateur a **tous** les droits sans qu'on ait à les lui lister.
+    #[tokio::test]
+    async fn un_administrateur_a_tous_les_droits() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let cookie = connecte(&app, "remi", "motdepasse").await;
+
+        let v = body_json(get_with(&app, "/auth/me", Some(&cookie)).await).await;
+        assert_eq!(v["user"]["roles"][0], "admin");
+        assert_eq!(
+            v["user"]["permissions"].as_array().unwrap().len(),
+            crate::auth::permissions::ALL.len()
+        );
+
+        // Le catalogue des droits est servi par le backend : l'interface n'en a
+        // aucune liste en dur.
+        let v = body_json(get_with(&app, "/permissions", Some(&cookie)).await).await;
+        assert!(v.as_array().unwrap().iter().any(|p| p["id"] == "model.delete"));
+    }
+
+    /// Le rôle livré `lecteur` : voir le catalogue, rien de plus.
+    #[tokio::test]
+    async fn un_lecteur_consulte_sans_pouvoir_modifier() {
+        let (app, dir) = app_avec_comptes(|_| {});
+        std::fs::write(dir.path().join("models/a.txt"), "x").unwrap();
+
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        assert_eq!(
+            cree_compte(&app, &admin, "lecteur", vec![lecteur]).await.status(),
+            StatusCode::CREATED
+        );
+
+        let cookie = connecte(&app, "lecteur", "motdepasse").await;
+
+        // Il lit le catalogue et les notes…
+        assert_eq!(
+            get_with(&app, "/models", Some(&cookie)).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            get_with(&app, "/note?path=a.txt", Some(&cookie)).await.status(),
+            StatusCode::OK
+        );
+
+        // …mais ne peut ni écrire, ni lire les réglages, ni toucher aux comptes.
+        for (method, uri, body) in [
+            ("POST", "/delete", serde_json::json!({ "path": "a.txt" })),
+            ("POST", "/rename", serde_json::json!({ "path": "a.txt", "name": "b.txt" })),
+            ("POST", "/upload?path=b.txt", serde_json::json!({})),
+            ("PUT", "/config", serde_json::json!({ "display": { "mode": "3d" } })),
+            ("POST", "/ai/search", serde_json::json!({ "query": "x" })),
+        ] {
+            let res = if method == "PUT" {
+                put_json(&app, uri, body, Some(&cookie)).await
+            } else {
+                post_json(&app, uri, body, Some(&cookie)).await
+            };
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+            assert_eq!(body_text(res).await, "forbidden");
+        }
+
+        for uri in ["/config", "/users", "/roles"] {
+            assert_eq!(
+                get_with(&app, uri, Some(&cookie)).await.status(),
+                StatusCode::FORBIDDEN,
+                "{uri}"
+            );
+        }
+
+        // Le fichier est toujours là : le refus n'a rien modifié au passage.
+        assert!(dir.path().join("models/a.txt").exists());
+    }
+
+    /// Un droit posé **directement** sur un compte s'ajoute à ses rôles.
+    #[tokio::test]
+    async fn un_droit_direct_s_ajoute_aux_roles() {
+        let (app, dir) = app_avec_comptes(|_| {});
+        std::fs::write(dir.path().join("models/a.txt"), "x").unwrap();
+
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        assert_eq!(
+            cree_compte(&app, &admin, "supprimant", vec![lecteur]).await.status(),
+            StatusCode::CREATED
+        );
+
+        let v = body_json(get_with(&app, "/users", Some(&admin)).await).await;
+        let uuid = v["users"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|user| user["username"] == "supprimant")
+            .unwrap()["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let cookie = connecte(&app, "supprimant", "motdepasse").await;
+        assert_eq!(
+            post_json(&app, "/delete", serde_json::json!({ "path": "a.txt" }), Some(&cookie))
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        // On ajoute le droit seul, sans toucher au rôle.
+        assert_eq!(
+            put_json(
+                &app,
+                &format!("/users/{uuid}"),
+                serde_json::json!({ "permissions": ["model.delete"] }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        assert_eq!(
+            post_json(&app, "/delete", serde_json::json!({ "path": "a.txt" }), Some(&cookie))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert!(!dir.path().join("models/a.txt").exists());
+    }
+
+    /// Le dernier administrateur actif ne peut être ni désactivé, ni supprimé,
+    /// ni privé de son rôle : sinon plus personne ne peut administrer.
+    #[tokio::test]
+    async fn le_dernier_administrateur_est_protege() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let uuid = body_json(get_with(&app, "/auth/me", Some(&admin)).await).await["user"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+
+        for (nom, res) in [
+            (
+                "désactivation",
+                put_json(
+                    &app,
+                    &format!("/users/{uuid}"),
+                    serde_json::json!({ "disabled": true }),
+                    Some(&admin),
+                )
+                .await,
+            ),
+            (
+                "retrait du rôle",
+                put_json(
+                    &app,
+                    &format!("/users/{uuid}"),
+                    serde_json::json!({ "roles": [lecteur.clone()] }),
+                    Some(&admin),
+                )
+                .await,
+            ),
+            ("suppression", delete_with(&app, &format!("/users/{uuid}"), Some(&admin)).await),
+        ] {
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{nom}");
+        }
+
+        // Il reste administrateur, et toujours connecté.
+        assert_eq!(
+            get_with(&app, "/users", Some(&admin)).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Se supprimer soi-même est refusé : c'est le clic qu'on regrette.
+    #[tokio::test]
+    async fn on_ne_se_supprime_pas_soi_meme() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        // Ce compte a de quoi supprimer des comptes (sinon la couche de droit
+        // l'arrête avant d'arriver au handler, et le test ne prouverait rien).
+        let res = post_json(
+            &app,
+            "/users",
+            serde_json::json!({
+                "username": "second",
+                "email": "second@exemple.fr",
+                "password": "motdepasse",
+                "permissions": ["users.write"],
+            }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let second = connecte(&app, "second", "motdepasse").await;
+
+        let uuid = body_json(get_with(&app, "/auth/me", Some(&second)).await).await["user"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let res = delete_with(&app, &format!("/users/{uuid}"), Some(&second)).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "cannot_delete_self");
+    }
+
+    /// Les rôles livrés sont figés — mais on les clone pour partir de quelque
+    /// chose.
+    #[tokio::test]
+    async fn les_roles_livres_sont_figes_mais_clonables() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+
+        for res in [
+            put_json(
+                &app,
+                &format!("/roles/{lecteur}"),
+                serde_json::json!({ "name": "autre" }),
+                Some(&admin),
+            )
+            .await,
+            delete_with(&app, &format!("/roles/{lecteur}"), Some(&admin)).await,
+        ] {
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(body_text(res).await, "role_frozen");
+        }
+
+        // Clonage : le clone reprend les droits, puis vit sa vie.
+        let res = post_json(
+            &app,
+            "/roles",
+            serde_json::json!({ "name": "imprimeur", "from": lecteur, "permissions": ["catalog.read", "model.upload"] }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let clone = body_json(res).await["uuid"].as_str().unwrap().to_string();
+
+        let v = body_json(get_with(&app, "/roles", Some(&admin)).await).await;
+        let imprimeur = v["roles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|role| role["name"] == "imprimeur")
+            .unwrap()
+            .clone();
+        assert_eq!(imprimeur["builtin"], false);
+        assert_eq!(imprimeur["permissions"], serde_json::json!(["catalog.read", "model.upload"]));
+
+        assert_eq!(
+            put_json(
+                &app,
+                &format!("/roles/{clone}"),
+                serde_json::json!({ "name": "imprimeur 3D" }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            delete_with(&app, &format!("/roles/{clone}"), Some(&admin)).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Un droit ou un rôle inconnu fait **échouer** l'écriture : accorder un
+    /// droit que le serveur n'appliquera pas serait bien pire qu'un refus.
+    #[tokio::test]
+    async fn un_droit_ou_un_role_inconnu_est_refuse() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        let res = post_json(
+            &app,
+            "/roles",
+            serde_json::json!({ "name": "bizarre", "permissions": ["model.purge"] }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "unknown_permission");
+
+        let res = cree_compte(
+            &app,
+            &admin,
+            "fantome",
+            vec!["0199e3d0-0000-7000-8000-00000000ffff".to_string()],
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "unknown_role");
+
+        // Un nom déjà pris est un **conflit**, pas une panne — et le code dit
+        // lequel des deux, parce que l'interface n'affiche pas le même message.
+        assert_eq!(
+            cree_compte(&app, &admin, "doublon", vec![]).await.status(),
+            StatusCode::CREATED
+        );
+        let res = post_json(
+            &app,
+            "/users",
+            serde_json::json!({ "username": "doublon", "email": "autre@exemple.fr", "password": "motdepasse" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(body_text(res).await, "username_taken");
+
+        let res = post_json(
+            &app,
+            "/users",
+            serde_json::json!({ "username": "autre", "email": "doublon@exemple.fr", "password": "motdepasse" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(body_text(res).await, "email_taken");
+    }
+
+    /// Le rôle par défaut s'applique aux comptes créés sans rôle explicite.
+    #[tokio::test]
+    async fn le_role_par_defaut_s_applique_aux_nouveaux_comptes() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+
+        assert_eq!(
+            put_json(
+                &app,
+                "/roles/default",
+                serde_json::json!({ "uuid": lecteur }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        assert_eq!(cree_compte(&app, &admin, "nouveau", vec![]).await.status(), StatusCode::CREATED);
+        let cookie = connecte(&app, "nouveau", "motdepasse").await;
+        let v = body_json(get_with(&app, "/auth/me", Some(&cookie)).await).await;
+        assert_eq!(v["user"]["roles"][0], "lecteur");
+        assert_eq!(get_with(&app, "/models", Some(&cookie)).await.status(), StatusCode::OK);
+    }
+
+    /// Un compte désactivé perd l'accès **immédiatement**, sans attendre que sa
+    /// session expire.
+    #[tokio::test]
+    async fn desactiver_un_compte_coupe_l_acces_tout_de_suite() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "temporaire", vec![lecteur]).await;
+
+        let cookie = connecte(&app, "temporaire", "motdepasse").await;
+        assert_eq!(
+            get_with(&app, "/models", Some(&cookie)).await.status(),
+            StatusCode::OK
+        );
+
+        let uuid = body_json(get_with(&app, "/users", Some(&admin)).await).await["users"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|user| user["username"] == "temporaire")
+            .unwrap()["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            put_json(
+                &app,
+                &format!("/users/{uuid}"),
+                serde_json::json!({ "disabled": true }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        assert_eq!(
+            get_with(&app, "/models", Some(&cookie)).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // Et il ne peut plus se reconnecter.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "temporaire", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Chacun change son propre mot de passe ; les anciennes sessions tombent.
+    #[tokio::test]
+    async fn chacun_change_son_propre_mot_de_passe() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        // Mauvais mot de passe actuel.
+        let res = post_json(
+            &app,
+            "/auth/password",
+            serde_json::json!({ "current": "faux", "new": "nouveau-mot-de-passe" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // Trop court.
+        let res = post_json(
+            &app,
+            "/auth/password",
+            serde_json::json!({ "current": "motdepasse", "new": "court" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "password_too_short");
+
+        // Accepté : la session est renouvelée (nouveau cookie) et reste valable.
+        let res = post_json(
+            &app,
+            "/auth/password",
+            serde_json::json!({ "current": "motdepasse", "new": "nouveau-mot-de-passe" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = cookie_de(&res);
+        assert_ne!(cookie, admin, "la session doit être renouvelée");
+        assert_eq!(
+            get_with(&app, "/models", Some(&cookie)).await.status(),
+            StatusCode::OK
+        );
+
+        // L'ancien mot de passe ne vaut plus rien, le nouveau ouvre une session.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "nouveau-mot-de-passe" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// Sans authentification, le catalogue des droits et les comptes n'existent
+    /// pas : le reste du serveur se comporte comme avant.
+    #[tokio::test]
+    async fn sans_authentification_les_routes_de_comptes_restent_ouvertes() {
+        let app = test_app(".");
+        assert_eq!(
+            get_with(&app, "/users", None).await.status(),
+            StatusCode::OK,
+            "sans comptes, il n'y a rien à cacher"
+        );
+        assert_eq!(
+            get_with(&app, "/permissions", None).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// La déconnexion ferme la session **et** les tickets d'accès déjà émis
+    /// pour le compte : rien ne doit rester ouvert derrière soi.
+    #[tokio::test]
+    async fn la_deconnexion_ferme_la_session_et_ses_tickets() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "remi", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        let cookie = cookie_de(&res);
+        let res = post_json(
+            &app,
+            "/auth/ws-ticket",
+            serde_json::json!({}),
+            Some(&cookie),
+        )
+        .await;
+        let ticket = body_json(res).await["ticket"].as_str().unwrap().to_string();
+
+        // Le compte existe toujours, mais la déconnexion a écarté ses tickets.
+        post_json(&app, "/auth/logout", serde_json::json!({}), Some(&cookie)).await;
+        let res = get_with(&app, &format!("/models?ticket={ticket}"), None).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // ── Jetons d'API (agents) ───────────────────────────────────────────────
+
+    /// Requête authentifiée par un **jeton** plutôt que par un cookie.
+    async fn bearer(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Option<serde_json::Value>,
+        token: &str,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"));
+        if body.is_some() {
+            request = request.header("content-type", "application/json");
+        }
+        app.clone()
+            .oneshot(
+                request
+                    .body(
+                        body.map(|value| Body::from(value.to_string()))
+                            .unwrap_or_else(Body::empty),
+                    )
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Crée un jeton pour un compte et renvoie sa valeur en clair.
+    async fn cree_jeton(app: &Router, cookie: &str, name: &str) -> String {
+        let res = post_json(
+            app,
+            "/tokens",
+            serde_json::json!({ "name": name }),
+            Some(cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        body_json(res).await["token"].as_str().unwrap().to_string()
+    }
+
+    /// Un jeton remplace le cookie : c'est ce qui ouvre le serveur aux agents,
+    /// qui n'ont pas de navigateur.
+    #[tokio::test]
+    async fn un_jeton_ouvre_l_acces_sans_cookie() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let cookie = connecte(&app, "remi", "motdepasse").await;
+        let token = cree_jeton(&app, &cookie, "portable").await;
+        assert!(token.starts_with("e3d_"), "jeton : {token}");
+
+        // Le jeton vaut à la place du cookie…
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &token).await.status(),
+            StatusCode::OK
+        );
+
+        // …mais il n'est **jamais** réaffiché : la liste ne donne que son nom.
+        let v = body_json(get_with(&app, "/tokens", Some(&cookie)).await).await;
+        assert_eq!(v[0]["name"], "portable");
+        assert!(v[0].get("token").is_none(), "json : {}", v[0]);
+        assert!(
+            v[0]["last_used_at"].is_number(),
+            "l'usage qui vient d'avoir lieu doit être noté : {}",
+            v[0]
+        );
+
+        // Révocation : le jeton ne vaut plus rien.
+        let uuid = v[0]["uuid"].as_str().unwrap().to_string();
+        assert_eq!(
+            delete_with(&app, &format!("/tokens/{uuid}"), Some(&cookie))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &token).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// Un jeton **hérite** des droits du compte : il n'en donne jamais plus.
+    #[tokio::test]
+    async fn un_jeton_ne_donne_pas_plus_de_droits_que_le_compte() {
+        let (app, dir) = app_avec_comptes(|_| {});
+        std::fs::write(dir.path().join("models/a.txt"), "x").unwrap();
+
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "agent", vec![lecteur]).await;
+
+        let cookie = connecte(&app, "agent", "motdepasse").await;
+        let token = cree_jeton(&app, &cookie, "ci").await;
+
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &token).await.status(),
+            StatusCode::OK
+        );
+        // Ce que le compte ne peut pas faire, son jeton ne le peut pas non plus.
+        let res = bearer(
+            &app,
+            "POST",
+            "/delete",
+            Some(serde_json::json!({ "path": "a.txt" })),
+            &token,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(dir.path().join("models/a.txt").exists());
+
+        // Un jeton inventé non plus.
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, "e3d_0000").await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// Les jetons sont **personnels** : personne ne voit ni ne révoque ceux des
+    /// autres — pas même un administrateur (il désactive le compte, ce qui les
+    /// neutralise tous d'un coup).
+    #[tokio::test]
+    async fn les_jetons_sont_personnels() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "bob", vec![lecteur]).await;
+        let bob = connecte(&app, "bob", "motdepasse").await;
+
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "de bob" }),
+            Some(&bob),
+        )
+        .await;
+        let uuid = body_json(res).await["uuid"].as_str().unwrap().to_string();
+
+        let v = body_json(get_with(&app, "/tokens", Some(&admin)).await).await;
+        assert!(v.as_array().unwrap().is_empty(), "jetons de l'admin : {v}");
+        assert_eq!(
+            delete_with(&app, &format!("/tokens/{uuid}"), Some(&admin))
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// Désactiver un compte arrête aussi ses agents, sans qu'on ait à retrouver
+    /// chacun de ses jetons.
+    #[tokio::test]
+    async fn desactiver_un_compte_arrete_ses_jetons() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "agent", vec![lecteur]).await;
+
+        let cookie = connecte(&app, "agent", "motdepasse").await;
+        let token = cree_jeton(&app, &cookie, "ci").await;
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &token).await.status(),
+            StatusCode::OK
+        );
+
+        let uuid = body_json(get_with(&app, "/auth/me", Some(&cookie)).await).await["user"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            put_json(
+                &app,
+                &format!("/users/{uuid}"),
+                serde_json::json!({ "disabled": true }),
+                Some(&admin),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &token).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    // ── SSO (OIDC) ──────────────────────────────────────────────────────────
+
+    /// Application avec comptes actifs, administrateur créé, et une
+    /// configuration SSO donnée (les réglages d'environnement sont injectés par
+    /// l'état, comme en production).
+    fn app_sso(config: Config, env: auth::oidc::Env) -> (Router, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        let comptes = auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        let seed = auth::AdminSeed {
+            username: "remi".into(),
+            email: "remi@exemple.fr".into(),
+            password: "motdepasse".into(),
+        };
+        auth::bootstrap_admin(&comptes, Some(seed)).unwrap();
+        let (ws, _) = broadcast::channel::<String>(16);
+        let app = routes(
+            AppState::new(models, ws, config)
+                .with_auth(comptes)
+                .with_oidc(env),
+        );
+        (app, dir)
+    }
+
+    /// Configuration SSO complète (émetteur, client, secret).
+    fn config_sso() -> Config {
+        Config {
+            oidc: config::Oidc {
+                enabled: true,
+                issuer: Some("https://sso.exemple.fr/realms/moi".into()),
+                client_id: Some("easy3d".into()),
+                client_secret: Some("secret".into()),
+                ..config::Oidc::default()
+            },
+            ..Config::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn le_sso_est_une_route_publique_qui_dit_quand_il_est_eteint() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        // Deux routes **publiques** : on n'est pas encore authentifié quand on
+        // les appelle. Sans SSO configuré, le départ refuse clairement…
+        let res = get_with(&app, "/auth/oidc/start", None).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "oidc_disabled");
+
+        // …et le retour dépose l'utilisateur sur la page de connexion, avec un
+        // code traduisible, plutôt que sur une page blanche.
+        let res = get_with(&app, "/auth/oidc/callback?code=x&state=y", None).await;
+        assert_eq!(res.status(), StatusCode::FOUND);
+        assert_eq!(
+            res.headers().get("location").unwrap(),
+            "/login?error=invalid_state"
+        );
+
+        // Même éteint, `/auth/me` reste une réponse normale : l'interface ne
+        // montre simplement pas de bouton.
+        let v = body_json(get_with(&app, "/auth/me", None).await).await;
+        assert!(v["oidc"].is_null());
+    }
+
+    #[tokio::test]
+    async fn auth_me_annonce_le_fournisseur_quand_le_sso_est_allume() {
+        let (app, _dir) = app_sso(config_sso(), auth::oidc::Env::empty());
+
+        // Le bouton de la page de connexion n'a besoin que du nom du
+        // fournisseur — et le secret client ne sort **jamais**.
+        let v = body_json(get_with(&app, "/auth/me", None).await).await;
+        assert_eq!(v["oidc"]["label"], "sso.exemple.fr");
+        assert!(v["oidc"].get("client_secret").is_none(), "{v}");
+
+        // La configuration exposée masque le secret, comme la clé d'API.
+        let cookie = connecte(&app, "remi", "motdepasse").await;
+        let v = body_json(get_with(&app, "/config", Some(&cookie)).await).await;
+        assert_eq!(v["config"]["oidc"]["client_secret"], config::KEY_PLACEHOLDER);
+        assert_eq!(v["oidc"]["active"], true);
+        assert_eq!(v["oidc"]["locked"].as_array().unwrap().len(), 0);
+        assert!(v["oidc"]["problem"].is_null(), "{v}");
+    }
+
+    #[tokio::test]
+    async fn un_sso_a_moitie_configure_le_dit_au_lieu_d_echouer_en_silence() {
+        let config = Config {
+            oidc: config::Oidc {
+                enabled: true,
+                issuer: Some("https://sso.exemple.fr".into()),
+                ..config::Oidc::default()
+            },
+            ..Config::default()
+        };
+        let (app, _dir) = app_sso(config, auth::oidc::Env::empty());
+
+        // L'interface peut dire *ce qui manque* au lieu d'afficher un
+        // interrupteur sans effet.
+        let cookie = connecte(&app, "remi", "motdepasse").await;
+        let v = body_json(get_with(&app, "/config", Some(&cookie)).await).await;
+        assert_eq!(v["oidc"]["active"], false);
+        assert_eq!(v["oidc"]["problem"], "client_id", "{v}");
+        // Et aucun bouton n'est proposé sur la page de connexion.
+        let v = body_json(get_with(&app, "/auth/me", None).await).await;
+        assert!(v["oidc"].is_null());
+    }
+
+    #[tokio::test]
+    async fn les_reglages_sso_de_l_environnement_sont_annonces_comme_figes() {
+        let (app, _dir) = app_sso(
+            Config::default(),
+            auth::oidc::Env {
+                issuer: Some("https://env.exemple.fr".into()),
+                client_id: Some("easy3d".into()),
+                client_secret: Some("secret".into()),
+                ..auth::oidc::Env::empty()
+            },
+        );
+
+        // L'environnement allume le SSO même si le fichier ne dit rien : les
+        // champs correspondants sont annoncés comme figés, donc l'interface les
+        // grise au lieu de laisser croire qu'on peut les régler ici.
+        let cookie = connecte(&app, "remi", "motdepasse").await;
+        let v = body_json(get_with(&app, "/config", Some(&cookie)).await).await;
+        assert_eq!(v["oidc"]["active"], true);
+        assert!(v["oidc"]["problem"].is_null(), "{v}");
+        let locked: Vec<&str> = v["oidc"]["locked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_str().unwrap())
+            .collect();
+        assert!(locked.contains(&"enabled"), "{locked:?}");
+        assert!(locked.contains(&"issuer"), "{locked:?}");
+        assert!(locked.contains(&"client_secret"), "{locked:?}");
+        assert!(!locked.contains(&"provisioning"), "{locked:?}");
+
+        let v = body_json(get_with(&app, "/auth/me", None).await).await;
+        assert_eq!(v["oidc"]["label"], "env.exemple.fr");
     }
 }

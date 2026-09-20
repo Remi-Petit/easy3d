@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
   try {
     const res = await fetch(`${base}/ai/search`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...backendHeaders(event) },
       body: JSON.stringify({ query }),
     })
 

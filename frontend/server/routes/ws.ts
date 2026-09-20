@@ -1,5 +1,5 @@
 import { defineWebSocketHandler } from 'h3'
-import { backendWsUrl, relayToBackend, type Relay } from '../utils/wsRelay'
+import { backendWsUrl, peerCookie, relayToBackend, type Relay } from '../utils/wsRelay'
 
 /**
  * WS « catalogue » (`/ws`) : le backend pousse un `ModelsResponse` à chaque
@@ -17,7 +17,9 @@ function drop(peer: { id: string }) {
 
 export default defineWebSocketHandler({
   open(peer) {
-    relays.set(peer.id, relayToBackend(peer, backendWsUrl('/ws')))
+    // Le cookie du navigateur sert au relais à obtenir un ticket : la connexion
+    // amont, elle, ne peut porter aucun en-tête.
+    relays.set(peer.id, relayToBackend(peer, backendWsUrl('/ws'), false, peerCookie(peer)))
   },
   message(peer, message) {
     // Protocole à sens unique : on transmet quand même, un relais qui trie les

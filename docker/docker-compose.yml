@@ -9,3 +9,32 @@ services:
     volumes:
       - ./models:/models # Les modèles 3D
       - ./config:/config # configuration, réécrite par la page /admin
+
+    # ── Comptes utilisateurs (facultatif) ──────────────────────────────────
+    #
+    # Décommenter le bloc `environment:` ci-dessous pour activer la gestion des
+    # comptes (sinon l'application est ouverte, comme avant). La base SQLite se
+    # place à côté de `config.yml`, donc dans `./config` : elle survit à la
+    # recréation du conteneur.
+    #
+    # EASY3D_ADMIN_* ne sert qu'à la première création de l'administrateur ;
+    # ensuite ces variables sont ignorées (le mot de passe ne peut plus être
+    # écrasé en redémarrant).
+    #
+    # environment:
+    #   EASY3D_AUTH: "on"
+    #   EASY3D_ADMIN_EMAIL: vous@exemple.fr
+    #   EASY3D_ADMIN_PASSWORD: "un mot de passe de 8 caractères minimum"
+    #   # EASY3D_ADMIN_USERNAME: remi
+    #
+    # Connexion par un fournisseur d'identité (SSO), en plus du mot de passe :
+    # ces réglages gagnent sur `config.yml`, et les champs correspondants sont
+    # grisés dans /admin. Côté fournisseur, déclarer l'adresse de retour
+    # `<EASY3D_PUBLIC_URL>/api/auth/oidc/callback`.
+    #   # EASY3D_PUBLIC_URL: https://easy3d.exemple.fr
+    #   # EASY3D_OIDC_ISSUER: https://auth.exemple.fr/application/o/easy3d/
+    #   # EASY3D_OIDC_CLIENT_ID: easy3d
+    #   # EASY3D_OIDC_CLIENT_SECRET: "…"
+    #   # # Facultatif : portées demandées, et mode de provisionnement.
+    #   # EASY3D_OIDC_SCOPES: openid email profile
+    #   # EASY3D_OIDC_PROVISIONING: auto

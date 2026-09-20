@@ -1,4 +1,4 @@
-use easy3d::{ai, api, config, formats, thumbnail, watcher};
+use easy3d::{ai, api, auth, config, formats, thumbnail, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 use std::path::{Path, PathBuf};
@@ -75,7 +75,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Canal broadcast : diffuse la liste des modèles (JSON) à tous les clients WS.
     let (ws_tx, _) = broadcast::channel::<String>(16);
 
-    let state = api::AppState::new(root.clone(), ws_tx, config).with_presets(presets);
+    // Comptes utilisateurs (facultatif) : sans `EASY3D_AUTH`, rien ne change —
+    // aucune base n'est ouverte et le middleware laisse tout passer.
+    //
+    // ⚠️ Une erreur ici **arrête** le serveur. Démarrer sans authentification
+    // parce que la base est illisible ou parce qu'une variable est mal écrite
+    // ouvrirait le catalogue à tout le monde à cause d'une panne : c'est
+    // exactement le contraire de ce qu'on veut d'un interrupteur de sécurité.
+    let auth = auth::Auth::from_env(&config_path)?;
+    let seed = auth::admin_seed_from_env()?;
+    auth::bootstrap_admin(&auth, seed)?;
+    if auth.is_enabled() {
+        println!(
+            "Comptes   : activés (base {}), cookie {}",
+            auth.path().display(),
+            if auth.cookie_secure() {
+                "Secure"
+            } else {
+                "sans Secure — interface servie en HTTP"
+            }
+        );
+    } else {
+        println!("Comptes   : désactivés (EASY3D_AUTH=on pour les activer).");
+    }
+
+    // SSO (facultatif) : les réglages de l'environnement **gagnent** sur
+    // `config.yml` (voir `auth::oidc::Env`). La validation se fait ici, au
+    // démarrage : un SSO activé mais incomplet doit le dire tout de suite, et
+    // non au premier utilisateur qui essaie de se connecter.
+    let oidc_env = auth::oidc::Env::from_env()?;
+    if let Some(settings) =
+        auth::oidc::resolve(&config.oidc, &oidc_env).map_err(auth::oidc::describe)?
+    {
+        println!(
+            "SSO       : activé ({}, client {}, provisionnement {}, {})",
+            settings.issuer,
+            settings.client_id,
+            settings.provisioning.id(),
+            if oidc_env.is_set() {
+                "réglages de l'environnement"
+            } else {
+                "réglages de config.yml"
+            }
+        );
+        // Un SSO sans comptes ne sert à rien : il n'y a ni écran de connexion ni
+        // session à ouvrir. Le dire au démarrage évite de chercher pourquoi le
+        // bouton n'apparaît nulle part.
+        if !auth.is_enabled() {
+            println!(
+                "          ⚠️  EASY3D_AUTH n'est pas activé : le SSO est ignoré tant que la \
+                 gestion des comptes est éteinte."
+            );
+        }
+        // Sans URL publique, le `redirect_uri` est déduit de l'en-tête `Host` :
+        // ça marche derrière un reverse proxy qui le conserve, et ça échoue
+        // ailleurs — mieux vaut le dire au démarrage que devant un écran
+        // d'erreur du fournisseur.
+        if oidc_env.public_url.is_none() {
+            println!(
+                "          ⚠️  EASY3D_PUBLIC_URL n'est pas défini : l'adresse de retour sera \
+                 déduite de l'en-tête Host. Déclarez <URL publique>{CALLBACK} chez le fournisseur.",
+                CALLBACK = auth::oidc::CALLBACK_PATH
+            );
+        }
+    }
+
+    let state = api::AppState::new(root.clone(), ws_tx, config)
+        .with_presets(presets)
+        .with_auth(auth)
+        .with_oidc(oidc_env);
 
     // API → tâche async sur le pool Tokio (multi-thread).
     let server = tokio::spawn({
