@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DisplayMode, FileInfo, ConfigResponse, WatchInfo } from '~/composables/useModels'
-import { modelOptions } from '~/utils/ai'
-import type { AiConfig, AiModelsResponse } from '~/utils/ai'
+import { modelOptions, presetFor } from '~/utils/ai'
+import type { AiConfig, AiModelsResponse, AiPreset } from '~/utils/ai'
 
 // Page d'administration : réglages de l'application (écrits dans `config.yml`
 // via `PUT /api/config`) et gestion des notes.
@@ -104,6 +104,18 @@ const aiTouched = ref(false)
 const aiDefaults = computed(() => aiProviders.value.find((p) => p.id === aiProvider.value) ?? null)
 /** Le fournisseur exige-t-il une clé ? (faux pour un Ollama local) */
 const aiNeedsKey = computed(() => aiDefaults.value?.needs_key ?? true)
+
+/**
+ * Adresses connues du fournisseur choisi (DeepSeek, OpenRouter, Groq…).
+ *
+ * Elles viennent du **backend** : c'est lui qui sait quels services parlent son
+ * protocole, et l'interface n'a donc aucune adresse en dur — exactement comme
+ * pour la liste des fournisseurs. Vide tant qu'aucun n'est choisi.
+ */
+const aiPresets = computed(() => aiDefaults.value?.presets ?? [])
+
+/** Puce correspondant à l'adresse effective (champ vide = défaut du fournisseur). */
+const aiActivePreset = computed(() => presetFor(aiDefaults.value, aiBaseUrl.value))
 /** Modèle enregistré, tel que le backend le connaît. */
 const aiSavedModel = computed(() => data.value?.config?.ai?.model ?? '')
 
@@ -131,6 +143,24 @@ function pickProvider() {
 
   const defaults = aiDefaults.value
   if (defaults && !aiBaseUrl.value.trim()) aiBaseUrl.value = defaults.base_url
+}
+
+/**
+ * Choix d'une adresse connue : elle remplit le champ, et propose le modèle qui
+ * va avec.
+ *
+ * L'adresse reste modifiable à la main — la puce n'est qu'un raccourci, et le
+ * champ accepte aussi un proxy ou une adresse intermédiaire. Changer d'adresse
+ * jette la liste des modèles : elle appartient au point d'entrée précédent (le
+ * backend la jetterait de toute façon, voir `api::apply_config`).
+ */
+function pickPreset(preset: AiPreset) {
+  const changed = aiActivePreset.value?.base_url !== preset.base_url
+
+  markAiTouched()
+  aiBaseUrl.value = preset.base_url
+  if (preset.model) aiModel.value = preset.model
+  if (changed) aiModels.value = []
 }
 
 /** Efface la clé enregistrée : vide veut dire « supprime-la » côté backend. */
@@ -569,6 +599,30 @@ usePageHeader(() => ({
 
         <div class="admin__field admin__field--ai">
           <label class="admin__label" for="ai-base-url">{{ $t('ai.baseUrl') }}</label>
+          <!--
+            Adresses connues du fournisseur choisi : un clic remplit le champ
+            ci-dessous. Elles viennent du backend (DeepSeek, OpenRouter… parlent
+            l'API d'OpenAI telle quelle) et restent un raccourci : le champ
+            accepte n'importe quelle adresse, proxy compris.
+          -->
+          <div
+            v-if="aiPresets.length"
+            class="admin__choices"
+            role="group"
+            :aria-label="$t('ai.presets')"
+          >
+            <button
+              v-for="preset in aiPresets"
+              :key="preset.base_url"
+              type="button"
+              class="admin__choice admin__choice--pick"
+              :class="{ 'admin__choice--on': aiActivePreset?.base_url === preset.base_url }"
+              :title="preset.base_url"
+              @click="pickPreset(preset)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
           <div class="admin__row">
             <input
               id="ai-base-url"

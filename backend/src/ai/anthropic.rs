@@ -7,11 +7,23 @@
 
 use super::Provider;
 use super::tools::Spec;
-use super::{Reply, Request, Resolved, ToolCall, Turn, error_message, short_body};
+use super::{Preset, Reply, Request, Resolved, ToolCall, Turn, error_message, short_body};
 use serde_json::{Value, json};
 
 const BASE_URL: &str = "https://api.anthropic.com/v1";
 const MODEL: &str = "claude-3-5-haiku-latest";
+
+/// Adresses connues de ce fournisseur.
+///
+/// Il n'y en a qu'une : le protocole d'Anthropic (`/v1/messages`, blocs
+/// `tool_use`) n'est imité par personne, contrairement à celui d'OpenAI. La
+/// puce sert donc seulement à remettre l'adresse par défaut après avoir essayé
+/// autre chose — un proxy, par exemple.
+static PRESETS: &[Preset] = &[Preset {
+    label: "Anthropic",
+    base_url: BASE_URL,
+    model: MODEL,
+}];
 
 /// Version de l'API, exigée par Anthropic dans un en-tête dédié.
 const API_VERSION: &str = "2023-06-01";
@@ -40,6 +52,10 @@ impl Provider for Anthropic {
 
     fn default_model(&self) -> &'static str {
         MODEL
+    }
+
+    fn presets(&self) -> &'static [Preset] {
+        PRESETS
     }
 
     fn headers(&self, cfg: &Resolved) -> Vec<(String, String)> {

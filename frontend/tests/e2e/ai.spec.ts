@@ -75,6 +75,39 @@ async function configurerOllamaFerme(page: Page) {
   }).toPass({ timeout: 60_000 })
 }
 
+/**
+ * Adresses connues du fournisseur : un clic remplit le champ.
+ *
+ * Rien n'est enregistré ici (la carte IA n'écrit qu'au clic sur « Enregistrer ») :
+ * le test peut donc choisir un fournisseur sans toucher à la configuration
+ * partagée par les autres tests.
+ */
+test('recherche IA : une adresse connue remplit le champ, qui reste libre', async ({ page }) => {
+  await ouvrirCarteIA(page)
+  await page.getByLabel('Fournisseur').selectOption('openai')
+
+  // La liste vient du backend : l'interface n'a aucune adresse en dur.
+  const puces = page.getByRole('group', { name: 'Adresses connues' })
+  await expect(puces.getByRole('button', { name: 'DeepSeek' })).toBeVisible()
+  await expect(puces.getByRole('button', { name: 'OpenRouter' })).toBeVisible()
+
+  await puces.getByRole('button', { name: 'DeepSeek' }).click()
+
+  const adresse = page.getByLabel('Adresse de l’API')
+  await expect(adresse).toHaveValue('https://api.deepseek.com/v1')
+  // La puce choisie est marquée, et elle seule.
+  await expect(puces.locator('.admin__choice--on')).toHaveCount(1)
+
+  // Le point d'entrée propose aussi son modèle : il sera remplacé par ce que le
+  // fournisseur annonce au premier « Tester ».
+  await expect(page.locator('select#ai-model')).toHaveValue('deepseek-chat')
+
+  // Le champ reste maître : une adresse intermédiaire n'appartient à aucune
+  // puce, donc plus rien n'est marqué.
+  await adresse.fill('https://proxy.interne/v1')
+  await expect(puces.locator('.admin__choice--on')).toHaveCount(0)
+})
+
 test('recherche IA : grisée tant qu’aucun fournisseur n’est configuré', async ({ page }) => {
   // La configuration peut garder un fournisseur d'une exécution précédente :
   // on part explicitement de « aucun ».

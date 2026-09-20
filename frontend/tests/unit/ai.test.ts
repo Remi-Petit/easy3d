@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { aiConfigured, hitHref, modelOptions, type AiHit } from '~/utils/ai'
+import {
+  aiConfigured,
+  endpointKey,
+  hitHref,
+  modelOptions,
+  presetFor,
+  type AiHit,
+  type AiProvider,
+} from '~/utils/ai'
 
 /**
  * Recherche assistée : la seule logique pure côté interface.
@@ -71,5 +79,60 @@ describe('modelOptions', () => {
       'fake-large',
     ])
     expect(modelOptions(['a', ' a '], 'a')).toEqual(['a'])
+  })
+})
+
+/** Fournisseur tel que le backend le décrit, réduit à ce qui nous intéresse. */
+function provider(overrides: Partial<AiProvider> = {}): AiProvider {
+  return {
+    id: 'openai',
+    label: 'OpenAI',
+    needs_key: true,
+    base_url: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    presets: [
+      { label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+      { label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+      { label: 'LM Studio', base_url: 'http://localhost:1234/v1', model: '' },
+    ],
+    ...overrides,
+  }
+}
+
+describe('endpointKey', () => {
+  it('ramène à la même clé ce qui désigne la même adresse', () => {
+    // Une adresse se recopie à la main : espaces, barre oblique finale et
+    // majuscules ne doivent pas éteindre la puce correspondante.
+    expect(endpointKey('https://api.openai.com/v1/')).toBe('https://api.openai.com/v1')
+    expect(endpointKey('  HTTPS://API.OpenAI.COM/v1  ')).toBe('https://api.openai.com/v1')
+    expect(endpointKey('')).toBe('')
+    expect(endpointKey(null)).toBe('')
+    expect(endpointKey(undefined)).toBe('')
+  })
+})
+
+describe('presetFor', () => {
+  it('allume la puce du point d’entrée saisi', () => {
+    const openai = provider()
+    expect(presetFor(openai, 'https://api.deepseek.com/v1')?.label).toBe('DeepSeek')
+    // Même adresse écrite autrement : c'est la même puce.
+    expect(presetFor(openai, 'https://api.openai.com/v1/')?.label).toBe('OpenAI')
+  })
+
+  it('traite le champ vide comme l’adresse par défaut du fournisseur', () => {
+    // Vide veut dire « l'adresse par défaut » : c'est donc la puce du
+    // fournisseur lui-même qui s'allume, et non aucune.
+    expect(presetFor(provider(), '')?.label).toBe('OpenAI')
+    expect(presetFor(provider(), '   ')?.label).toBe('OpenAI')
+  })
+
+  it('n’allume rien pour une adresse personnalisée', () => {
+    // Un proxy ou un serveur intermédiaire n'est dans aucune liste : rien ne
+    // s'allume, et c'est exact — le champ reste maître.
+    expect(presetFor(provider(), 'https://proxy.interne/v1')).toBeNull()
+    expect(presetFor(provider({ presets: [] }), 'https://api.openai.com/v1')).toBeNull()
+    // Un backend plus ancien n'annonce aucune liste du tout.
+    expect(presetFor(provider({ presets: undefined }), '')).toBeNull()
+    expect(presetFor(null, 'https://api.openai.com/v1')).toBeNull()
   })
 })

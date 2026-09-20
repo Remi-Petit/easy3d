@@ -1477,6 +1477,18 @@ mod tests {
             assert!(provider["label"].as_str().unwrap().len() > 2);
             assert!(provider["base_url"].as_str().unwrap().starts_with("http"));
             assert!(!provider["model"].as_str().unwrap().is_empty());
+
+            // Les adresses connues voyagent avec le fournisseur : l'interface
+            // n'a donc aucune adresse en dur, et la première est celle du
+            // fournisseur lui-même (un champ vide vaut ce défaut).
+            let presets = provider["presets"].as_array().unwrap();
+            assert!(!presets.is_empty());
+            assert!(
+                presets
+                    .iter()
+                    .all(|p| !p["label"].as_str().unwrap().is_empty())
+            );
+            assert_eq!(presets[0]["base_url"], provider["base_url"]);
         }
 
         let ollama = providers.iter().find(|p| p["id"] == "ollama").unwrap();

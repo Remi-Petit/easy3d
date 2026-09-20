@@ -7,12 +7,59 @@
 
 use super::Provider;
 use super::tools::Spec;
-use super::{Reply, Request, Resolved, ToolCall, Turn, error_message, short_body};
+use super::{Preset, Reply, Request, Resolved, ToolCall, Turn, error_message, short_body};
 use serde_json::{Value, json};
 
 /// Points d'entrée par défaut.
 const BASE_URL: &str = "https://api.openai.com/v1";
 const MODEL: &str = "gpt-4o-mini";
+
+/// Services qui exposent l'API d'OpenAI **telle quelle** (`/chat/completions`
+/// et `/models`) : ils se configurent donc avec ce fournisseur, seule l'adresse
+/// change.
+///
+/// Les modèles cités sont des propositions : le bouton « Tester » remplace la
+/// valeur par ce que le service annonce réellement pour la clé fournie.
+static PRESETS: &[Preset] = &[
+    Preset {
+        label: "OpenAI",
+        base_url: BASE_URL,
+        model: MODEL,
+    },
+    Preset {
+        label: "DeepSeek",
+        base_url: "https://api.deepseek.com/v1",
+        // Modèle annoncé par l'API DeepSeek (relevé sur `GET /models`) ; le
+        // bouton « Tester » le remplace par ce que la clé ouvre réellement.
+        model: "deepseek-flash",
+    },
+    Preset {
+        label: "OpenRouter",
+        base_url: "https://openrouter.ai/api/v1",
+        // OpenRouter préfixe ses modèles par l'éditeur.
+        model: "openai/gpt-4o-mini",
+    },
+    Preset {
+        label: "Groq",
+        base_url: "https://api.groq.com/openai/v1",
+        model: "llama-3.3-70b-versatile",
+    },
+    Preset {
+        label: "Mistral",
+        base_url: "https://api.mistral.ai/v1",
+        model: "mistral-small-latest",
+    },
+    Preset {
+        label: "Together",
+        base_url: "https://api.together.xyz/v1",
+        model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    },
+    Preset {
+        label: "xAI (Grok)",
+        base_url: "https://api.x.ai/v1",
+        model: "grok-3-mini",
+    },
+];
 
 /// Le fournisseur OpenAI.
 pub static OPENAI: OpenAi = OpenAi;
@@ -34,6 +81,10 @@ impl Provider for OpenAi {
 
     fn default_model(&self) -> &'static str {
         MODEL
+    }
+
+    fn presets(&self) -> &'static [Preset] {
+        PRESETS
     }
 
     fn headers(&self, cfg: &Resolved) -> Vec<(String, String)> {

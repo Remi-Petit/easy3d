@@ -1099,6 +1099,15 @@ body {
   color: var(--text);
 }
 
+/*
+ * Puce d'adresse connue : même dessin que les radios ci-dessus, mais un vrai
+ * bouton — un clic remplit le champ, rien n'est mémorisé à cet endroit. Seule
+ * la police est à reprendre : un `button` n'hérite pas de celle du document.
+ */
+.admin__choice--pick {
+  font-family: inherit;
+}
+
 .admin__input {
   background: var(--surface-2);
   border: 1px solid var(--border);
