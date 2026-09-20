@@ -1,5 +1,6 @@
 // Types alignés sur le JSON du backend Rust (scanner.rs / api.rs).
 import { DEFAULT_FORMATS, type FormatInfo } from '~/utils/formats'
+import type { AiPresets } from '~/utils/ai'
 import type { AiConfig } from '~/utils/ai'
 import type { WsConfig } from '~/utils/collab'
 
@@ -103,6 +104,14 @@ export interface ModelsResponse {
    * Absent d'un backend plus ancien : `useFormats` retombe sur les défauts.
    */
   formats?: FormatInfo[]
+  /**
+   * Adresses connues des fournisseurs d'IA, par identifiant (`ai-presets.yml`).
+   *
+   * Diffusées avec le catalogue : le fichier est relu à chaud côté serveur, donc
+   * les puces de l'administration suivent sans recharger la page. Absent d'un
+   * backend plus ancien — `useAiSearch` retombe alors sur `/ai/providers`.
+   */
+  presets?: AiPresets
   /** Configuration applicative, exposée par le backend. */
   config?: AppConfig
 }
@@ -129,6 +138,12 @@ export function useModels(intervalMs = 5000) {
    * composants n'ont ainsi aucune extension à connaître).
    */
   const formats = useState<FormatInfo[]>('easy3d:formats', () => DEFAULT_FORMATS)
+  /**
+   * Adresses connues des fournisseurs, partagées avec `useAiSearch()` : elles
+   * vivent dans un fichier que l'on édite (`ai-presets.yml`), donc la liste
+   * chargée une fois pour toutes serait vite périmée.
+   */
+  const aiPresets = useState<AiPresets>('easy3d:ai:presets', () => ({}))
 
   let timer: ReturnType<typeof setInterval> | null = null
   let ws: WebSocket | null = null
@@ -151,11 +166,15 @@ export function useModels(intervalMs = 5000) {
 
   /**
    * Mémorise une réponse du backend, qu'elle vienne du WS ou du polling :
-   * données du catalogue + formats reconnus (identiques dans les deux cas).
+   * données du catalogue + formats reconnus et adresses connues des
+   * fournisseurs (identiques dans les deux cas).
    */
   function apply(response: ModelsResponse) {
     data.value = response
     if (response.formats?.length) formats.value = response.formats
+    // Une carte **vide** est une information (le fichier a été vidé) : seule
+    // son absence, d'un backend plus ancien, laisse l'état en place.
+    if (response.presets) aiPresets.value = response.presets
     error.value = null
     lastUpdated.value = new Date()
   }

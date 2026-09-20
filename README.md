@@ -41,9 +41,9 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   par le slicer dans les G-codes (matière, hauteur de couche, temps d'impression…).
   Il ne peut proposer que des fichiers **existants** : chaque chemin est vérifié
   côté serveur. Le fournisseur (OpenAI, Anthropic, Ollama…), son adresse — avec
-  un raccourci vers les services qui parlent le même protocole — et la clé se
-  règlent dans l'administration ; tant que rien n'est configuré, le bouton reste
-  grisé.
+  un raccourci vers les services qui parlent le même protocole, tenu dans
+  `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
+  n'est configuré, le bouton reste grisé.
 <!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 202 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
@@ -119,10 +119,16 @@ un fournisseur (OpenAI, Anthropic, ou un Ollama local), son adresse et sa clé
 d'API. Les services qui parlent le même protocole sont proposés en un clic —
 DeepSeek, OpenRouter, Groq, Mistral… pour OpenAI, ou l'Ollama **de la machine
 hôte** quand easy3d tourne dans un conteneur — et le champ reste libre : un
-proxy ou une adresse intermédiaire se saisit à la main. Le bouton **Tester**
-demande alors au fournisseur la liste des
-modèles que cette clé ouvre, et le modèle se choisit dedans — pas de nom à
-connaître par cœur, et la vérification de la clé est immédiate. La liste est
+proxy ou une adresse intermédiaire se saisit à la main.
+
+Cette liste est un fichier à part, `ai-presets.yml`, posé à côté de `config.yml`
+(et livré avec le binaire) : on y ajoute un service — une passerelle d'entreprise,
+un serveur intermédiaire — sans recompiler, puisqu'il est **relu à chaud** comme
+la configuration. `EASY3D_PRESETS` permet de le poser ailleurs.
+
+Le bouton **Tester** demande alors au fournisseur la liste des modèles que cette
+clé ouvre, et le modèle se choisit dedans — pas de nom à connaître par cœur, et
+la vérification de la clé est immédiate. La liste est
 **conservée avec la configuration** : pour changer de modèle plus tard, il suffit
 d'ouvrir l'administration, de choisir dans la liste et d'enregistrer, sans
 redonner la clé. Rien n'est écrit avant le bouton **Enregistrer** : la clé ne part

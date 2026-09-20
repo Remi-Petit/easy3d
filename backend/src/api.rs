@@ -39,6 +39,11 @@ pub struct AppState {
     pub ws: broadcast::Sender<String>,
     /// Documents collaboratifs ouverts (édition temps réel des notes).
     pub collab: Arc<collab::Rooms>,
+    /// Adresses connues des fournisseurs d'IA (`ai-presets.yml`).
+    ///
+    /// Rechargées à chaud comme la configuration : c'est un fichier que l'on
+    /// édite pendant que le serveur tourne (voir [`crate::ai::presets`]).
+    pub presets: Arc<RwLock<ai::presets::Presets>>,
     /// Dernière liste diffusée aux clients WS (JSON).
     ///
     /// Référence du **re-scan périodique** ([`refresh_if_changed`]) : sans elle,
@@ -56,8 +61,22 @@ impl AppState {
             config_path: Arc::new(Config::config_path()),
             ws,
             collab: Arc::new(collab::Rooms::new()),
+            // Adresses livrées par défaut : le fichier du dossier de
+            // configuration les remplace s'il existe (voir `main.rs`).
+            presets: Arc::new(RwLock::new(ai::presets::defaults())),
             last_snapshot: Arc::new(RwLock::new(String::new())),
         }
+    }
+
+    /// Remplace les adresses connues (démarrage, ou relecture à chaud).
+    pub fn with_presets(mut self, presets: ai::presets::Presets) -> Self {
+        self.presets = Arc::new(RwLock::new(presets));
+        self
+    }
+
+    /// Copie des adresses connues, telles que servies à l'interface.
+    pub fn presets(&self) -> ai::presets::Presets {
+        self.presets.read().unwrap().clone()
     }
 
     /// Redirige la réécriture de config vers un autre fichier.
@@ -159,9 +178,12 @@ async fn health() -> &'static str {
 /// Fournisseurs de modèles connus, pour l'écran d'administration.
 ///
 /// Les identifiants, libellés et valeurs par défaut viennent du backend : le
-/// frontend n'a aucune liste de fournisseurs codée en dur.
-async fn ai_providers() -> Json<Vec<ai::ProviderInfo>> {
-    Json(ai::describe())
+/// frontend n'a aucune liste de fournisseurs codée en dur. Les **adresses**
+/// connues viennent du fichier `ai-presets.yml` ([`ai::presets`]) : elles sont
+/// donc relues à chaque appel de la route, et une modification du fichier se
+/// voit sans redémarrer.
+async fn ai_providers(State(state): State<AppState>) -> Json<Vec<ai::ProviderInfo>> {
+    Json(ai::describe(&state.presets()))
 }
 
 /// Demande de recherche assistée.
@@ -254,19 +276,30 @@ pub struct ModelsResponse {
     /// Formats reconnus (extensions, aperçu, visionneuse) : le frontend n'a
     /// ainsi aucune extension codée en dur.
     pub formats: Vec<formats::FormatInfo>,
+    /// Adresses connues des fournisseurs d'IA, par identifiant de fournisseur.
+    ///
+    /// Diffusées avec le reste (et non seulement par `/ai/providers`) : le
+    /// fichier `ai-presets.yml` peut être modifié pendant que la page
+    /// d'administration est ouverte, et les puces suivent.
+    pub presets: ai::presets::Presets,
     /// Configuration applicative, exposée au frontend.
     pub config: Config,
 }
 
 impl ModelsResponse {
     /// Construit une réponse à partir d'un scan.
-    pub fn from_scan(scan: scanner::ModelsScan, config: &Config) -> Self {
+    pub fn from_scan(
+        scan: scanner::ModelsScan,
+        config: &Config,
+        presets: &ai::presets::Presets,
+    ) -> Self {
         let count = scan.total();
         ModelsResponse {
             folders: scan.folders,
             files: scan.files,
             count,
             formats: formats::describe(),
+            presets: presets.clone(),
             // La clé d'API ne sort jamais du backend, même par le WebSocket.
             config: config.redacted(),
         }
@@ -278,6 +311,7 @@ async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
     Json(ModelsResponse::from_scan(
         scanner::scan_models(&state.root()),
         &state.config(),
+        &state.presets(),
     ))
 }
 
@@ -468,6 +502,7 @@ fn snapshot(state: &AppState) -> String {
     serde_json::to_string(&ModelsResponse::from_scan(
         scanner::scan_models(&state.root()),
         &state.config(),
+        &state.presets(),
     ))
     .unwrap_or_else(|_| "{}".to_string())
 }

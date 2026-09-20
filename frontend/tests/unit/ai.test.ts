@@ -5,6 +5,7 @@ import {
   hitHref,
   modelOptions,
   presetFor,
+  providersWithPresets,
   type AiHit,
   type AiProvider,
 } from '~/utils/ai'
@@ -134,5 +135,28 @@ describe('presetFor', () => {
     // Un backend plus ancien n'annonce aucune liste du tout.
     expect(presetFor(provider({ presets: undefined }), '')).toBeNull()
     expect(presetFor(null, 'https://api.openai.com/v1')).toBeNull()
+  })
+})
+
+describe('providersWithPresets', () => {
+  it('préfère les adresses diffusées en continu', () => {
+    // La liste du chargement est périmée dès que le fichier est édité : c'est
+    // la version poussée avec le catalogue qui fait foi.
+    const live = { openai: [{ label: 'Passerelle', base_url: 'https://gw/v1' }] }
+    const [merged] = providersWithPresets([provider()], live)
+
+    expect(merged.presets).toEqual([{ label: 'Passerelle', base_url: 'https://gw/v1' }])
+    // Le reste du fournisseur ne bouge pas : seule la liste est rafraîchie.
+    expect(merged.label).toBe('OpenAI')
+    expect(merged.needs_key).toBe(true)
+    expect(merged.base_url).toBe('https://api.openai.com/v1')
+  })
+
+  it('garde la liste du chargement quand rien n’a été diffusé', () => {
+    const openai = provider()
+    // Diffusion vide (fichier vidé) ou absente (backend plus ancien) : le
+    // fournisseur reste tel quel, son `presets` d'origine compris.
+    expect(providersWithPresets([openai], {})[0].presets).toEqual(openai.presets)
+    expect(providersWithPresets([openai], undefined)[0]).toBe(openai)
   })
 })

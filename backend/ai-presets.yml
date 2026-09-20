@@ -1,0 +1,68 @@
+# easy3d — adresses connues des fournisseurs d'IA
+#
+# Ce fichier est **relu à chaud** : enregistrez-le, l'interface d'administration
+# propose les nouvelles adresses aussitôt, sans redémarrer le serveur. C'est
+# aussi lui qui est embarqué dans le binaire et écrit dans le dossier de
+# configuration quand il n'y en a pas encore (premier démarrage d'un conteneur).
+#
+# Chaque clé est un **identifiant de fournisseur** — « comment on lui parle » :
+#   openai    API OpenAI (POST /chat/completions), imitée par plusieurs services
+#   anthropic API Anthropic (POST /messages)
+#   ollama    serveur local compatible OpenAI, sans clé d'API
+#
+# Chaque entrée décrit un **service** — « à qui » :
+#   label     nom affiché sur la puce, dans l'administration
+#   base_url  adresse de base de l'API (c'est elle qui remplit le champ)
+#   model     modèle conseillé (facultatif) ; le bouton « Tester » le remplace
+#             par ce que le service annonce réellement pour la clé saisie
+#
+# Un fournisseur absent d'ici n'a **aucune** adresse proposée : le champ de
+# l'administration reste utilisable, il est simplement vide. La première entrée
+# d'un fournisseur doit être sa propre adresse (le champ laissé vide vaut ce
+# défaut).
+#
+# Supprimez ce fichier pour revenir aux adresses livrées (il est recréé au
+# démarrage suivant). Ailleurs qu'ici : `EASY3D_PRESETS=/chemin/vers/fichier`.
+
+openai:
+  - label: OpenAI
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+  - label: DeepSeek
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-flash
+  - label: OpenRouter
+    base_url: https://openrouter.ai/api/v1
+    model: openai/gpt-4o-mini
+  - label: Groq
+    base_url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+  - label: Mistral
+    base_url: https://api.mistral.ai/v1
+    model: mistral-small-latest
+  - label: Together
+    base_url: https://api.together.xyz/v1
+    model: meta-llama/Llama-3.3-70B-Instruct-Turbo
+  - label: xAI (Grok)
+    base_url: https://api.x.ai/v1
+    model: grok-3-mini
+
+anthropic:
+  - label: Anthropic
+    base_url: https://api.anthropic.com/v1
+    model: claude-3-5-haiku-latest
+
+# Serveurs locaux : `localhost` quand easy3d tourne sur la machine, et
+# `host.docker.internal` quand il tourne dans un conteneur (vu de là,
+# `localhost` est le conteneur lui-même).
+ollama:
+  - label: Ollama (local)
+    base_url: http://localhost:11434/v1
+    model: qwen3:8b
+  - label: Ollama (Docker)
+    base_url: http://host.docker.internal:11434/v1
+    model: qwen3:8b
+  - label: LM Studio (local)
+    base_url: http://localhost:1234/v1
+  - label: LM Studio (Docker)
+    base_url: http://host.docker.internal:1234/v1

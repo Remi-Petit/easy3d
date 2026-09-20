@@ -21,6 +21,15 @@ export interface AiPreset {
   model?: string
 }
 
+/**
+ * Adresses connues de **tous** les fournisseurs, par identifiant.
+ *
+ * C'est la forme du fichier `ai-presets.yml` côté serveur, diffusée avec le
+ * catalogue : elle suit le fichier même s'il est modifié pendant que la page
+ * est ouverte.
+ */
+export type AiPresets = Record<string, AiPreset[]>
+
 /** Fournisseur de modèle, tel que l'administration le propose. */
 export interface AiProvider {
   id: string
@@ -38,6 +47,23 @@ export interface AiProvider {
    * libre, comme avant.
    */
   presets?: AiPreset[]
+}
+
+/**
+ * Fournisseurs avec leurs adresses **à jour**.
+ *
+ * Les adresses arrivent par deux chemins : la liste lue au chargement de
+ * l'administration (`GET /ai/providers`) et la diffusion continue du catalogue,
+ * qui suit le fichier `ai-presets.yml` (relu à chaud côté serveur). Le second
+ * est plus frais quand la page est restée ouverte, donc il l'emporte ; le reste
+ * du fournisseur (libellé, clé nécessaire…) ne change jamais.
+ */
+export function providersWithPresets(
+  providers: AiProvider[],
+  live: AiPresets | null | undefined,
+): AiProvider[] {
+  if (!live) return providers
+  return providers.map((p) => (live[p.id] ? { ...p, presets: live[p.id] } : p))
 }
 
 /** Une proposition de la recherche assistée. */

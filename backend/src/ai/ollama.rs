@@ -9,47 +9,17 @@
 use super::Provider;
 use super::openai;
 use super::tools::Spec;
-use super::{Preset, Reply, Request, Resolved, Turn};
+use super::{Reply, Request, Resolved, Turn};
 
 /// Adresse par défaut d'un Ollama installé sur la même machine.
+///
+/// Les autres adresses de serveurs locaux (celle vue depuis un conteneur,
+/// LM Studio) vivent dans `ai-presets.yml`, relu à chaud : voir
+/// [`super::presets`].
 const BASE_URL: &str = "http://localhost:11434/v1";
 
 /// Modèle par défaut : un modèle courant, capable d'appeler des outils.
 const MODEL: &str = "qwen3:8b";
-
-/// Où joindre un serveur local, selon l'endroit d'où on regarde.
-///
-/// Deux familles d'adresses, parce que les deux se rencontrent vraiment :
-/// `localhost` quand easy3d tourne sur la même machine (le cas courant en
-/// développement), et `host.docker.internal` quand easy3d tourne **dans un
-/// conteneur** — vu de là, `localhost` est le conteneur lui-même, et l'Ollama de
-/// la machine hôte est injoignable sans cette adresse.
-///
-/// Aucun modèle n'est conseillé pour LM Studio : ses modèles sont ceux que
-/// l'utilisateur y a téléchargés, on ne peut rien deviner (le champ reste vide,
-/// et « Tester » remplit la liste).
-static PRESETS: &[Preset] = &[
-    Preset {
-        label: "Ollama (local)",
-        base_url: BASE_URL,
-        model: MODEL,
-    },
-    Preset {
-        label: "Ollama (Docker)",
-        base_url: "http://host.docker.internal:11434/v1",
-        model: MODEL,
-    },
-    Preset {
-        label: "LM Studio (local)",
-        base_url: "http://localhost:1234/v1",
-        model: "",
-    },
-    Preset {
-        label: "LM Studio (Docker)",
-        base_url: "http://host.docker.internal:1234/v1",
-        model: "",
-    },
-];
 
 /// Le fournisseur Ollama.
 pub static OLLAMA: Ollama = Ollama;
@@ -75,10 +45,6 @@ impl Provider for Ollama {
 
     fn default_model(&self) -> &'static str {
         MODEL
-    }
-
-    fn presets(&self) -> &'static [Preset] {
-        PRESETS
     }
 
     fn headers(&self, _cfg: &Resolved) -> Vec<(String, String)> {
