@@ -1,5 +1,5 @@
 import { defineWebSocketHandler } from 'h3'
-import { backendWsUrl, relayToBackend, type Relay } from '../../utils/wsRelay'
+import { backendWsUrl, peerCookie, relayToBackend, type Relay } from '../../utils/wsRelay'
 
 /**
  * WS d'une note (`/collab/<rel>`) : document CRDT partagé, en binaire (Yjs).
@@ -17,9 +17,10 @@ function drop(peer: { id: string }) {
 
 export default defineWebSocketHandler({
   open(peer) {
-    // `peer.request` est la requête d'ouverture : son chemin porte la room.
+    // `peer.request` est la requête d'ouverture : son chemin porte la room, et
+    // son cookie sert à obtenir un ticket pour la connexion amont.
     const path = new URL(peer.request.url, 'http://localhost').pathname
-    relays.set(peer.id, relayToBackend(peer, backendWsUrl(path), true))
+    relays.set(peer.id, relayToBackend(peer, backendWsUrl(path), true, peerCookie(peer)))
   },
   message(peer, message) {
     relays.get(peer.id)?.send(message)

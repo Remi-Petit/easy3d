@@ -4,12 +4,11 @@ export default defineEventHandler(async (event) => {
   const base: string = config.hpccatApiBase
 
   try {
-    return await $fetch(`${base}/health`, { responseType: 'text' })
-  } catch (err: any) {
-    throw createError({
-      statusCode: 502,
-      statusMessage: `Backend indisponible (${base}).`,
-      data: { cause: err?.message ?? String(err) },
+    return await $fetch(`${base}/health`, {
+      responseType: 'text',
+      headers: backendHeaders(event),
     })
+  } catch (err: any) {
+    throw backendError(base, err)
   }
 })

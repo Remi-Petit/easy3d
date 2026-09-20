@@ -68,16 +68,28 @@ watch(
 const { t } = useI18n()
 const menu = reactive({ open: false, x: 0, y: 0 })
 
+// `can` vient de `useAuth()` (pas d'auto-import) : voir `FileItem`.
+const { can } = useAuth()
+
 function openMenu(event: MouseEvent) {
+  // Rien à proposer : un menu vide vaut moins qu'aucun menu.
+  if (!menuItems.value.length) return
   menu.open = true
   menu.x = event.clientX
   menu.y = event.clientY
 }
 
-const menuItems = computed(() => [
-  { key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' },
-  { key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true },
-])
+/** Actions du menu contextuel, limitées à ce que le compte peut faire. */
+const menuItems = computed(() => {
+  const items = []
+  if (can(PERM.modelRename)) {
+    items.push({ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' })
+  }
+  if (can(PERM.modelDelete)) {
+    items.push({ key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true })
+  }
+  return items
+})
 
 const { start: startRename } = useRename()
 const { start: startDelete } = useDelete()

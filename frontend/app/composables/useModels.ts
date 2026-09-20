@@ -2,6 +2,7 @@
 import { DEFAULT_FORMATS, type FormatInfo } from '~/utils/formats'
 import type { AiPresets } from '~/utils/ai'
 import type { AiConfig } from '~/utils/ai'
+import type { OidcConfig, OidcInfo } from '~/utils/oidc'
 import type { WsConfig } from '~/utils/collab'
 
 export interface FileInfo {
@@ -77,6 +78,11 @@ export interface AppConfig {
    * backend.
    */
   ai?: AiConfig
+  /**
+   * Connexion par un fournisseur d'identité (voir `~/utils/oidc`). Le secret
+   * client n'arrive ici que masqué (`***`), comme la clé d'API.
+   */
+  oidc?: OidcConfig
 }
 
 /** Ce que `/api/config` expose sur le re-scan périodique. */
@@ -93,6 +99,8 @@ export interface ConfigResponse {
   config: AppConfig
   models_root: string
   watch: WatchInfo
+  /** État du SSO : champs figés par l'environnement, configuration incomplète. */
+  oidc: OidcInfo
 }
 
 export interface ModelsResponse {

@@ -26,6 +26,7 @@ use crate::scanner::{self, FileInfo};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
+use crate::auth::permissions;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,11 @@ pub struct Easy3dMcp {
     state: AppState,
     /// Autorise les outils destructeurs (cf. [`destructive_allowed_from_env`]).
     allow_destructive: bool,
+    /// Compte au nom duquel les outils s'exécutent.
+    ///
+    /// `None` quand l'authentification est éteinte (ou dans les tests) : le
+    /// serveur est alors celui d'avant les comptes, ouvert comme le reste.
+    user: Option<String>,
     /// Table des outils, générée par `#[tool_router]`.
     tool_router: ToolRouter<Self>,
 }
@@ -57,12 +63,47 @@ impl Easy3dMcp {
         Self::with_permissions(state, destructive_allowed_from_env())
     }
 
+    /// Serveur au nom d'un compte (voir `api::AppState::mcp_service`).
+    pub fn for_user(state: AppState, user: Option<String>) -> Self {
+        Self {
+            user,
+            ..Self::with_permissions(state, destructive_allowed_from_env())
+        }
+    }
+
     /// Serveur avec des permissions explicites (utilisé par les tests).
     pub fn with_permissions(state: AppState, allow_destructive: bool) -> Self {
         Self {
             state,
             allow_destructive,
+            user: None,
             tool_router: Self::tool_router(),
+        }
+    }
+
+    /// Refuse l'appel si le compte n'a pas le droit qu'exige cet outil.
+    ///
+    /// C'est le pendant MCP de la table des routes : un outil sans droit déclaré
+    /// laisse le routeur répondre (« outil inconnu »).
+    fn require_for(&self, tool: &str) -> Result<(), ErrorData> {
+        let Some(uuid) = self.user.as_deref() else {
+            return Ok(());
+        };
+        let Some(permission) = permissions::for_tool(tool) else {
+            return Ok(());
+        };
+
+        match self.state.auth.can_uuid(uuid, permission) {
+            Ok(true) => Ok(()),
+            // MCP n'a pas de code « accès refusé » : `invalid_params` est ce qui
+            // s'en approche le plus, et le message dit **quel** droit manque — un
+            // agent doit pouvoir expliquer à son utilisateur ce qu'il faut
+            // accorder, pas seulement qu'il a échoué.
+            Ok(false) => Err(ErrorData::invalid_params(
+                format!("droit « {permission} » requis pour l'outil « {tool} »"),
+                None,
+            )),
+            Err(e) => Err(ErrorData::internal_error(e, None)),
         }
     }
 
@@ -143,6 +184,21 @@ impl Easy3dMcp {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Easy3dMcp {
+    /// Appel d'un outil : le **droit exigé** est vérifié ici, en un seul endroit.
+    ///
+    /// `#[tool_handler]` ne génère pas cette méthode si elle existe déjà (la macro
+    /// le teste), ce qui permet de l'écrire à la main pour y glisser le contrôle —
+    /// sans toucher aux treize outils eux-mêmes.
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        self.require_for(&request.name)?;
+        let call = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(call).await
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("easy3d", env!("CARGO_PKG_VERSION")))
@@ -895,6 +951,45 @@ mod tests {
     /// Laisse le flush collaboratif (250 ms) écrire le `.md` sur disque.
     async fn wait_flush() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    #[test]
+    fn chaque_outil_mcp_exige_le_droit_correspondant() {
+        let dir = tempfile::tempdir().unwrap();
+        let comptes = crate::auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        comptes.db(crate::auth::db::ensure_builtin_roles).unwrap();
+
+        // Un compte avec le seul rôle livré `lecteur` : il consulte, il n'écrit
+        // rien.
+        let user = crate::auth::db::NewUser::new("bob", "bob@exemple.fr", None);
+        comptes.db(|conn| crate::auth::db::insert_user(conn, &user)).unwrap();
+        comptes
+            .db(|conn| crate::auth::db::assign_role(conn, &user.uuid, crate::auth::db::READER_ROLE))
+            .unwrap();
+
+        let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
+        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
+            .with_auth(comptes);
+        let serveur = Easy3dMcp::for_user(state.clone(), Some(user.uuid.clone()));
+
+        // Lire le catalogue, ses notes et les formats : oui.
+        for outil in ["list_formats", "list_models", "find_models", "get_model", "list_notes", "read_note"] {
+            assert!(serveur.require_for(outil).is_ok(), "outil : {outil}");
+        }
+
+        // Écrire une note, lire ou modifier les réglages : non — c'est ce qui
+        // empêche un agent de contourner les droits de l'interface.
+        for outil in ["create_note", "delete_note", "get_config", "set_display_mode", "set_models_root"] {
+            assert!(serveur.require_for(outil).is_err(), "outil : {outil}");
+        }
+
+        // Un outil inconnu n'est pas de son ressort : le routeur répondra.
+        assert!(serveur.require_for("outil_invente").is_ok());
+
+        // Sans compte (installation ouverte), tout passe : le serveur MCP est
+        // celui d'avant les comptes.
+        let ouvert = Easy3dMcp::for_user(state, None);
+        assert!(ouvert.require_for("delete_note").is_ok());
     }
 
     #[test]

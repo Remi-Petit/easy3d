@@ -8,7 +8,9 @@
     "catalog": "Katalog",
     "system": "System",
     "models": "Models",
-    "admin": "Administration"
+    "admin": "Administration",
+    "accounts": "Konten",
+    "account": "Mein Konto"
   },
   "status": {
     "live": "live",
@@ -27,6 +29,64 @@
   "language": {
     "label": "Sprache",
     "choose": "Sprache wählen"
+  },
+  "auth": {
+    "title": "Anmeldung",
+    "hint": "Melde dich an, um auf den Katalog zuzugreifen.",
+    "login": "Benutzername oder E-Mail",
+    "password": "Passwort",
+    "submit": "Anmelden",
+    "or": "oder",
+    "sso": "Weiter mit {provider}",
+    "oidc": "Identitätsanbieter",
+    "signOut": "Abmelden",
+    "errors": {
+      "unknown": "Anmeldung nicht möglich.",
+      "auth_disabled": "Die Authentifizierung ist auf diesem Server nicht aktiviert.",
+      "invalid_credentials": "Benutzername oder Passwort ist falsch.",
+      "rate_limited": "Zu viele Versuche: in einer Minute erneut versuchen.",
+      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
+      "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
+      "internal_error": "Serverfehler.",
+      "oidc_denied": "Der Identitätsanbieter hat die Anmeldung abgelehnt.",
+      "invalid_state": "Diese Anmeldung ist abgelaufen: bitte erneut beginnen.",
+      "oidc_no_email": "Dein Anbieter übermittelt keine E-Mail-Adresse, die zum Zuordnen des Kontos nötig ist.",
+      "oidc_not_provisioned": "Kein passendes Konto: bitte eine Administration darum bitten.",
+      "oidc_conflict": "Dieses Konto ist bereits mit einer anderen Identität verknüpft.",
+      "pending_approval": "Dein Konto wartet auf die Freigabe durch eine Administration.",
+      "account_disabled": "Dieses Konto ist deaktiviert."
+    }
+  },
+  "permGroup": {
+    "catalog": "Katalog",
+    "ai": "KI-Suche",
+    "settings": "Einstellungen",
+    "accounts": "Konten"
+  },
+  "perm": {
+    "catalog": { "read": "Katalog ansehen und Modelle herunterladen" },
+    "model": {
+      "upload": "Dateien hinzufügen",
+      "rename": "Umbenennen",
+      "delete": "Löschen"
+    },
+    "note": { "write": "Notizen schreiben" },
+    "ai": {
+      "use": "KI-Suche starten",
+      "config": "Anbieter und Schlüssel wählen"
+    },
+    "config": {
+      "read": "Einstellungen ansehen",
+      "write": "Einstellungen ändern"
+    },
+    "users": {
+      "read": "Konten ansehen",
+      "write": "Konten anlegen und bearbeiten"
+    },
+    "roles": {
+      "read": "Rollen ansehen",
+      "write": "Rollen anlegen und bearbeiten"
+    }
   },
   "upload": {
     "add": "Hinzufügen",
@@ -217,6 +277,39 @@
     "watchLocal": "Dateisystem „{fs}“: lokal, Änderungen werden in Echtzeit erkannt.",
     "watchVirtual": "Dateisystem „{fs}“, virtualisiert: es meldet keine Dateien, die von deinem Rechner abgelegt werden – daher ein Neuscanning alle {seconds} s empfohlen.",
     "watchUnknown": "Lokales Dateisystem: Änderungen werden in Echtzeit erkannt.",
+    "sso": "Identitätsanbieter (SSO)",
+    "ssoEnable": "Anmeldung über den Identitätsanbieter erlauben",
+    "ssoEnableHint": "Ein zweiter Weg hinein: lokale Konten und Passwörter funktionieren weiter. Über SSO erstellte Konten erhalten die Standardrolle.",
+    "ssoLocked": "Einige Felder sind durch die Umgebung vorgegeben (EASY3D_OIDC_*) und hier ausgegraut.",
+    "ssoIssuer": "Adresse des Ausstellers",
+    "ssoIssuerHint": "Diejenige, die der Anbieter als seinen \"issuer\" angibt. Von dort wird die Konfiguration ermittelt.",
+    "ssoClientId": "Client-ID",
+    "ssoClientSecret": "Client-Secret",
+    "ssoClientSecretHint": "Wird nie im Klartext zurückgegeben: das Feld enthält ***, wenn ein Secret gespeichert ist; Leeren löscht es.",
+    "ssoScopes": "Scopes",
+    "ssoScopesHint": "Durch Leerzeichen getrennt. Leer = openid email profile — die E-Mail-Adresse ist nötig, um ein vorbereitetes Konto zuzuordnen.",
+    "ssoProvisioning": "Erste Anmeldung",
+    "ssoRedirect": "Beim Anbieter anzugebende Rückleitungs-URL",
+    "ssoCheckOk": "Anbieter erreichbar ({issuer}).",
+    "ssoMissing": {
+      "issuer": "Unvollständige Konfiguration: die Aussteller-Adresse fehlt.",
+      "client_id": "Unvollständige Konfiguration: die Client-ID fehlt.",
+      "client_secret": "Unvollständige Konfiguration: das Client-Secret fehlt."
+    },
+    "ssoMode": {
+      "auto": {
+        "label": "Konto automatisch anlegen",
+        "hint": "Wer beim Anbieter authentifiziert ist, erhält ein Konto mit der Standardrolle. Einfach, aber das Verzeichnis des Anbieters entscheidet."
+      },
+      "manual": {
+        "label": "Nur vorbereitete Konten",
+        "hint": "Eine Administration legt das Konto hier an (gleiche E-Mail-Adresse): die erste Anmeldung verknüpft es und speichert die Anbieter-Identität. Ohne Konto kommt niemand hinein."
+      },
+      "approval": {
+        "label": "Anlegen und freigeben",
+        "hint": "Das Konto entsteht bei der ersten Anmeldung deaktiviert: die Konten-Seite dient als Freigabe. Die Person wird informiert, dass ihr Konto wartet."
+      }
+    },
     "notes": "Notizen",
     "noItems": "Kein Eintrag.",
     "whereFolder": "Ordner",
@@ -239,6 +332,103 @@
     "whatFolder": "„{name}“ und seine {count} Datei werden endgültig gelöscht. | „{name}“ und seine {count} Dateien werden endgültig gelöscht.",
     "done": "„{name}“ gelöscht.",
     "failed": "Löschen fehlgeschlagen."
+  },
+  "account": {
+    "identity": "Identität",
+    "userName": "Benutzername",
+    "email": "E-Mail-Adresse",
+    "roles": "Rollen",
+    "noRole": "keine Rolle",
+    "password": "Passwort",
+    "currentPassword": "Aktuelles Passwort",
+    "newPassword": "Neues Passwort",
+    "repeatPassword": "Neues Passwort wiederholen",
+    "change": "Ändern",
+    "mismatch": "Die beiden Eingaben stimmen nicht überein.",
+    "changed": "Passwort geändert. Die anderen Sitzungen wurden geschlossen.",
+    "passwordHint": "Mindestens 8 Zeichen. Die Änderung schließt die anderen Sitzungen: offen gelassene Geräte müssen sich neu anmelden.",
+    "tokens": "API-Token",
+    "tokensHint": "Für Agenten (Claude Code, ein Skript, eine CI): sie weisen sich mit einem Token statt mit einem Cookie aus und haben nie mehr Rechte als du.",
+    "tokenOnce": "Kopiere dieses Token jetzt: es wird nicht wieder angezeigt.",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "done": "Fertig",
+    "lastUsed": "zuletzt benutzt",
+    "created": "erstellt am",
+    "neverUsed": "nie benutzt",
+    "revoke": "Widerrufen",
+    "confirm": "Bestätigen?",
+    "noToken": "Kein Token.",
+    "newToken": "Neues Token",
+    "tokenName": "Name (z. B. „Laptop“, „CI“)",
+    "create": "Anlegen",
+    "mcpHint": "Für einen MCP-Agenten: die Serveradresse und dieses Token als Authorization: Bearer.",
+    "errors": {
+      "unknown": "Aktion nicht möglich.",
+      "forbidden": "Dein Konto darf das nicht.",
+      "unauthenticated": "Sitzung abgelaufen: bitte erneut anmelden.",
+      "not_found": "Token nicht gefunden.",
+      "name_required": "Ein Name ist erforderlich.",
+      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
+      "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
+      "invalid_credentials": "Aktuelles Passwort ist falsch."
+    }
+  },
+  "accounts": {
+    "roles": "Rollen",
+    "rolesHint": "Die mitgelieferten Rollen sind fest: klone sie, um von etwas auszugehen.",
+    "users": "Konten",
+    "newRole": "Neue Rolle",
+    "newUser": "Neues Konto",
+    "roleName": "Name der Rolle",
+    "roleDescription": "Beschreibung",
+    "userName": "Benutzername",
+    "email": "E-Mail-Adresse",
+    "password": "Passwort",
+    "passwordHint": "Optional: ohne Passwort kann sich das Konto nur über den Identitätsanbieter (SSO) anmelden.",
+    "oidc": "SSO",
+    "newPassword": "Neues Passwort (leer = unverändert)",
+    "rolesOf": "Rollen",
+    "direct": "Rechte dieses Kontos",
+    "create": "Anlegen",
+    "clone": "Klonen",
+    "cloneFrom": "Zu klonende Rolle",
+    "cloneNone": "Mit leerer Rolle beginnen",
+    "cloneHint": "Eine leere Rolle anlegen oder eine klonen: deren Rechte werden übernommen. So entsteht üblicherweise eine passende Rolle.",
+    "save": "Speichern",
+    "remove": "Löschen",
+    "confirm": "Bestätigen?",
+    "setDefault": "Als Standard",
+    "byDefault": "Standard",
+    "builtin": "mitgeliefert",
+    "disabled": "deaktiviert",
+    "disable": "Deaktivieren",
+    "enable": "Reaktivieren",
+    "frozen": "Mitgelieferte Rolle: fest. Klone sie, um die Rechte zu ändern.",
+    "superuser": "Superuser: alle Rechte, von Natur aus.",
+    "members": "{count} Konto | {count} Konten",
+    "noRole": "keine Rolle",
+    "noUser": "Keine Konten.",
+    "hint": "Ein hier gesetztes Recht kommt zu denen der Rollen hinzu. Der letzte Administrator kann weder deaktiviert noch gelöscht werden.",
+    "defaultHint": "Ohne angekreuzte Rolle gilt die Standardrolle der Installation.",
+    "errors": {
+      "unknown": "Aktion nicht möglich.",
+      "forbidden": "Dein Konto darf das nicht.",
+      "unauthenticated": "Sitzung abgelaufen: bitte erneut anmelden.",
+      "not_found": "Nicht gefunden.",
+      "last_admin": "Der letzte Administrator kann nicht entfernt werden.",
+      "cannot_delete_self": "Das eigene Konto kann nicht gelöscht werden.",
+      "unknown_permission": "Dem Server unbekanntes Recht.",
+      "unknown_role": "Unbekannte Rolle.",
+      "role_frozen": "Eine mitgelieferte Rolle ist unveränderlich: klone sie.",
+      "name_required": "Ein Name ist erforderlich.",
+      "username_taken": "Dieser Benutzername ist bereits vergeben.",
+      "email_taken": "Diese E-Mail-Adresse wird bereits verwendet.",
+      "name_taken": "Dieser Name wird bereits verwendet.",
+      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
+      "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
+      "invalid_credentials": "Aktuelles Passwort ist falsch."
+    }
   },
   "time": {
     "now": "gerade eben",

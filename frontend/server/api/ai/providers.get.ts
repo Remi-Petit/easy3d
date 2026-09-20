@@ -8,12 +8,11 @@ export default defineEventHandler(async (event) => {
   const base: string = config.hpccatApiBase
 
   try {
-    return await $fetch(`${base}/ai/providers`, { responseType: 'json' })
-  } catch (err: any) {
-    throw createError({
-      statusCode: 502,
-      message: `Backend indisponible (${base}).`,
-      data: { cause: err?.message ?? String(err) },
+    return await $fetch(`${base}/ai/providers`, {
+      responseType: 'json',
+      headers: backendHeaders(event),
     })
+  } catch (err: any) {
+    throw backendError(base, err)
   }
 })

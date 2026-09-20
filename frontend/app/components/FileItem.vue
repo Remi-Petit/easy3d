@@ -40,18 +40,36 @@ watch(
 // ── Menu contextuel (clic droit) ────────────────────────────────────────────
 // La position est celle du curseur : c'est la carte qui la retient, le menu ne
 // fait que s'y poser (voir `CardMenu`).
+//
+// `can` vient de `useAuth()` — ce n'est pas une auto-import : sans cet appel, le
+// gabarit référence une fonction qui n'existe pas.
+const { can } = useAuth()
 const menu = reactive({ open: false, x: 0, y: 0 })
 
 function openMenu(event: MouseEvent) {
+  // Rien à proposer : un menu vide vaut moins qu'aucun menu.
+  if (!menuItems.value.length) return
   menu.open = true
   menu.x = event.clientX
   menu.y = event.clientY
 }
 
-const menuItems = computed(() => [
-  { key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' },
-  { key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true },
-])
+/**
+ * Actions du menu contextuel, limitées à ce que le compte peut faire.
+ *
+ * Proposer un renommage que le serveur refusera serait un piège : l'utilisateur
+ * remplirait une fenêtre pour rien.
+ */
+const menuItems = computed(() => {
+  const items = []
+  if (can(PERM.modelRename)) {
+    items.push({ key: 'rename', label: t('rename.title'), icon: 'i-lucide-pencil' })
+  }
+  if (can(PERM.modelDelete)) {
+    items.push({ key: 'delete', label: t('delete.title'), icon: 'i-lucide-trash-2', danger: true })
+  }
+  return items
+})
 
 const { start: startRename } = useRename()
 const { start: startDelete } = useDelete()

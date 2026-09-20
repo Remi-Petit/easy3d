@@ -156,6 +156,127 @@ impl Ai {
     }
 }
 
+/// Comment un compte est obtenu à la première connexion OIDC.
+///
+/// Les trois modes sont volontairement explicites : « qui a le droit d'entrer »
+/// est une décision d'administration, pas une conséquence de la configuration du
+/// fournisseur.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Provisioning {
+    /// Le compte est créé à la volée au premier login, avec le rôle par défaut.
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    /// Seuls les comptes **déjà créés** par l'administrateur entrent : le
+    /// rattachement se fait par e-mail, puis se verrouille sur le `sub`.
+    #[serde(rename = "manual")]
+    Manual,
+    /// Le compte est créé **désactivé** : la page Comptes de l'administration
+    /// sert d'écran de validation.
+    #[serde(rename = "approval")]
+    Approval,
+}
+
+impl Provisioning {
+    /// Identifiant stable, utilisé par l'API et l'interface.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Manual => "manual",
+            Self::Approval => "approval",
+        }
+    }
+
+    /// Analyse une valeur venue de l'environnement (`EASY3D_OIDC_PROVISIONING`).
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "manual" => Some(Self::Manual),
+            "approval" => Some(Self::Approval),
+            _ => None,
+        }
+    }
+}
+
+/// Connexion par un fournisseur d'identité OIDC (Keycloak, Entra ID, Auth0…).
+///
+/// Le bloc est **absent** du YAML tant qu'on n'y a pas touché : une installation
+/// sans SSO ne voit pas de section `oidc:` dans son fichier, et le comportement
+/// reste exactement celui d'avant.
+///
+/// Les réglages venus de l'environnement (`EASY3D_OIDC_*`) **gagnent** sur ce
+/// bloc, et l'interface les montre grisés (voir `auth::oidc::Env`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Oidc {
+    /// Interrupteur du SSO. Sans lui, tout le reste est inerte (mais conservé).
+    #[serde(default)]
+    pub enabled: bool,
+    /// URL de l'émetteur : la découverte se fait sur
+    /// `<issuer>/.well-known/openid-configuration`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Secret client — un **secret**, au même titre que la clé d'API : jamais
+    /// renvoyé tel quel (voir [`Oidc::redacted`]), jamais journalisé.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// Portées demandées. Vide = `openid email profile`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    /// Ce qui se passe au premier login (voir [`Provisioning`]).
+    #[serde(default)]
+    pub provisioning: Provisioning,
+}
+
+impl Oidc {
+    /// Portées effectives : celles demandées, sinon le minimum utile.
+    ///
+    /// `email` est indispensable (c'est la clé de rattachement d'un compte
+    /// pré-créé) : sans elle, aucun compte ne pourrait être relié.
+    pub fn effective_scopes(&self) -> Vec<String> {
+        if self.scopes.is_empty() {
+            ["openid", "email", "profile"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            self.scopes.clone()
+        }
+    }
+
+    /// `true` si rien n'est fixé : `save` laisse alors le YAML sans ce bloc.
+    ///
+    /// Un mode de provisionnement seul (sans émetteur ni client) est considéré
+    /// comme vide : il ne décrit aucun fournisseur.
+    fn is_empty(&self) -> bool {
+        !self.enabled
+            && self.issuer.is_none()
+            && self.client_id.is_none()
+            && self.client_secret.is_none()
+            && self.scopes.is_empty()
+            && self.provisioning == Provisioning::Auto
+    }
+
+    /// Copie où le secret client est remplacé par [`KEY_PLACEHOLDER`].
+    pub fn redacted(&self) -> Self {
+        Self {
+            client_secret: self.client_secret.as_ref().map(|_| KEY_PLACEHOLDER.to_string()),
+            ..self.clone()
+        }
+    }
+
+    /// Secret effectif après réception d'un formulaire (même convention que
+    /// [`Ai::merge_key`]).
+    pub fn merge_secret(&self, incoming: Option<&str>) -> Option<String> {
+        match incoming.map(str::trim) {
+            None | Some(KEY_PLACEHOLDER) => self.client_secret.clone(),
+            Some("") => None,
+            Some(value) => Some(value.to_string()),
+        }
+    }
+}
+
 /// Configuration de l'application.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -171,14 +292,18 @@ pub struct Config {
     /// Recherche assistée par un modèle de langage.
     #[serde(default, skip_serializing_if = "Ai::is_empty")]
     pub ai: Ai,
+    /// Connexion par un fournisseur d'identité (SSO).
+    #[serde(default, skip_serializing_if = "Oidc::is_empty")]
+    pub oidc: Oidc,
 }
 
 impl Config {
-    /// Copie destinée à sortir du backend (HTTP, WebSocket) : la clé d'API y est
-    /// masquée.
+    /// Copie destinée à sortir du backend (HTTP, WebSocket) : les secrets (clé
+    /// d'API, secret client OIDC) y sont masqués.
     pub fn redacted(&self) -> Self {
         Self {
             ai: self.ai.redacted(),
+            oidc: self.oidc.redacted(),
             ..self.clone()
         }
     }

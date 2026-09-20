@@ -41,6 +41,43 @@ services:
       # et le conseil de créer le sien (`mkdir config`) si vous partez du README.
       - ./config:/config
 
+    # ── Comptes utilisateurs (facultatif) ──────────────────────────────────
+    #
+    # Décommenter le bloc `environment:` ci-dessous pour activer la gestion des
+    # comptes. Sans lui, l'application est **ouverte** et se comporte comme
+    # avant (aucune base n'est créée).
+    #
+    # Le mot de passe administrateur ne sert qu'à la **première** création :
+    # dès qu'un administrateur existe, ces deux variables sont ignorées (le
+    # mot de passe ne peut plus être écrasé — on le change dans l'interface).
+    #
+    # `EASY3D_DB` est inutile ici : la base se pose à côté de `config.yml`,
+    # donc dans le dossier `./config` monté juste au-dessus, et survit à la
+    # recréation du conteneur.
+    #
+    # environment:
+    #   EASY3D_AUTH: "on"
+    #   EASY3D_ADMIN_EMAIL: vous@exemple.fr
+    #   EASY3D_ADMIN_PASSWORD: "un mot de passe de 8 caractères minimum"
+    #   # Facultatif : nom d'utilisateur (défaut : la partie locale de l'e-mail).
+    #   # EASY3D_ADMIN_USERNAME: remi
+    #
+    # Connexion OIDC (facultative, en plus du mot de passe) : ces réglages
+    # **gagnent** sur `config.yml`, et les champs correspondants apparaissent
+    # grisés dans /admin. Les poser ici évite de laisser un secret client dans un
+    # fichier que l'interface réécrit.
+    #
+    # Côté fournisseur, déclarer l'adresse de retour
+    # `<EASY3D_PUBLIC_URL>/api/auth/oidc/callback` (rappelée dans /admin).
+    #   EASY3D_PUBLIC_URL: https://easy3d.exemple.fr
+    #   EASY3D_OIDC_ISSUER: https://auth.exemple.fr/application/o/easy3d/
+    #   EASY3D_OIDC_CLIENT_ID: easy3d
+    #   EASY3D_OIDC_CLIENT_SECRET: "…"
+    #   # Facultatif : portées demandées (défaut « openid email profile ») et ce
+    #   # qui se passe à la première connexion (auto, manual ou approval).
+    #   # EASY3D_OIDC_SCOPES: openid email profile
+    #   # EASY3D_OIDC_PROVISIONING: auto
+
 # Plus de volume nommé : l'ancien (`easy3d_easy3d-config`) n'est plus utilisé.
 # Il peut être supprimé une fois la migration vérifiée
 # (`docker volume rm easy3d_easy3d-config`), ou rétabli en remettant

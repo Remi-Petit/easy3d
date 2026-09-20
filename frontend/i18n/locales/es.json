@@ -8,7 +8,9 @@
     "catalog": "Catálogo",
     "system": "Sistema",
     "models": "Models",
-    "admin": "Administración"
+    "admin": "Administración",
+    "accounts": "Cuentas",
+    "account": "Mi cuenta"
   },
   "status": {
     "live": "en vivo",
@@ -27,6 +29,64 @@
   "language": {
     "label": "Idioma",
     "choose": "Elegir idioma"
+  },
+  "auth": {
+    "title": "Iniciar sesión",
+    "hint": "Identifícate para acceder al catálogo.",
+    "login": "Usuario o correo",
+    "password": "Contraseña",
+    "submit": "Entrar",
+    "or": "o",
+    "sso": "Continuar con {provider}",
+    "oidc": "Proveedor de identidad",
+    "signOut": "Cerrar sesión",
+    "errors": {
+      "unknown": "No se pudo iniciar sesión.",
+      "auth_disabled": "La autenticación no está activada en este servidor.",
+      "invalid_credentials": "Usuario o contraseña incorrectos.",
+      "rate_limited": "Demasiados intentos: vuelve a probar en un minuto.",
+      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
+      "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
+      "internal_error": "Error del servidor.",
+      "oidc_denied": "El proveedor de identidad rechazó la conexión.",
+      "invalid_state": "Esta conexión ha caducado: vuelve a empezar.",
+      "oidc_no_email": "Tu proveedor no envía una dirección de correo, necesaria para vincular la cuenta.",
+      "oidc_not_provisioned": "Ninguna cuenta corresponde: pide a un administrador que la cree.",
+      "oidc_conflict": "Esta cuenta ya está vinculada a otra identidad.",
+      "pending_approval": "Tu cuenta espera la validación de un administrador.",
+      "account_disabled": "Esta cuenta está desactivada."
+    }
+  },
+  "permGroup": {
+    "catalog": "Catálogo",
+    "ai": "Búsqueda con IA",
+    "settings": "Ajustes",
+    "accounts": "Cuentas"
+  },
+  "perm": {
+    "catalog": { "read": "Ver el catálogo y descargar los modelos" },
+    "model": {
+      "upload": "Añadir archivos",
+      "rename": "Renombrar",
+      "delete": "Eliminar"
+    },
+    "note": { "write": "Escribir las notas" },
+    "ai": {
+      "use": "Lanzar una búsqueda con IA",
+      "config": "Elegir el proveedor y su clave"
+    },
+    "config": {
+      "read": "Ver los ajustes",
+      "write": "Modificar los ajustes"
+    },
+    "users": {
+      "read": "Ver las cuentas",
+      "write": "Crear y modificar las cuentas"
+    },
+    "roles": {
+      "read": "Ver los roles",
+      "write": "Crear y modificar los roles"
+    }
   },
   "upload": {
     "add": "Añadir",
@@ -217,6 +277,39 @@
     "watchLocal": "Sistema de archivos «{fs}»: local, los cambios se detectan en tiempo real.",
     "watchVirtual": "Sistema de archivos «{fs}», virtualizado: no informa de los archivos depositados desde tu equipo, por eso se recomienda un re-escaneo cada {seconds} s.",
     "watchUnknown": "Sistema de archivos local: los cambios se detectan en tiempo real.",
+    "sso": "Proveedor de identidad (SSO)",
+    "ssoEnable": "Permitir la conexión con el proveedor de identidad",
+    "ssoEnableHint": "Una segunda forma de entrar: las cuentas y contraseñas locales siguen funcionando. Las cuentas creadas por el SSO reciben el rol por defecto.",
+    "ssoLocked": "Algunos campos vienen del entorno (EASY3D_OIDC_*) y aparecen desactivados aquí.",
+    "ssoIssuer": "Dirección del emisor",
+    "ssoIssuerHint": "La que el proveedor anuncia como su \"issuer\". La configuración se descubre a partir de ahí.",
+    "ssoClientId": "Identificador de cliente",
+    "ssoClientSecret": "Secreto de cliente",
+    "ssoClientSecretHint": "Nunca se devuelve en claro: el campo contiene *** cuando hay un secreto guardado, y vaciarlo lo borra.",
+    "ssoScopes": "Ámbitos",
+    "ssoScopesHint": "Separados por espacios. Vacío = openid email profile — la dirección de correo es imprescindible para vincular una cuenta preparada a mano.",
+    "ssoProvisioning": "Primera conexión",
+    "ssoRedirect": "URL de retorno que hay que declarar en el proveedor",
+    "ssoCheckOk": "Proveedor accesible ({issuer}).",
+    "ssoMissing": {
+      "issuer": "Configuración incompleta: falta la dirección del emisor.",
+      "client_id": "Configuración incompleta: falta el identificador de cliente.",
+      "client_secret": "Configuración incompleta: falta el secreto de cliente."
+    },
+    "ssoMode": {
+      "auto": {
+        "label": "Crear la cuenta automáticamente",
+        "hint": "Quien esté autenticado en el proveedor obtiene una cuenta, con el rol por defecto. Sencillo, pero manda el directorio del proveedor."
+      },
+      "manual": {
+        "label": "Solo las cuentas preparadas",
+        "hint": "Un administrador crea aquí la cuenta (misma dirección de correo): la primera conexión la vincula y guarda la identidad del proveedor. Sin cuenta no entra nadie."
+      },
+      "approval": {
+        "label": "Crear y validar",
+        "hint": "La cuenta se crea desactivada en la primera conexión: la página Cuentas sirve de pantalla de validación. Se avisa a la persona de que su cuenta está pendiente."
+      }
+    },
     "notes": "Notas",
     "noItems": "Ningún elemento.",
     "whereFolder": "carpeta",
@@ -239,6 +332,103 @@
     "whatFolder": "Se eliminarán definitivamente «{name}» y su {count} archivo. | Se eliminarán definitivamente «{name}» y sus {count} archivos.",
     "done": "«{name}» eliminado.",
     "failed": "No se pudo eliminar."
+  },
+  "account": {
+    "identity": "Identidad",
+    "userName": "Usuario",
+    "email": "Correo electrónico",
+    "roles": "Roles",
+    "noRole": "sin rol",
+    "password": "Contraseña",
+    "currentPassword": "Contraseña actual",
+    "newPassword": "Nueva contraseña",
+    "repeatPassword": "Repetir la nueva contraseña",
+    "change": "Cambiar",
+    "mismatch": "Las dos entradas no coinciden.",
+    "changed": "Contraseña cambiada. Se han cerrado las demás sesiones.",
+    "passwordHint": "Mínimo 8 caracteres. El cambio cierra las demás sesiones: los dispositivos abiertos tendrán que volver a entrar.",
+    "tokens": "Claves de API",
+    "tokensHint": "Para los agentes (Claude Code, un script, una CI): se identifican con una clave en lugar de una cookie, y nunca tienen más permisos que tú.",
+    "tokenOnce": "Copia esta clave ahora: no volverá a mostrarse.",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "done": "Hecho",
+    "lastUsed": "último uso",
+    "created": "creada el",
+    "neverUsed": "nunca usada",
+    "revoke": "Revocar",
+    "confirm": "¿Confirmar?",
+    "noToken": "Ninguna clave.",
+    "newToken": "Nueva clave",
+    "tokenName": "Nombre (p. ej. «portátil», «CI»)",
+    "create": "Crear",
+    "mcpHint": "Para un agente MCP: la dirección del servidor y esta clave como Authorization: Bearer.",
+    "errors": {
+      "unknown": "No se pudo hacer.",
+      "forbidden": "Tu cuenta no tiene permiso para eso.",
+      "unauthenticated": "Sesión caducada: vuelve a entrar.",
+      "not_found": "Clave no encontrada.",
+      "name_required": "El nombre es obligatorio.",
+      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
+      "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
+      "invalid_credentials": "La contraseña actual es incorrecta."
+    }
+  },
+  "accounts": {
+    "roles": "Roles",
+    "rolesHint": "Los roles incluidos son fijos: clónalos para partir de algo.",
+    "users": "Cuentas",
+    "newRole": "Nuevo rol",
+    "newUser": "Nueva cuenta",
+    "roleName": "Nombre del rol",
+    "roleDescription": "Descripción",
+    "userName": "Usuario",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "passwordHint": "Opcional: sin contraseña, la cuenta solo entra por el proveedor de identidad (SSO).",
+    "oidc": "SSO",
+    "newPassword": "Nueva contraseña (vacío = sin cambios)",
+    "rolesOf": "Roles",
+    "direct": "Permisos concedidos a esta cuenta",
+    "create": "Crear",
+    "clone": "Clonar",
+    "cloneFrom": "Rol que clonar",
+    "cloneNone": "Partir de un rol vacío",
+    "cloneHint": "Crear un rol vacío o clonar uno: se copian sus permisos. Es la forma habitual de hacer un rol a medida.",
+    "save": "Guardar",
+    "remove": "Eliminar",
+    "confirm": "¿Confirmar?",
+    "setDefault": "Predeterminado",
+    "byDefault": "predeterminado",
+    "builtin": "incluido",
+    "disabled": "desactivada",
+    "disable": "Desactivar",
+    "enable": "Reactivar",
+    "frozen": "Rol incluido: fijo. Clónalo para cambiar sus permisos.",
+    "superuser": "Superusuario: todos los permisos, por construcción.",
+    "members": "{count} cuenta | {count} cuentas",
+    "noRole": "sin rol",
+    "noUser": "Ninguna cuenta.",
+    "hint": "Un permiso marcado aquí se suma a los de los roles. El último administrador no puede desactivarse ni eliminarse.",
+    "defaultHint": "Sin ningún rol marcado, se aplica el rol predeterminado de la instalación.",
+    "errors": {
+      "unknown": "No se pudo hacer.",
+      "forbidden": "Tu cuenta no tiene permiso para eso.",
+      "unauthenticated": "Sesión caducada: vuelve a entrar.",
+      "not_found": "No encontrado.",
+      "last_admin": "El último administrador no puede quitarse.",
+      "cannot_delete_self": "No puedes eliminar tu propia cuenta.",
+      "unknown_permission": "Permiso desconocido para el servidor.",
+      "unknown_role": "Rol desconocido.",
+      "role_frozen": "Un rol incluido no se puede modificar: clónalo.",
+      "name_required": "El nombre es obligatorio.",
+      "username_taken": "Ese usuario ya está en uso.",
+      "email_taken": "Ese correo ya está en uso.",
+      "name_taken": "Ese nombre ya está en uso.",
+      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
+      "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
+      "invalid_credentials": "La contraseña actual es incorrecta."
+    }
   },
   "time": {
     "now": "ahora mismo",

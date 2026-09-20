@@ -26,6 +26,7 @@ export default defineEventHandler(async (event) => {
     duplex: 'half',
     headers: {
       'content-type': getRequestHeader(event, 'content-type') || 'application/octet-stream',
+      ...backendHeaders(event),
     },
   } as RequestInit
 
