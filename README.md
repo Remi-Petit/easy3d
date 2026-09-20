@@ -64,13 +64,11 @@ services:
       - "8090:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
     volumes:
       - ./models:/models # tes modèles : lus, et écrits (aperçus + notes)
-      - easy3d-config:/config # configuration, réécrite par la page /admin
-
-volumes:
-  easy3d-config:
+      - ./config:/config # config.yml (écrit par /admin) + ai-presets.yml, éditables
 ```
 
 ```bash
+mkdir -p config # un dossier à toi : sinon Docker le crée en root (Linux)
 docker compose up -d
 ```
 
@@ -80,6 +78,13 @@ docker compose up -d
 Tes modèles se déposent dans `./models` : le dossier est monté dans le conteneur,
 il n'y a rien à importer. Ils apparaissent dans l'interface tout seuls — au plus
 tard quelques secondes après, même déposés depuis l'explorateur.
+
+`./config` contient les deux fichiers de réglages, à ouvrir dans ton éditeur :
+`config.yml` (écrit par la page **Administration** — clé d'API comprise) et
+`ai-presets.yml` (les adresses connues des fournisseurs d'IA, voir plus bas).
+Les deux sont **relus à chaud**. Ces fichiers ne sont pas à versionner :
+`config/` est ignoré par git (l'`ai-presets.yml` livré, lui, vit dans
+`backend/` et part dans le binaire).
 
 ## Serveur MCP (agents IA)
 
@@ -122,9 +127,12 @@ hôte** quand easy3d tourne dans un conteneur — et le champ reste libre : un
 proxy ou une adresse intermédiaire se saisit à la main.
 
 Cette liste est un fichier à part, `ai-presets.yml`, posé à côté de `config.yml`
-(et livré avec le binaire) : on y ajoute un service — une passerelle d'entreprise,
-un serveur intermédiaire — sans recompiler, puisqu'il est **relu à chaud** comme
-la configuration. `EASY3D_PRESETS` permet de le poser ailleurs.
+— donc `./config/ai-presets.yml` dans l'installation Docker, ouvrable dans ton
+éditeur. Celui livré (`backend/ai-presets.yml`) est embarqué dans le binaire et
+recopié là au premier démarrage s'il manque ; `EASY3D_PRESETS` permet de le poser
+ailleurs. On y ajoute un service — une passerelle d'entreprise, un serveur
+intermédiaire — sans recompiler, puisqu'il est **relu à chaud** comme la
+configuration.
 
 Le bouton **Tester** demande alors au fournisseur la liste des modèles que cette
 clé ouvre, et le modèle se choisit dedans — pas de nom à connaître par cœur, et

@@ -29,11 +29,21 @@ services:
       # dossier est sur un montage virtualisé ou réseau
       # (`config::watch_poll_recommendation`).
       - ./models:/models
-      # Configuration : `config.yml` (réécrit par /admin) et `ai-presets.yml`,
-      # les adresses connues des fournisseurs d'IA — relu à chaud lui aussi.
-      # Pour les éditer dans un éditeur plutôt que dans le navigateur, remplacer
-      # ce volume par un montage de dossier (`- ./config:/config`).
-      - easy3d-config:/config # configuration, réécrite par la page /admin
+      # Configuration : `config.yml` (écrit par /admin, clé d'API comprise) et
+      # `ai-presets.yml` (les adresses connues des fournisseurs), les deux relus
+      # à chaud. Un **dossier** plutôt qu'un volume nommé, justement pour pouvoir
+      # les ouvrir dans un éditeur : le contenu est ignoré par git (secret ou
+      # propre à la machine), et le dossier existe dans le dépôt (`.gitignore`).
+      #
+      # Sous Linux : le conteneur tourne sous l'utilisateur `node` (uid 1000).
+      # Un dossier créé par Docker à la place d'un dossier absent appartiendrait
+      # à root, et /admin ne pourrait plus écrire — d'où ce dossier versionné,
+      # et le conseil de créer le sien (`mkdir config`) si vous partez du README.
+      - ./config:/config
 
-volumes:
-  easy3d-config:
+# Plus de volume nommé : l'ancien (`easy3d_easy3d-config`) n'est plus utilisé.
+# Il peut être supprimé une fois la migration vérifiée
+# (`docker volume rm easy3d_easy3d-config`), ou rétabli en remettant
+# `- easy3d-config:/config` dans le service et ce bloc :
+# volumes:
+#   easy3d-config:

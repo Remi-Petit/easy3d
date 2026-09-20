@@ -8,6 +8,13 @@ backend/.env
 models/*
 !models/.gitkeep
 
+# configuration de l'installation (montée dans le conteneur) : `config.yml`
+# contient la clé d'API du fournisseur d'IA, et `ai-presets.yml` les adresses
+# que l'on édite à la main — rien de tout ça n'est à versionner. Le fichier
+# livré, lui, est `backend/ai-presets.yml` (embarqué dans le binaire).
+config/*
+!config/.gitkeep
+
 # frontend
 frontend/node_modules
 frontend/.nuxt
