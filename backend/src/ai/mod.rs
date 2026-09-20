@@ -118,6 +118,28 @@ pub struct Resolved {
     pub api_key: Option<String>,
 }
 
+/// Point d'entrée connu d'un fournisseur : un nom de service et l'adresse qui
+/// va avec.
+///
+/// Le fournisseur choisi dit **comment** parler (dialecte OpenAI, Anthropic…) ;
+/// cette liste dit **à qui** : plusieurs services exposent le même protocole
+/// tel quel (DeepSeek, OpenRouter, Groq…), et l'utilisateur n'a pas à retenir
+/// leur adresse.
+///
+/// Elle vit ici, et non dans l'interface : c'est le backend qui sait quels
+/// services parlent son protocole, et une adresse n'a de sens qu'avec lui.
+#[derive(Debug, Serialize)]
+pub struct Preset {
+    /// Nom du service, tel qu'il s'affiche sur la puce.
+    pub label: &'static str,
+    /// Adresse à écrire dans le champ correspondant.
+    pub base_url: &'static str,
+    /// Modèle conseillé, **vide** quand il n'y a rien à conseiller (un serveur
+    /// local n'a que les modèles que l'utilisateur y a installés). Ce n'est
+    /// jamais qu'une proposition : la vraie liste vient de « Tester ».
+    pub model: &'static str,
+}
+
 /// Description d'un fournisseur, pour l'écran d'administration.
 #[derive(Serialize)]
 pub struct ProviderInfo {
@@ -127,6 +149,9 @@ pub struct ProviderInfo {
     pub needs_key: bool,
     pub base_url: &'static str,
     pub model: &'static str,
+    /// Adresses connues de ce fournisseur, **la sienne en premier** (voir
+    /// [`Preset`]).
+    pub presets: &'static [Preset],
 }
 
 /// Interface commune aux fournisseurs de modèles.
@@ -144,6 +169,15 @@ pub trait Provider: Sync {
     }
     fn default_base_url(&self) -> &'static str;
     fn default_model(&self) -> &'static str;
+
+    /// Adresses connues qui parlent ce protocole, la sienne en premier.
+    ///
+    /// Vide par défaut : seule l'implémentation sait quels services imitent son
+    /// API. L'interface ne propose donc jamais une adresse qu'elle aurait
+    /// inventée — au pire elle n'en propose qu'une, celle du fournisseur.
+    fn presets(&self) -> &'static [Preset] {
+        &[]
+    }
 
     /// En-têtes d'authentification (et de version), communs à tous les appels.
     fn headers(&self, cfg: &Resolved) -> Vec<(String, String)>;
@@ -243,6 +277,7 @@ pub fn describe() -> Vec<ProviderInfo> {
             needs_key: p.needs_key(),
             base_url: p.default_base_url(),
             model: p.default_model(),
+            presets: p.presets(),
         })
         .collect()
 }
@@ -626,6 +661,59 @@ mod tests {
         sorted.dedup();
         assert_eq!(ids.len(), sorted.len(), "identifiants en double : {ids:?}");
         assert!(describe().iter().all(|p| !p.label.is_empty()));
+    }
+
+    /// Les adresses proposées à l'utilisateur doivent être utilisables telles
+    /// quelles : complètes, distinctes, et la première doit être celle du
+    /// fournisseur (le champ vide veut dire « l'adresse par défaut », donc la
+    /// même chose, et la puce correspondante doit s'allumer).
+    #[test]
+    fn les_adresses_proposees_sont_utilisables() {
+        for provider in PROVIDERS {
+            let presets = provider.presets();
+            assert!(
+                !presets.is_empty(),
+                "{} ne propose aucune adresse",
+                provider.id()
+            );
+
+            for preset in presets {
+                assert!(!preset.label.is_empty());
+                assert!(
+                    preset.base_url.starts_with("http"),
+                    "adresse incomplète : {}",
+                    preset.base_url
+                );
+            }
+
+            let urls: Vec<&str> = presets.iter().map(|p| p.base_url).collect();
+            let mut unique = urls.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(urls.len(), unique.len(), "adresses en double : {urls:?}");
+
+            assert_eq!(presets[0].base_url, provider.default_base_url());
+            assert_eq!(presets[0].model, provider.default_model());
+        }
+    }
+
+    /// Les services qui imitent l'API d'OpenAI sont annoncés avec lui : c'est
+    /// tout l'intérêt de la liste, et ce que l'utilisateur vient chercher.
+    #[test]
+    fn openai_annonce_les_services_qui_l_imitent() {
+        let openai = describe()
+            .into_iter()
+            .find(|p| p.id == "openai")
+            .expect("le fournisseur openai existe");
+
+        let labels: Vec<&str> = openai.presets.iter().map(|p| p.label).collect();
+        for expected in ["OpenAI", "DeepSeek", "OpenRouter"] {
+            assert!(labels.contains(&expected), "absent de {labels:?}");
+        }
+
+        // Chaque service annonce une adresse **et** un modèle : sans modèle, la
+        // puce remplirait l'adresse sans rien proposer à interroger.
+        assert!(openai.presets.iter().all(|p| !p.model.is_empty()));
     }
 
     #[test]

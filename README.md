@@ -40,9 +40,11 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   fouille le catalogue : noms, dossiers, notes Markdown et métadonnées annoncées
   par le slicer dans les G-codes (matière, hauteur de couche, temps d'impression…).
   Il ne peut proposer que des fichiers **existants** : chaque chemin est vérifié
-  côté serveur. Le fournisseur (OpenAI, Anthropic, Ollama…) et la clé se règlent
-  dans l'administration ; tant que rien n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 201 clés, traduites à 100 %.<!-- langues:end -->
+  côté serveur. Le fournisseur (OpenAI, Anthropic, Ollama…), son adresse — avec
+  un raccourci vers les services qui parlent le même protocole — et la clé se
+  règlent dans l'administration ; tant que rien n'est configuré, le bouton reste
+  grisé.
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 202 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -113,8 +115,12 @@ avant de l'exposer.
 ## Recherche assistée (IA)
 
 Désactivée par défaut : dans **Administration → Recherche assistée**, on choisit
-un fournisseur (OpenAI, Anthropic, ou un Ollama local), son adresse éventuelle et
-sa clé d'API. Le bouton **Tester** demande alors au fournisseur la liste des
+un fournisseur (OpenAI, Anthropic, ou un Ollama local), son adresse et sa clé
+d'API. Les services qui parlent le même protocole sont proposés en un clic —
+DeepSeek, OpenRouter, Groq, Mistral… pour OpenAI, ou l'Ollama **de la machine
+hôte** quand easy3d tourne dans un conteneur — et le champ reste libre : un
+proxy ou une adresse intermédiaire se saisit à la main. Le bouton **Tester**
+demande alors au fournisseur la liste des
 modèles que cette clé ouvre, et le modèle se choisit dedans — pas de nom à
 connaître par cœur, et la vérification de la clé est immédiate. La liste est
 **conservée avec la configuration** : pour changer de modèle plus tard, il suffit
