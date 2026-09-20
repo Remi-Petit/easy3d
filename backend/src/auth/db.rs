@@ -821,17 +821,21 @@ fn row_to_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiToken> {
 }
 
 /// Enregistre un jeton (son empreinte, jamais le jeton).
+///
+/// `expires_at` reste facultatif : `NULL` veut dire « n'expire jamais », ce qui
+/// est le cas de tous les jetons créés avant que le réglage existe.
 pub fn insert_token(
     conn: &Connection,
     uuid: &str,
     user_uuid: &str,
     name: &str,
     token_hash: &str,
+    expires_at: Option<i64>,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO api_tokens (uuid, user_uuid, name, token_hash, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![uuid, user_uuid, name.trim(), token_hash, now()],
+        "INSERT INTO api_tokens (uuid, user_uuid, name, token_hash, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![uuid, user_uuid, name.trim(), token_hash, now(), expires_at],
     )
     .map(|_| ())
     .map_err(err)

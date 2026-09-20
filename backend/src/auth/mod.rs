@@ -142,8 +142,11 @@ impl Auth {
     pub fn open(path: &Path, cookie_secure: bool) -> Result<Self, String> {
         let conn = db::open(path)?;
         // Ménage de démarrage : les sessions expirées pendant l'arrêt du
-        // serveur n'ont plus à occuper la base.
+        // serveur n'ont plus à occuper la base — et les jetons d'API arrivés à
+        // échéance non plus (leur date les neutralise de toute façon, mais
+        // autant ne pas laisser traîner des lignes mortes).
         db::purge_expired_sessions(&conn)?;
+        db::purge_expired_tokens(&conn)?;
         Ok(Self {
             db: Some(Mutex::new(conn)),
             path: path.to_path_buf(),
