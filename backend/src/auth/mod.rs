@@ -29,6 +29,7 @@
 //!   que le **temps de réponse** ne trahisse pas l'existence d'un compte.
 
 pub mod db;
+pub mod journal;
 pub mod oidc;
 pub mod password;
 pub mod permissions;
@@ -230,10 +231,9 @@ impl Auth {
         let token = new_token();
         let expires_at = db::now() + self.session_days * 86_400;
         let user_agent = header_value(headers, header::USER_AGENT.as_str(), 200);
-        // Derrière le relais Nitro, l'adresse vue par le backend est celle du
-        // relais : la colonne n'a de sens que si un proxy place
-        // `X-Forwarded-For`, et elle ne sert qu'au diagnostic.
-        let ip = header_value(headers, "x-forwarded-for", 45);
+        // L'adresse est celle que le relais annonce (voir `client_ip`) : elle ne
+        // sert qu'au diagnostic, et vaut mieux vide qu'erronée.
+        let ip = client_ip(headers);
 
         self.db(|conn| {
             db::create_session(conn, &token, user_uuid, expires_at, &user_agent, &ip)?;
@@ -249,10 +249,14 @@ impl Auth {
         cookie_value(token, self.session_days, self.cookie_secure)
     }
 
-    /// Ferme la session portée par la requête.
-    fn end_session(&self, headers: &HeaderMap) -> Result<(), String> {
+    /// Ferme la session portée par la requête, et renvoie le compte concerné.
+    ///
+    /// L'UUID est rendu parce que l'appelant en a besoin pour **écrire au
+    /// journal** : une déconnexion est un événement, et le journal n'a pas de
+    /// raison d'aller le rechercher une seconde fois.
+    fn end_session(&self, headers: &HeaderMap) -> Result<Option<String>, String> {
         let Some(token) = token_from_headers(headers) else {
-            return Ok(());
+            return Ok(None);
         };
         // Le compte est lu **avant** la suppression : il faut son UUID pour
         // écarter aussi les tickets d'accès qu'il a reçus (une déconnexion doit
@@ -260,10 +264,39 @@ impl Auth {
         // après).
         let user = self.db(|conn| db::session_user(conn, &token, db::now()))?;
         self.db(|conn| db::delete_session(conn, &token))?;
-        if let Some(user) = user {
-            self.forget_tickets(&user.uuid);
+        let Some(user) = user else {
+            return Ok(None);
+        };
+        self.forget_tickets(&user.uuid);
+        Ok(Some(user.uuid))
+    }
+
+    /// Écrit une ligne au **journal d'audit**.
+    ///
+    /// Ne fait jamais échouer l'action racontée : un journal est un témoin, pas
+    /// une condition. Une écriture ratée laisse un avertissement et rien d'autre
+    /// (voir `db::log_event`).
+    pub(crate) fn log(
+        &self,
+        headers: &HeaderMap,
+        kind: &str,
+        actor_uuid: Option<&str>,
+        subject: &str,
+        detail: &str,
+    ) {
+        if !self.is_enabled() {
+            return;
         }
-        Ok(())
+        // L'adresse vue par le backend est celle du relais : c'est le relais qui
+        // annonce celle du client (voir `client_ip`), et le journal note ce qu'il
+        // dit plutôt qu'une adresse qui ne désignerait personne.
+        let ip = client_ip(headers);
+        let user_agent = header_value(headers, header::USER_AGENT.as_str(), 200);
+        if let Err(e) = self.db(|conn| {
+            db::log_event(conn, kind, actor_uuid, subject, detail, &ip, &user_agent)
+        }) {
+            eprintln!("⚠️  journal : {e}");
+        }
     }
 
     /// Compte connecté, d'après le cookie de session. `None` si personne.
@@ -598,6 +631,7 @@ pub async fn login(
         return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
     }
     if auth.is_locked(&login) {
+        auth.log(&headers, "login_blocked", None, &login, "rate_limited");
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited");
     }
 
@@ -622,6 +656,9 @@ pub async fn login(
         Some(user) if verified && !user.disabled => user,
         _ => {
             auth.record_failure(&login);
+            // Le journal note l'identifiant **essayé** : c'est ce qu'on cherche
+            // ensuite (« qui a tenté d'entrer sous ce nom »).
+            auth.log(&headers, "login_failed", None, &login, "invalid_credentials");
             return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
         }
     };
@@ -635,6 +672,7 @@ pub async fn login(
         Err(e) => return internal(&e),
     };
     auth.clear_failures(&login);
+    auth.log(&headers, "login_ok", Some(&user.uuid), &user.username, "password");
 
     (
         StatusCode::OK,
@@ -653,8 +691,12 @@ pub async fn login(
 /// utilisateur qui a déjà perdu son cookie n'a pas besoin d'un message d'erreur.
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let auth = &state.auth;
-    if let Err(e) = auth.end_session(&headers) {
-        return internal(&e);
+    let closed = match auth.end_session(&headers) {
+        Ok(closed) => closed,
+        Err(e) => return internal(&e),
+    };
+    if let Some(uuid) = closed {
+        auth.log(&headers, "logout", Some(&uuid), "", "");
     }
     (
         StatusCode::OK,
@@ -857,6 +899,33 @@ fn header_value(headers: &HeaderMap, name: &str, max: usize) -> String {
         .and_then(|value| value.to_str().ok())
         .map(|value| value.chars().take(max).collect())
         .unwrap_or_default()
+}
+
+/// Adresse du **client**, telle qu'un relais la transmet.
+///
+/// Le backend n'est jamais joint directement par un navigateur : il est derrière
+/// le relais Nitro du frontend — l'adresse de la socket serait donc celle du
+/// conteneur voisin, sans aucun intérêt. L'adresse utile est celle que le relais
+/// annonce :
+///
+/// 1. `X-Forwarded-For`, dont on ne garde que le **premier** maillon : c'est le
+///    client d'origine, les suivants sont les relais traversés. Il n'est pas
+///    question de faire confiance à un en-tête envoyé par n'importe qui — c'est
+///    le relais qui l'**pose** (il écrase ce que le client avait envoyé).
+/// 2. `X-Real-IP`, posé par plusieurs serveurs d'entrée (nginx, Traefik).
+///
+/// Les deux sont absents quand rien ne les pose (appel direct au port du
+/// backend) : la colonne reste alors vide, plutôt que de désigner le relais.
+fn client_ip(headers: &HeaderMap) -> String {
+    let chaine = header_value(headers, "x-forwarded-for", 45);
+    if let Some(premier) = chaine.split(',').next() {
+        let premier = premier.trim();
+        if !premier.is_empty() {
+            return premier.chars().take(45).collect();
+        }
+    }
+    let reel = header_value(headers, "x-real-ip", 45);
+    reel.trim().chars().take(45).collect()
 }
 
 /// Jeton de session porté par l'en-tête `Cookie`.
@@ -1200,5 +1269,78 @@ mod tests {
         // Aucune base ouverte : l'appel ne doit pas échouer ni écrire quoi que
         // ce soit (le serveur démarre sans comptes, comme avant).
         assert!(bootstrap_admin(&auth, Some(seed)).is_ok());
+    }
+
+    // ── Adresse du client ───────────────────────────────────────────────────
+
+    /// Sans relais, le backend ne voit que la socket du conteneur voisin : mieux
+    /// vaut une colonne vide qu'une adresse qui ne désigne personne.
+    #[test]
+    fn sans_relais_l_adresse_reste_vide() {
+        assert_eq!(client_ip(&HeaderMap::new()), "");
+        assert_eq!(client_ip(&en_tetes(&[("user-agent", "curl/8")])), "");
+    }
+
+    #[test]
+    fn l_adresse_du_client_est_celle_que_le_relais_annonce() {
+        assert_eq!(
+            client_ip(&en_tetes(&[("x-forwarded-for", "203.0.113.7")])),
+            "203.0.113.7"
+        );
+        // Espaces autour de la valeur : recopiés par un relais bavard, ils ne
+        // doivent pas se retrouver dans la colonne.
+        assert_eq!(
+            client_ip(&en_tetes(&[("x-forwarded-for", "  203.0.113.7  ")])),
+            "203.0.113.7"
+        );
+    }
+
+    /// Une chaîne `client, relais1, relais2` : le client est le **premier**
+    /// maillon, les suivants ne disent rien de lui.
+    #[test]
+    fn seule_la_premiere_adresse_de_la_chaine_compte() {
+        assert_eq!(
+            client_ip(&en_tetes(&[
+                ("x-forwarded-for", "203.0.113.7, 172.18.0.1, 172.18.0.2")
+            ])),
+            "203.0.113.7"
+        );
+        // Premier maillon vide (relais maladroit) : on retombe sur `X-Real-IP`
+        // plutôt que d'écrire une adresse vide.
+        assert_eq!(
+            client_ip(&en_tetes(&[
+                ("x-forwarded-for", ", 172.18.0.1"),
+                ("x-real-ip", "198.51.100.4")
+            ])),
+            "198.51.100.4"
+        );
+    }
+
+    #[test]
+    fn x_real_ip_sert_de_repli() {
+        assert_eq!(
+            client_ip(&en_tetes(&[("x-real-ip", "198.51.100.4")])),
+            "198.51.100.4"
+        );
+        assert_eq!(client_ip(&en_tetes(&[("x-real-ip", "   ")])), "");
+    }
+
+    /// L'adresse est écrite en base : elle est bornée, comme le reste.
+    #[test]
+    fn l_adresse_est_bornee_avant_d_etre_ecrite() {
+        let longue = "1".repeat(200);
+        let ip = client_ip(&en_tetes(&[("x-forwarded-for", longue.as_str())]));
+        assert_eq!(ip.chars().count(), 45);
+    }
+
+    fn en_tetes(paires: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (nom, valeur) in paires {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(nom.as_bytes()).unwrap(),
+                axum::http::HeaderValue::from_str(valeur).unwrap(),
+            );
+        }
+        headers
     }
 }

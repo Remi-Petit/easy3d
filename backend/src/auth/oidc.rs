@@ -844,19 +844,39 @@ where
     }
     let identite = match parse_identity(&body) {
         Ok(identite) => identite,
-        Err(code) => return login_error(&code),
+        Err(code) => {
+            state
+                .auth
+                .log(headers, "sso_refused", None, "", &code);
+            return login_error(&code);
+        }
     };
 
     // Provisionnement puis session : à partir d'ici, tout échec est un refus
     // (code) ou une panne (500), jamais une session à moitié ouverte.
     let user = match provision(&state.auth, &settings, &identite) {
         Ok(user) => user,
-        Err(code) => return login_error(&code),
+        Err(code) => {
+            // L'adresse **essayée** est notée : c'est ce qui permet de répondre
+            // à « pourquoi cette personne n'arrive pas à entrer » sans qu'elle
+            // ait à raconter son parcours.
+            state
+                .auth
+                .log(headers, "sso_refused", None, &identite.email, &code);
+            return login_error(&code);
+        }
     };
     let token = match state.auth.start_session(&user.uuid, headers) {
         Ok(token) => token,
         Err(e) => return auth::internal(&e),
     };
+    state.auth.log(
+        headers,
+        "sso_login",
+        Some(&user.uuid),
+        &user.email,
+        settings.provisioning.id(),
+    );
     println!(
         "SSO : {} ({}) connecté — provisionnement {}",
         user.username,
@@ -1597,6 +1617,43 @@ mod tests {
             }
             autre => panic!("attendu : un GET userinfo, obtenu {autre:?}"),
         }
+
+        // Le journal garde la trace de la connexion, avec le mode de
+        // provisionnement qui a servi : c'est ce qu'on relit quand on se demande
+        // « d'où vient ce compte ? ».
+        let events = state.auth.db(|conn| db::list_events(conn, 5)).unwrap();
+        assert_eq!(events.len(), 1, "un seul événement : {events:?}");
+        assert_eq!(events[0].kind, "sso_login");
+        assert_eq!(events[0].subject, "remi@exemple.fr");
+        assert_eq!(events[0].detail, "auto");
+        assert!(events[0].actor_uuid.is_some());
+    }
+
+    #[tokio::test]
+    async fn un_refus_de_provisionnement_est_journalise() {
+        let state = etat(Provisioning::Manual, true);
+        let headers = entetes();
+        let etat_courant = demarrer(&state, &headers, None).await;
+
+        let (faux, _) = transport(reponses_du_retour("inconnu@exemple.fr"));
+        let query = CallbackQuery {
+            code: Some("code-1".to_string()),
+            state: Some(etat_courant),
+            error: None,
+        };
+        let reponse = callback_with(&state, &headers, &query, faux).await;
+        assert_eq!(
+            reponse.headers().get(header::LOCATION).unwrap(),
+            "/login?error=oidc_not_provisioned"
+        );
+
+        // L'adresse **essayée** est au journal : c'est ce qui permet de répondre
+        // à « pourquoi cette personne n'arrive pas à entrer ».
+        let events = state.auth.db(|conn| db::list_events(conn, 5)).unwrap();
+        assert_eq!(events[0].kind, "sso_refused");
+        assert_eq!(events[0].subject, "inconnu@exemple.fr");
+        assert_eq!(events[0].detail, "oidc_not_provisioned");
+        assert!(events[0].actor_uuid.is_none(), "personne n'est entré");
     }
 
     #[tokio::test]

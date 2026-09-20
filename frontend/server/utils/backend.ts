@@ -1,4 +1,11 @@
-import { createError, getMethod, getRequestHeader, readRawBody, type H3Event } from 'h3'
+import {
+  createError,
+  getMethod,
+  getRequestHeader,
+  getRequestIP,
+  readRawBody,
+  type H3Event,
+} from 'h3'
 import { useRuntimeConfig } from '#imports'
 
 /**
@@ -36,19 +43,47 @@ export async function backendCall(event: H3Event, path: string) {
 }
 
 /**
- * En-têtes à transmettre au backend : le **cookie de session**.
+ * En-têtes à transmettre au backend : le **cookie de session**, et l'identité de
+ * l'appelant.
  *
  * Ces routes-ci appellent le backend avec `fetch`/`$fetch` **depuis le serveur**,
  * donc sans les en-têtes du navigateur : Nitro n'est pas un simple tube. Depuis
  * que les comptes existent, le cookie doit être recopié à la main — sinon le
  * backend voit un anonyme (401) alors que le navigateur, lui, est bien connecté.
  *
+ * `callerHeaders` porte en plus de quoi **journaliser** qui agit : le backend ne
+ * voit que le relais, il lui faut donc l'adresse du client et son navigateur.
+ *
  * Les routes d'authentification n'en ont pas besoin : elles passent par
  * `proxyRequest` (voir `server/utils/authProxy.ts`), qui recopie tout.
  */
 export function backendHeaders(event: H3Event): Record<string, string> {
   const cookie = getRequestHeader(event, 'cookie')
-  return cookie ? { cookie } : {}
+  return { ...(cookie ? { cookie } : {}), ...callerHeaders(event) }
+}
+
+/**
+ * Adresse et navigateur du client, pour le journal d'audit.
+ *
+ * L'adresse **de la socket** d'abord : c'est la seule que le client ne peut pas
+ * inventer. `X-Forwarded-For` ne sert que de repli, pour le cas où un relais
+ * amont (nginx, Traefik) masquerait le client — c'est alors lui qui l'annonce, et
+ * on le croit. L'inverse (recopier l'en-tête du client en premier) laisserait
+ * chacun choisir sa propre adresse dans le journal.
+ *
+ * `X-Forwarded-For` est ensuite **posé** (écrasé), pas complété : le backend ne
+ * garde que le premier maillon de la liste, qui doit donc être le client.
+ *
+ * Absents quand ils ne sont pas connus : mieux vaut une colonne vide qu'une
+ * valeur inventée.
+ */
+export function callerHeaders(event: H3Event): Record<string, string> {
+  const ip = getRequestIP(event) ?? getRequestIP(event, { xForwardedFor: true })
+  const userAgent = getRequestHeader(event, 'user-agent')
+  return {
+    ...(ip ? { 'x-forwarded-for': ip } : {}),
+    ...(userAgent ? { 'user-agent': userAgent } : {}),
+  }
 }
 
 /**

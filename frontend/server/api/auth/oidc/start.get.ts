@@ -1,5 +1,6 @@
 import { createError, proxyRequest } from 'h3'
 import { useRuntimeConfig } from '#imports'
+import { callerHeaders } from '../../../utils/backend'
 
 /**
  * Départ du flux SSO : le backend répond un `302` vers le fournisseur.
@@ -21,6 +22,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     return await proxyRequest(event, url.toString(), {
+      headers: callerHeaders(event),
       fetchOptions: { redirect: 'manual' },
     })
   } catch (err: any) {

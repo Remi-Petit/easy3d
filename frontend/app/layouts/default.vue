@@ -55,6 +55,9 @@ const { user: authUser, status: authStatus, signOut, can } = useAuth()
 /** `true` sur la page des comptes (`/admin/comptes`). */
 const isAccounts = computed(() => route.path.startsWith('/admin/comptes'))
 
+/** `true` sur le journal d'audit (`/admin/journal`). */
+const isJournal = computed(() => route.path.startsWith('/admin/journal'))
+
 /** `true` sur « mon compte » (`/compte`). */
 const isCompte = computed(() => route.path.startsWith('/compte'))
 
@@ -65,6 +68,7 @@ const isAdmin = computed(() => route.path.startsWith('/admin'))
 const title = computed(() => {
   if (isCompte.value) return t('nav.account')
   if (isAccounts.value) return t('nav.accounts')
+  if (isJournal.value) return t('nav.journal')
   if (isAdmin.value) return t('nav.admin')
   // Dossiers et fichiers sont désignés par un chemin relatif : le titre de la
   // page est le **dernier** segment (un sous-dossier ne réaffiche pas sa parenté).
@@ -190,7 +194,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       label: t('nav.admin'),
       icon: 'i-lucide-settings',
       to: '/admin',
-      active: isAdmin.value && !isAccounts.value,
+      active: isAdmin.value && !isAccounts.value && !isJournal.value,
     })
   }
   if (can(PERM.usersRead) || can(PERM.rolesRead)) {
@@ -199,6 +203,15 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-users',
       to: '/admin/comptes',
       active: isAccounts.value,
+    })
+  }
+  // Le journal se lit avec les comptes : c'est le même sujet (et le même droit).
+  if (can(PERM.usersRead)) {
+    systeme.push({
+      label: t('nav.journal'),
+      icon: 'i-lucide-scroll-text',
+      to: '/admin/journal',
+      active: isJournal.value,
     })
   }
   // « Mon compte » n'a de sens qu'avec des comptes : c'est là qu'on change son

@@ -1,5 +1,6 @@
 import { createError, proxyRequest, type H3Event } from 'h3'
 import { useRuntimeConfig } from '#imports'
+import { callerHeaders } from './backend'
 
 /**
  * Relais d'une route d'authentification vers le backend Rust.
@@ -12,12 +13,15 @@ import { useRuntimeConfig } from '#imports'
  *
  * Le corps et le code d'état du backend passent tels quels : le frontend reçoit
  * les codes d'erreur (`invalid_credentials`, `rate_limited`…) et les traduit.
+ *
+ * `callerHeaders` ajoute l'adresse du client : le backend ne voit que le relais,
+ * et c'est pourtant l'adresse du visiteur qu'on veut lire dans le journal.
  */
 export async function authProxy(event: H3Event, path: string) {
   const base: string = useRuntimeConfig(event).hpccatApiBase
 
   try {
-    return await proxyRequest(event, `${base}${path}`)
+    return await proxyRequest(event, `${base}${path}`, { headers: callerHeaders(event) })
   } catch (err: any) {
     throw createError({
       statusCode: 502,

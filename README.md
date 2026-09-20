@@ -44,7 +44,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 367 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 407 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -295,6 +295,22 @@ secret client n'est jamais renvoyé à l'interface (il y apparaît sous la forme
 jamais ce secret. Le SSO ne remplace pas le mot de passe local : un compte peut
 avoir les deux, ou aucun mot de passe du tout (créé par le SSO, ou préparé pour
 lui).
+
+### Journal d'audit
+
+**Administration → Journal** garde trace des actions sensibles : connexions
+(par mot de passe ou par le fournisseur d'identité) et **tentatives refusées**,
+déconnexions, changements de mot de passe, jetons créés ou révoqués, et
+modifications de comptes, de rôles et de droits. Chaque ligne porte la date,
+l'auteur, la cible, le **motif** (mot de passe faux, trop de tentatives, compte
+en attente de validation, pas d'adresse e-mail chez le fournisseur…), l'adresse
+IP et le navigateur.
+
+Deux principes : **aucun secret n'y entre** — ni mot de passe, ni jeton (seul son
+nom et sa durée apparaissent) — et la liste est **bornée** aux 5000 derniers
+événements, les plus anciens partant d'eux-mêmes : c'est un témoin des derniers
+jours, pas une archive à sauvegarder. La page est en lecture seule, et réservée
+aux comptes qui ont le droit de voir les utilisateurs.
 
 ### Session
 

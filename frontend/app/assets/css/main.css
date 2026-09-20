@@ -1306,6 +1306,16 @@ select.admin__input option {
   color: var(--text);
 }
 
+/* Refus (connexion ratée ou bloquée, SSO refusé) : c'est ce qu'on vient
+   chercher dans le journal, donc ça se repère sans lire la ligne entière. */
+.admin__item--alert {
+  border-left: 2px solid var(--err);
+}
+
+.admin__item--alert .admin__item-label {
+  color: var(--err);
+}
+
 .admin__item-label {
   flex: 1;
   overflow: hidden;
