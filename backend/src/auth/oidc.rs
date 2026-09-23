@@ -1155,7 +1155,15 @@ mod tests {
     /// État complet, SSO allumé, découverte **déjà en cache** : aucun appel au
     /// fournisseur n'est nécessaire pour démarrer un flux.
     fn etat(mode: Provisioning, public_url: bool) -> AppState {
-        let (_dir, auth) = base();
+        let (dir, auth) = base();
+        // Le dossier doit survivre **à cette fonction**, puisque c'est lui qui
+        // porte la base que l'état renvoyé va interroger. Un `TempDir` détruit à
+        // la sortie emporte le fichier : sous Unix la suppression réussit, la
+        // base n'a plus de dossier où écrire son journal et SQLite répond
+        // « attempt to write a readonly database » ; sous Windows la suppression
+        // échoue (le fichier est ouvert), ce qui masquait le défaut en local et
+        // le faisait apparaître en CI. `keep` laisse donc le dossier en place.
+        dir.keep();
         let mut state = AppState::new(
             std::env::temp_dir(),
             tokio::sync::broadcast::channel(4).0,
