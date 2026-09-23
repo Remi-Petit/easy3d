@@ -1162,8 +1162,10 @@ mod tests {
         // base n'a plus de dossier où écrire son journal et SQLite répond
         // « attempt to write a readonly database » ; sous Windows la suppression
         // échoue (le fichier est ouvert), ce qui masquait le défaut en local et
-        // le faisait apparaître en CI. `keep` laisse donc le dossier en place.
-        dir.keep();
+        // le faisait apparaître en CI. `keep` laisse donc le dossier en place —
+        // le chemin qu'il rend ne sert pas ici, et son abandon se dit `let _ =`
+        // (la CI refuse les warnings).
+        let _ = dir.keep();
         let mut state = AppState::new(
             std::env::temp_dir(),
             tokio::sync::broadcast::channel(4).0,
