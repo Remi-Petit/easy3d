@@ -41,11 +41,63 @@ services:
       # et le conseil de créer le sien (`mkdir config`) si vous partez du README.
       - ./config:/config
 
-    # ── Comptes utilisateurs (facultatif) ──────────────────────────────────
+    # ── Comptes utilisateurs et connexion SSO (bloc **actif**) ─────────────
     #
-    # Décommenter le bloc `environment:` ci-dessous pour activer la gestion des
-    # comptes. Sans lui, l'application est **ouverte** et se comporte comme
-    # avant (aucune base n'est créée).
+    # Comptes gérés, et connexion par le fournisseur d'identité **fictif** du
+    # service `fake-oidc` défini en bas de ce fichier. Pour revenir à
+    # l'application ouverte — aucun compte, aucune base — commenter tout le
+    # bloc `environment:` ci-dessous.
+    #
+    # ⚠️ Adapter `EASY3D_ADMIN_EMAIL` avant le tout premier démarrage : ces
+    # deux variables ne servent qu'à la **création** de l'administrateur,
+    # ensuite elles sont ignorées (on change le mot de passe dans
+    # l'interface).
+    #
+    # `EASY3D_DB` est inutile ici : la base se pose à côté de `config.yml`,
+    # donc dans le dossier `./config` monté juste au-dessus, et survit à la
+    # recréation du conteneur.
+    #
+    # Les réglages `EASY3D_OIDC_*` **gagnent** sur `config.yml`, et les champs
+    # correspondants apparaissent grisés dans /admin — c'est voulu : le secret
+    # client n'a rien à faire dans un fichier que l'interface réécrit. Le
+    # `redirect_uri` à déclarer côté fournisseur est
+    # `<EASY3D_PUBLIC_URL>/api/auth/oidc/callback` (rappelé dans /admin).
+    environment:
+      # Comptes activés, avec l'administrateur initial.
+      #
+      # `EASY3D_DEV_EMAIL` n'est pas une variable d'easy3d : c'est un nom
+      # partagé entre ce service et `fake-oidc`, pour que les deux e-mails
+      # coïncident. Poser `EASY3D_DEV_EMAIL=vous@exemple.fr` dans un `.env` à
+      # la racine du dépôt (chargé automatiquement, non versionné) règle les
+      # deux d'un coup.
+      EASY3D_AUTH: "on"
+      EASY3D_ADMIN_EMAIL: ${EASY3D_DEV_EMAIL:-remi@example.com}
+      EASY3D_ADMIN_PASSWORD: "motdepasse"
+      EASY3D_ADMIN_USERNAME: remi
+
+      # SSO : l'adresse publique de l'interface — celle que le **navigateur**
+      # visite, et qui construit le `redirect_uri` — puis le fournisseur
+      # fictif. L'émetteur est le **nom de service** Compose : la découverte,
+      # le jeton et `userinfo` sont appelés par le backend ; le navigateur, lui,
+      # ne visite que la page d'autorisation, que la découverte annonce à part
+      # (`PUBLIC_URL`, voir `docker/fake-oidc/server.mjs`).
+      #
+      # Ces quatre lignes remplacées par celles d'un vrai fournisseur
+      # suffisent à l'utiliser.
+      EASY3D_PUBLIC_URL: http://localhost:3100
+      EASY3D_OIDC_ISSUER: http://fake-oidc:8788
+      EASY3D_OIDC_CLIENT_ID: easy3d
+      EASY3D_OIDC_CLIENT_SECRET: secret-idp
+      # Premier login inconnu → compte créé d'office (« auto »), sans rôle.
+      # Autres modes : « manual » (rattachement seulement) ou « approval ».
+      EASY3D_OIDC_PROVISIONING: auto
+
+    # ── Catalogue des variables (non actif) ────────────────────────────────
+    #
+    # Le bloc `environment:` réellement utilisé est plus haut, et vise le
+    # fournisseur d'identité **fictif** (`fake-oidc`, en bas du fichier) ;
+    # celui-ci garde le format attendu et l'exemple d'un vrai fournisseur,
+    # pour le jour où on le remplace.
     #
     # Le mot de passe administrateur ne sert qu'à la **première** création :
     # dès qu'un administrateur existe, ces deux variables sont ignorées (le
@@ -84,3 +136,65 @@ services:
 # `- easy3d-config:/config` dans le service et ce bloc :
 # volumes:
 #   easy3d-config:
+
+  # ── Fournisseur d'identité **fictif** (développement) ────────────────────
+  #
+  # Un serveur OIDC minimal (`docker/fake-oidc/server.mjs`, aucune dépendance)
+  # pour exercer le SSO sans compte chez un vrai fournisseur : il annonce ses
+  # adresses, accepte **n'importe quelle** connexion — aucun mot de passe n'est
+  # demandé — et décrit toujours le même compte simulé.
+  #
+  # Deux adresses pour une même instance, et c'est le point à comprendre :
+  #
+  #   - le **backend** l'atteint par le nom de service Compose
+  #     (`http://fake-oidc:8788`) : c'est là qu'il lit la découverte, échange le
+  #     code et demande `userinfo` ;
+  #   - le **navigateur** l'atteint par le port publié (`localhost:8788`), pour
+  #     la seule page d'autorisation. La découverte annonce donc cette adresse
+  #     à part (`PUBLIC_URL`), sans quoi le navigateur ne saurait pas résoudre
+  #     `fake-oidc`.
+  #
+  # ⚠️ Développement uniquement : ne jamais exposer ce service au-delà de la
+  # machine, et ne pas s'en servir comme modèle d'un vrai fournisseur.
+  #
+  # Journal du flux (autorisation, jeton, userinfo) :
+  #   docker compose logs -f fake-oidc
+  fake-oidc:
+    image: node:22-alpine
+    container_name: easy3d-fake-oidc
+    restart: unless-stopped
+    command: ["node", "/app/server.mjs"]
+    ports:
+      - "8788:8788" # page d'autorisation, vue par le navigateur
+    volumes:
+      # Monté en lecture seule : le serveur tourne dans l'image, le script
+      # reste sur l'hôte — une correction se teste par un simple redémarrage.
+      - ./docker/fake-oidc:/app:ro
+    environment:
+      PORT: "8788"
+      # Base vue par le navigateur. Adapter si l'interface n'est pas ouverte
+      # sur `localhost` (par exemple via une IP de la machine).
+      PUBLIC_URL: http://localhost:8788
+      # Doivent correspondre à `EASY3D_OIDC_CLIENT_ID` / `_SECRET` plus haut.
+      CLIENT_ID: easy3d
+      CLIENT_SECRET: secret-idp
+      # Le compte simulé, tel que `userinfo` le décrira. L'e-mail est la clé de
+      # rattachement : le **même** que l'administrateur (`EASY3D_DEV_EMAIL`,
+      # plus haut) fait ouvrir la session administrateur ; une autre adresse
+      # crée un compte de plus, sans rôle.
+      SUBJECT: fake-oidc-remi
+      EMAIL: ${EASY3D_DEV_EMAIL:-remi@example.com}
+      USERNAME: remi
+      NAME: Remi (SSO fictif)
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
