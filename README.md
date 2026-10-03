@@ -296,6 +296,35 @@ jamais ce secret. Le SSO ne remplace pas le mot de passe local : un compte peut
 avoir les deux, ou aucun mot de passe du tout (créé par le SSO, ou préparé pour
 lui).
 
+#### Éprouver le SSO sans annuaire : le fournisseur fictif
+
+Essayer cette fonctionnalité demanderait sinon un compte chez un vrai
+fournisseur. Le dépôt en livre donc un **fictif**, pour le développement :
+`docker/fake-oidc/server.mjs` — un serveur OIDC minimal, sans aucune dépendance,
+qui accepte **n'importe quelle** connexion sans mot de passe et décrit toujours
+le même compte simulé.
+
+Le `docker-compose.yml` de développement le démarre avec l'application, déjà
+branché (`EASY3D_OIDC_ISSUER: http://fake-oidc:8788`) : la page de connexion
+affiche alors **Continuer avec…**, et un clic ouvre une session sous le compte
+simulé.
+
+```bash
+docker compose logs -f fake-oidc        # le flux : autorisation, jeton, userinfo
+
+# Vérifier le fournisseur lui-même — il démarre son instance si besoin :
+node docker/fake-oidc/selftest.mjs
+```
+
+⚠️ Développement uniquement : ce service ne doit jamais être exposé au-delà de la
+machine, et il ne sert pas de modèle à un vrai fournisseur — il ne produit pas
+d'`id_token`, ne signe rien et ne vérifie ses clients qu'à peine.
+
+C'est aussi lui qui porte la campagne de tests de bout en bout de
+l'authentification (`frontend/tests/e2e-auth/`, lancée par
+`bun run test:e2e:auth` depuis `frontend/`) : garde d'accès, connexion par mot de
+passe, refus, SSO complet et provisionnement automatique du compte.
+
 ### Journal d'audit
 
 **Administration → Journal** garde trace des actions sensibles : connexions

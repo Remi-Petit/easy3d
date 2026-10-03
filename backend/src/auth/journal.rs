@@ -29,6 +29,18 @@ use serde::{Deserialize, Serialize};
 /// Nombre d'événements rendus par défaut.
 const DEFAULT_LIMIT: i64 = 100;
 
+/// Nombre d'événements rendus au plus, même si l'appelant en demande plus.
+const MAX_LIMIT: i64 = 500;
+
+/// Bornes de lecture d'une demande `?limit=…`.
+///
+/// Absent, on applique le défaut ; hors bornes, on **ramène** dans l'intervalle
+/// au lieu de refuser : c'est une lecture, et répondre « 400 » parce qu'on a
+/// demandé dix événements serait plus gênant qu'utile.
+fn limit_of(query: &ListQuery) -> i64 {
+    query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
+}
+
 /// Demande de lecture (`GET /journal?limit=…`).
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -64,7 +76,7 @@ pub async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>)
         return Json(Vec::<EventView>::new()).into_response();
     }
 
-    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 500);
+    let limit = limit_of(&query);
     match state.auth.db(|conn| {
         // Les noms sont résolus **à la lecture** : un compte renommé apparaît
         // sous son nom courant, et le journal ne recopie pas des noms qui
@@ -90,5 +102,32 @@ pub async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>)
     }) {
         Ok(vues) => Json(vues).into_response(),
         Err(e) => auth::internal(&e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn la_lecture_est_bornee_des_deux_cotes() {
+        let demande = |limit| ListQuery { limit };
+
+        // Absent : le défaut, pas « tout ».
+        assert_eq!(limit_of(&demande(None)), DEFAULT_LIMIT);
+
+        // Une valeur raisonnable passe telle quelle.
+        assert_eq!(limit_of(&demande(Some(42))), 42);
+        assert_eq!(limit_of(&demande(Some(1))), 1);
+        assert_eq!(limit_of(&demande(Some(MAX_LIMIT))), MAX_LIMIT);
+
+        // Zéro et le négatif sont ramenés à un minimum d'un événement : la
+        // réponse reste exploitable, sans erreur à traduire côté interface.
+        assert_eq!(limit_of(&demande(Some(0))), 1);
+        assert_eq!(limit_of(&demande(Some(-10))), 1);
+
+        // Une demande démesurée est plafonnée : le journal ne peut pas être
+        // aspiré d'un coup.
+        assert_eq!(limit_of(&demande(Some(10_000))), MAX_LIMIT);
     }
 }

@@ -826,3 +826,87 @@ fn conflict_or_internal(message: &str) -> Response {
         auth::internal(message)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+
+    /// Corps d'une réponse d'erreur : `auth::error` y met le **code** brut, que
+    /// l'interface traduit (`admin.accounts.errors.*`).
+    async fn corps(res: Response) -> String {
+        let octets = res.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(octets.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn tous_les_droits_connus_sont_acceptes() {
+        let tous: Vec<String> = permissions::all_ids().iter().map(|id| (*id).to_string()).collect();
+        assert_eq!(known_permissions(&tous), Ok(tous.clone()));
+
+        // Une liste vide est valide : un rôle sans droit existe (c'est même le
+        // point de départ d'un rôle créé à la main).
+        assert_eq!(known_permissions(&[]), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn un_seul_droit_inconnu_fait_echouer_toute_l_ecriture() {
+        let connu = permissions::all_ids()[0].to_string();
+        assert!(permissions::is_known(&connu));
+
+        // On refuse en bloc plutôt que de filtrer en silence : un droit qu'on
+        // croit accordé et que le serveur n'applique pas serait un piège.
+        let melange = vec![connu, "droit.invente".to_string()];
+        assert_eq!(known_permissions(&melange), Err("unknown_permission"));
+    }
+
+    #[test]
+    fn les_refus_destines_a_l_interface_sont_reconnus() {
+        for code in [
+            "last_admin",
+            "cannot_delete_self",
+            "unknown_permission",
+            "unknown_role",
+            "role_frozen",
+            "name_required",
+        ] {
+            assert!(is_client_error(code), "{code} doit être un refus client");
+        }
+
+        // Un conflit d'unicité (409) n'est pas un refus de saisie (400) : il a
+        // son propre chemin, `conflict_or_internal`.
+        for code in ["internal_error", "username_taken", "email_taken", "name_taken", ""] {
+            assert!(!is_client_error(code), "{code} ne doit pas être un refus client");
+        }
+    }
+
+    #[tokio::test]
+    async fn un_nom_deja_pris_est_un_conflit_nomme() {
+        for (message, code) in [
+            ("UNIQUE constraint failed: users.username", "username_taken"),
+            ("UNIQUE constraint failed: users.email", "email_taken"),
+            ("UNIQUE constraint failed: roles.name", "name_taken"),
+        ] {
+            let res = conflict_or_internal(message);
+            assert_eq!(res.status(), StatusCode::CONFLICT, "{message}");
+            assert_eq!(corps(res).await, code);
+        }
+    }
+
+    #[tokio::test]
+    async fn un_conflit_non_identifie_reste_un_conflit_sans_code() {
+        // Contrainte d'unicité sur une table qui n'est ni `users` ni `roles` :
+        // c'est bien un conflit, mais l'interface ne peut pas dire quoi.
+        let res = conflict_or_internal("UNIQUE constraint failed: settings.key");
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(corps(res).await, "internal_error");
+    }
+
+    #[tokio::test]
+    async fn une_panne_de_la_base_ne_dit_rien_de_plus() {
+        let res = conflict_or_internal("disk I/O error");
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Le détail part dans les logs (`auth::internal`), pas dans la réponse.
+        assert_eq!(corps(res).await, "internal_error");
+    }
+}

@@ -11,12 +11,35 @@ import { expect, test, type Page } from '@playwright/test'
  * l'interface et la **qualité du message d'échec**, pas une réponse de modèle.
  */
 
+/**
+ * Le sélecteur de fournisseur, **dans la carte IA**.
+ *
+ * Visé par son `id` et non par son libellé : l'administration porte désormais
+ * aussi une case « Autoriser la connexion par le fournisseur d'identité », et
+ * `getByLabel('Fournisseur')` — qui cherche par sous-chaîne — trouve alors deux
+ * éléments et échoue en mode strict.
+ */
+const champFournisseur = (page: Page) => page.locator('#ai-provider')
+
+/**
+ * La carte « Recherche assistée » de l'administration.
+ *
+ * Délimitée par le champ qu'elle contient : depuis l'arrivée du SSO, une autre
+ * carte porte elle aussi un bouton « Tester » (le contrôle du fournisseur
+ * d'identité), et viser le bouton par son seul libellé devient ambigu.
+ */
+const carteIA = (page: Page) =>
+  page.locator('.admin__card').filter({ has: page.locator('#ai-provider') })
+
+/** Le bouton « Tester » **de la carte IA** (et non celui du SSO). */
+const boutonTester = (page: Page) => carteIA(page).getByRole('button', { name: 'Tester' })
+
 /** Carte « Recherche assistée » de l'administration. */
 async function ouvrirCarteIA(page: Page) {
   await page.goto('/admin')
   // `/admin` compilée à la première visite du serveur de dev : délai large,
   // comme dans `admin.spec.ts`.
-  await expect(page.getByLabel('Fournisseur')).toBeVisible({ timeout: 30_000 })
+  await expect(champFournisseur(page)).toBeVisible({ timeout: 30_000 })
   // Le modèle n'est plus un champ de saisie : c'est une liste de choix, remplie
   // par ce que le fournisseur annonce.
   await expect(page.locator('select#ai-model')).toBeVisible()
@@ -41,10 +64,10 @@ async function enregistrerIA(page: Page) {
  */
 async function effacerFournisseur(page: Page) {
   await expect(async () => {
-    await page.getByLabel('Fournisseur').selectOption('')
+    await champFournisseur(page).selectOption('')
     await enregistrerIA(page)
     await page.reload()
-    await expect(page.getByLabel('Fournisseur')).toHaveValue('', { timeout: 2000 })
+    await expect(champFournisseur(page)).toHaveValue('', { timeout: 2000 })
   }).toPass({ timeout: 30_000 })
 }
 
@@ -55,15 +78,14 @@ async function effacerFournisseur(page: Page) {
  * la liste des modèles quand le fournisseur répond.
  */
 async function configurerOllamaFerme(page: Page) {
-  const fournisseur = page.getByLabel('Fournisseur')
+  const fournisseur = champFournisseur(page)
   const adresse = page.getByLabel('Adresse de l’API')
 
   await expect(async () => {
     await fournisseur.selectOption('ollama')
     await adresse.fill('http://127.0.0.1:9/v1')
 
-    await page.getByRole('button', { name: 'Tester' })
-      .click()
+    await boutonTester(page).click()
     await expect(page.locator('.admin__status--err')).toContainText('impossible', {
       timeout: 20_000,
     })
@@ -84,7 +106,7 @@ async function configurerOllamaFerme(page: Page) {
  */
 test('recherche IA : une adresse connue remplit le champ, qui reste libre', async ({ page }) => {
   await ouvrirCarteIA(page)
-  await page.getByLabel('Fournisseur').selectOption('openai')
+  await champFournisseur(page).selectOption('openai')
 
   // La liste vient du backend : l'interface n'a aucune adresse en dur.
   const puces = page.getByRole('group', { name: 'Adresses connues' })
@@ -152,7 +174,7 @@ test('recherche IA : configurée, elle s’ouvre et explique l’échec du fourn
 
   // « Tester » remonte la cause exacte, pas un statut nu.
   await ouvrirCarteIA(page)
-  await page.getByRole('button', { name: 'Tester' }).click()
+  await boutonTester(page).click()
   await expect(page.locator('.admin__status--err')).toContainText('impossible', {
     timeout: 30_000,
   })
