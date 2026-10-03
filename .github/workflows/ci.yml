@@ -1,10 +1,11 @@
 name: Cargo Build & Test
 
 # Deux dossiers, deux mondes : la CI ne lance que ce qui est concerné.
-#   - un commit qui ne touche ni `backend/`, ni `frontend/`, ni `scripts/`
-#     (README, modèles, compose…) ne déclenche **aucun** job ;
+#   - un commit qui ne touche ni `backend/`, ni `frontend/`, ni `scripts/`, ni
+#     `docker/` (README, modèles…) ne déclenche **aucun** job ;
 #   - un changement purement frontend n'exécute pas la matrice Rust (job
-#     `changes` + `if:` sur chaque job), et inversement.
+#     `changes` + `if:` sur chaque job), et inversement ; `docker/` n'exécute que
+#     l'auto-test du fournisseur fictif.
 # Les workflows font partie des filtres : modifier la CI la relance.
 #
 # `branches: [master]` : sans ce filtre, pousser un tag relançait toute la CI
@@ -16,12 +17,16 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'scripts/**'
+      - 'docker/**'
+      - 'docker-compose.yml'
       - '.github/workflows/**'
   pull_request:
     paths:
       - 'backend/**'
       - 'frontend/**'
       - 'scripts/**'
+      - 'docker/**'
+      - 'docker-compose.yml'
       - '.github/workflows/**'
 
 env: 
@@ -41,6 +46,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       scripts: ${{ steps.filter.outputs.scripts }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -58,6 +64,10 @@ jobs:
               - '.github/workflows/**'
             scripts:
               - 'scripts/**'
+            docker:
+              - 'docker/**'
+              - 'docker-compose.yml'
+              - '.github/workflows/**'
 
   build_and_test:
     name: Rust project - latest
@@ -166,3 +176,23 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'docs: langues du README' README.md
           git push
+
+  # Le fournisseur d'identité fictif est du code, lui aussi — et c'est lui qui
+  # sert à éprouver le SSO à la main comme en e2e. Son auto-test rejoue le flux
+  # OIDC complet (découverte, autorisation, jeton, userinfo, refus), et il
+  # démarre lui-même l'instance dont il a besoin : rien d'autre que Node.
+  fake_oidc:
+    name: Fournisseur OIDC fictif
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    # Le crate vit dans `backend/` : ce job, lui, travaille à la racine.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node docker/fake-oidc/selftest.mjs

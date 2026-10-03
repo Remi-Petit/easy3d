@@ -29,8 +29,23 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const modelsRoot = join(tmpdir(), 'easy3d-e2e-models')
-const configDir = join(tmpdir(), 'easy3d-e2e-config')
+
+/**
+ * Réglages, par variables d'environnement.
+ *
+ * Le harnais sert **deux campagnes** : le catalogue, sans comptes (défaut, port
+ * 8091), et l'authentification, comptes et SSO allumés
+ * (`playwright.auth.config.ts`, port 8092). Le port est donc réglable, et les
+ * dossiers temporaires portent ce port : un reste de l'une n'est jamais pris
+ * pour l'autre.
+ *
+ * Les variables `EASY3D_*` (comptes, SSO) ne sont **pas** traitées ici : le
+ * lanceur les transmet telles quelles à `cargo run` (il hérite de son
+ * environnement), et c'est la configuration Playwright qui les pose.
+ */
+const port = process.env.E2E_API_PORT ?? '8091'
+const modelsRoot = join(tmpdir(), `easy3d-e2e-models-${port}`)
+const configDir = join(tmpdir(), `easy3d-e2e-config-${port}`)
 
 /** Un STL minimal mais **valide** : le viewer et les aperçus doivent pouvoir le lire. */
 const stl = (nom) =>
@@ -67,13 +82,13 @@ writeFileSync(
 
 console.log(`[e2e] modèles : ${modelsRoot}`)
 console.log(`[e2e] config  : ${join(configDir, 'config.yml')}`)
-console.log('[e2e] API     : http://127.0.0.1:8091')
+console.log(`[e2e] API     : http://127.0.0.1:${port}`)
 
 const child = spawn('cargo', ['run'], {
   cwd: resolve(here, '../../../backend'),
   env: {
     ...process.env,
-    PORT: '8091',
+    PORT: port,
     EASY3D_CONFIG: join(configDir, 'config.yml'),
     CARGO_TARGET_DIR: resolve(here, '../../../backend/target/e2e'),
   },
