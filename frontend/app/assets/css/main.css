@@ -210,7 +210,8 @@ body {
   flex-wrap: wrap;
 }
 
-/* Pied de sidebar : état du backend puis sélecteur de langue, empilés. */
+/* Pied de sidebar : état du backend, version, sélecteur de langue, puis le
+   compte connecté, empilés — le compte ferme la colonne. */
 .foot {
   display: flex;
   flex-direction: column;

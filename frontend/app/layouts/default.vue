@@ -324,24 +324,11 @@ const navUi = {
            libellé blanc sur pastille grise pour l'entrée active. -->
       <UNavigationMenu :items="navItems" orientation="vertical" color="neutral" :ui="navUi" />
 
-      <!-- État du backend + langue de l'interface. -->
+      <!-- Pied de sidebar : état du backend, version et langue, puis le compte
+           connecté — **tout en bas**, sous le sélecteur : c'est la dernière
+           ligne de la colonne, celle qu'on vient chercher pour se déconnecter. -->
       <template #footer>
         <div class="foot">
-
-          <!-- Compte connecté (`EASY3D_AUTH`). Absent d'une installation sans
-               comptes : le pied de sidebar est alors celui d'avant. -->
-          <div v-if="authUser" class="sidebar-user">
-            <span class="sidebar-user__who" :title="authUser.email">{{ authUser.username }}</span>
-            <button
-              type="button"
-              class="sidebar-user__out"
-              :title="$t('auth.signOut')"
-              :aria-label="$t('auth.signOut')"
-              @click="signOut()"
-            >
-              <UIcon name="i-lucide-log-out" />
-            </button>
-          </div>
 
           <div class="stats">
             <span class="pill">
@@ -365,6 +352,22 @@ const navUi = {
               </option>
             </select>
           </label>
+
+          <!-- Compte connecté (`EASY3D_AUTH`), sous la langue. Absent d'une
+               installation sans comptes : le pied de sidebar est alors celui
+               d'avant. -->
+          <div v-if="authUser" class="sidebar-user">
+            <span class="sidebar-user__who" :title="authUser.email">{{ authUser.username }}</span>
+            <button
+              type="button"
+              class="sidebar-user__out"
+              :title="$t('auth.signOut')"
+              :aria-label="$t('auth.signOut')"
+              @click="signOut()"
+            >
+              <UIcon name="i-lucide-log-out" />
+            </button>
+          </div>
         </div>
       </template>
     </UDashboardSidebar>
