@@ -1,8 +1,14 @@
 **/target
 Cargo.lock
 
-# backend — fichiers d'environnement locaux (secrets / ports)
+# Fichiers d'environnement **locaux** (secrets / ports) : jamais versionnés.
+# Seul le modèle `*.env.example` l'est — d'où la négation, qui doit venir
+# **après** les motifs qu'elle annule. Le préfixe `.env.*` couvre les variantes
+# que Nuxt/Vite lisent aussi (`.env.local`, `.env.development`…) et qui
+# porteraient les mêmes secrets.
 backend/.env
+backend/.env.*
+!backend/.env.example
 
 # base des comptes utilisateurs (créée au premier démarrage en mode authentifié) :
 # des données locales, jamais versionnées. Le dossier `config/` du conteneur est
@@ -26,6 +32,10 @@ config/*
 frontend/node_modules
 frontend/.nuxt
 frontend/.output
+# Réglages locaux (ports des tests e2e, secrets) : même règle que pour le
+# backend — variantes comprises, modèle `frontend/.env.example` versionné.
 frontend/.env
+frontend/.env.*
+!frontend/.env.example
 frontend/test-results
 frontend/playwright-report

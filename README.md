@@ -388,3 +388,11 @@ Le projet est toujours en cours de développement et est récent. Si vous voyez 
 
 Pour développer : `cargo run` dans `backend/` et `bun run dev` dans `frontend/`
 (tests : `cargo test`, `bun run test`, `bun run test:e2e`).
+
+Les campagnes e2e démarrent leur propre backend et leur propre serveur Nuxt, sur
+des ports choisis **hors** de ceux du développement courant (`8091` + `3200` pour
+le catalogue, `8092` + `3201` pour l'authentification). Si l'un d'eux est pris sur
+votre machine — sous Windows, une plage entière peut être réservée
+(`netsh interface ipv4 show excludedportrange protocol=tcp`) et la campagne
+s'arrête alors avant le premier test —, il se règle dans `frontend/.env`
+(`E2E_API_PORT`, `E2E_WEB_PORT`, `E2E_AUTH_*` : voir `frontend/.env.example`).

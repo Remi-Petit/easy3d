@@ -9,16 +9,21 @@
  * Les ports sont choisis **hors de tout ce qui tourne déjà** : le conteneur de
  * développement publie 3100/3101, le backend de l'hôte 8090, le fournisseur
  * fictif du conteneur 8788, et la campagne du catalogue 8091/3200.
+ *
+ * Ils restent **réglables** (`tests/ports.ts`) pour une machine où l'un d'eux est
+ * indisponible : sous Windows, une plage réservée fait échouer le démarrage du
+ * backend (`os error 10013`) avant le premier test. Voir `frontend/.env.example`.
  */
+import { port } from '../ports'
 
 /** Port du fournisseur d'identité fictif. */
-export const IDP_PORT = 8790
+export const IDP_PORT = port('E2E_AUTH_IDP_PORT', 8790)
 
 /** Port du backend Rust de la campagne. */
-export const API_PORT = 8092
+export const API_PORT = port('E2E_AUTH_API_PORT', 8092)
 
 /** Port du serveur de développement Nuxt de la campagne. */
-export const WEB_PORT = 3201
+export const WEB_PORT = port('E2E_AUTH_WEB_PORT', 3201)
 
 /**
  * Adresse du fournisseur **telle que le backend la joint**.
