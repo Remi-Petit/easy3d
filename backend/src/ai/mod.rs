@@ -355,7 +355,15 @@ type Raw = Result<(u16, String), String>;
 type Answer = Pin<Box<dyn Future<Output = Raw> + Send>>;
 
 /// Recherche assistée sur le catalogue courant.
-pub async fn search(state: &AppState, query: &str) -> Result<Outcome, String> {
+///
+/// `rights` dit ce que le compte qui pose la question a le droit de lire :
+/// l'assistant ne doit pas pouvoir lire plus que lui (le journal d'audit, par
+/// exemple, demande `users.read`).
+pub async fn search(
+    state: &AppState,
+    query: &str,
+    rights: tools::Rights,
+) -> Result<Outcome, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("décris ce que tu cherches.".to_string());
@@ -366,7 +374,7 @@ pub async fn search(state: &AppState, query: &str) -> Result<Outcome, String> {
         .ok_or_else(|| format!("fournisseur d'IA inconnu : « {} ».", cfg.provider))?;
 
     let client = client()?;
-    search_with(&cfg, provider, state, query, move |req| {
+    search_with(&cfg, provider, state, query, rights, move |req| {
         let client = client.clone();
         Box::pin(async move { send(&client, req).await })
     })
@@ -414,12 +422,13 @@ async fn search_with<F>(
     provider: &'static (dyn Provider + Sync),
     state: &AppState,
     query: &str,
+    rights: tools::Rights,
     mut transport: F,
 ) -> Result<Outcome, String>
 where
     F: FnMut(Request) -> Answer + Send,
 {
-    let specs = tools::specs();
+    let specs = tools::specs(rights);
     let system = system_prompt();
     let mut turns = vec![Turn::User(query.to_string())];
 
@@ -453,7 +462,7 @@ where
 
         let mut finished = None;
         for call in &calls {
-            match tools::run(state, call) {
+            match tools::run(state, call, rights) {
                 tools::Ran::Continue(content) => turns.push(Turn::Tool {
                     id: call.id.clone(),
                     name: call.name.clone(),
@@ -709,6 +718,7 @@ mod tests {
             &openai::OPENAI,
             &state,
             "une pièce",
+            tools::Rights::default(),
             |request| {
                 seen.lock().unwrap().push(request.body.clone());
                 // Le numéro du tour est lu **avant** le bloc asynchrone : dedans,
@@ -758,6 +768,7 @@ mod tests {
             &openai::OPENAI,
             &state,
             "bonjour",
+            tools::Rights::default(),
             |_req| {
                 Box::pin(async move {
                     Ok((
@@ -786,6 +797,7 @@ mod tests {
             &openai::OPENAI,
             &state,
             "une pièce",
+            tools::Rights::default(),
             |_req| {
                 Box::pin(async move {
                     Ok((
@@ -816,6 +828,7 @@ mod tests {
             &openai::OPENAI,
             &state,
             "une pièce",
+            tools::Rights::default(),
             |_req| {
                 Box::pin(async move {
                     Ok((

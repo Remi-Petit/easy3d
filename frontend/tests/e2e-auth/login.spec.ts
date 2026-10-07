@@ -120,5 +120,12 @@ test('l’administration liste les comptes et le journal garde la connexion', as
   await expect(page.locator('h1')).toHaveText('Journal', { timeout: 30_000 })
   // La connexion qui vient d'avoir lieu est journalisée : c'est un témoin, pas
   // une navigation dans le catalogue (qui, elle, n'y figure pas).
-  await expect(page.locator('.admin__item').first()).toContainText('Connexion')
+  await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
+
+  // Les puces de famille filtrent le journal ; le compte se cherche au clavier.
+  await expect(page.locator('.audit .types__item')).toHaveCount(5)
+  await page.locator('.audit .types__item', { hasText: 'Sessions' }).click()
+  await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
+  await page.locator('.audit .toolbar .search input').fill('personne-de-ce-nom')
+  await expect(page.locator('.admin__empty')).toBeVisible()
 })

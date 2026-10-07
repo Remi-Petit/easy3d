@@ -402,11 +402,36 @@
     }
   },
   "journal": {
-    "title": "Audit log",
     "hint": "The latest actions: sign-ins, refusals, tokens created or revoked, permission changes. Read-only, and bounded (the oldest entries are dropped).",
     "empty": "Nothing to report.",
     "days": "{count} days",
     "neverExpires": "no expiry",
+    "search": "Search (account, address, detail…)",
+    "period": "Period",
+    "periods": {
+      "all": "All",
+      "day": "24 h",
+      "week": "7 days",
+      "month": "30 days"
+    },
+    "col": {
+      "when": "Date",
+      "kind": "Event",
+      "actor": "Account",
+      "subject": "Subject",
+      "detail": "Detail",
+      "ip": "Address"
+    },
+    "family": {
+      "sessions": "Sessions",
+      "refusals": "Refusals",
+      "tokens": "Tokens",
+      "accounts": "Accounts",
+      "roles": "Roles"
+    },
+    "count": "{count} events",
+    "filtered": "{count} of {total}",
+    "emptyFiltered": "Nothing matches these filters.",
     "errors": {
       "load": "Could not read the log."
     },

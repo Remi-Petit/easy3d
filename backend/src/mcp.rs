@@ -18,6 +18,7 @@
 //! pas supprimer de travail.
 
 use crate::api::{self, AppState};
+use crate::auth::journal;
 use crate::collab;
 use crate::config::{Config, DisplayMode};
 use crate::formats::{self, Viewer};
@@ -226,6 +227,9 @@ impl ServerHandler for Easy3dMcp {
                  find_models cherche plus large : dans les noms, les chemins, les notes Markdown \
                  et les métadonnées annoncées par le slicer dans les G-codes (matière, hauteur de \
                  couche, temps d'impression...).\n\
+                 list_audit lit le journal de l'installation (connexions, refus, jetons créés ou \
+                 révoqués, changements de comptes et de rôles) : en lecture seule, et réservé au \
+                 droit `users.read`.\n\
                  Une note est rattachée à un élément **existant** du catalogue (fichier ou \
                  dossier) ; son écriture est immédiatement visible dans l'application.",
             )
@@ -290,6 +294,24 @@ struct ListNotesArgs {
     #[serde(default)]
     folder: Option<String>,
     /// Nombre maximum de notes renvoyées (défaut 50, maximum 500).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// Entrée de `list_audit`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct ListAuditArgs {
+    /// Ne garder que ces types d'événement (`login_failed`, `token_created`,
+    /// `account_updated`...). Vide = tous.
+    #[serde(default)]
+    kinds: Option<Vec<String>>,
+    /// Ne garder que les N dernières heures (ex : 24).
+    #[serde(default)]
+    since_hours: Option<u32>,
+    /// Mots à chercher dans le compte, le sujet, la précision ou l'adresse.
+    #[serde(default)]
+    query: Option<String>,
+    /// Nombre maximum d'événements renvoyés (défaut 50, maximum 500).
     #[serde(default)]
     limit: Option<u32>,
 }
@@ -458,6 +480,51 @@ struct ListNotesOutput {
     notes: Vec<NoteSummary>,
     /// Nombre d'éléments sans note (candidats à documenter).
     without_note: usize,
+}
+
+/// Un événement du journal d'audit, tel qu'un agent le lit.
+#[derive(Debug, Serialize, JsonSchema)]
+struct AuditEvent {
+    /// Horodatage, en secondes unix.
+    at: i64,
+    /// Code **stable** du type d'événement (`login_failed`, `token_created`...) :
+    /// c'est cet identifiant qui se traduit dans l'interface, et qui se filtre
+    /// par `kinds`.
+    kind: String,
+    /// Compte concerné, quand il existe encore (`null` pour une tentative
+    /// refusée, ou un compte supprimé depuis — c'est aussi une information).
+    actor: Option<String>,
+    /// Objet visé : nom de compte essayé, nom du jeton, rôle touché.
+    subject: String,
+    /// Précision courte : un code (`invalid_credentials`) ou une valeur brute.
+    detail: String,
+    ip: String,
+}
+
+/// Sortie de `list_audit`.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ListAuditOutput {
+    /// Événements correspondants, **avant** `limit`.
+    matched: usize,
+    /// Événements effectivement renvoyés, du plus récent au plus ancien.
+    returned: usize,
+    events: Vec<AuditEvent>,
+}
+
+impl From<journal::EventView> for AuditEvent {
+    /// Le journal vu par un agent : `user_agent` reste dehors — c'est la donnée
+    /// la plus bavarde du journal, et la seule qui ne dit rien de *qui* a fait
+    /// *quoi*.
+    fn from(vue: journal::EventView) -> Self {
+        Self {
+            at: vue.at,
+            kind: vue.kind,
+            actor: vue.actor,
+            subject: vue.subject,
+            detail: vue.detail,
+            ip: vue.ip,
+        }
+    }
 }
 
 /// Sortie de `get_config`.
@@ -715,6 +782,49 @@ impl Easy3dMcp {
             exists: content.is_some(),
             content: content.unwrap_or_default(),
             rel: args.rel,
+        }))
+    }
+
+    /// Journal d'audit : connexions, refus, jetons, changements de droits.
+    #[tool(
+        description = "Read the easy3d audit log: sign-ins (including failed and blocked \
+                       ones), single sign-on, logouts, API tokens created or revoked, and \
+                       account or role changes. Read-only — the log is a witness, it cannot \
+                       be edited. Narrow it with `since_hours`, `kinds` and `query` rather \
+                       than raising `limit`: the log is read from its most recent events."
+    )]
+    fn list_audit(
+        &self,
+        Parameters(args): Parameters<ListAuditArgs>,
+    ) -> Result<Json<ListAuditOutput>, ErrorData> {
+        let criteria = journal::Criteria {
+            kinds: args
+                .kinds
+                .unwrap_or_default()
+                .iter()
+                .map(|kind| kind.trim().to_lowercase())
+                .filter(|kind| !kind.is_empty())
+                .collect(),
+            since: args.since_hours.map(journal::since_hours).unwrap_or(0),
+            query: args.query.unwrap_or_default(),
+        };
+
+        let trouves = criteria
+            .read(&self.state)
+            .map_err(|msg| ErrorData::internal_error(msg, None))?;
+
+        let matched = trouves.len();
+        let limit = args.limit.unwrap_or(50).clamp(1, 500) as usize;
+        let events: Vec<AuditEvent> = trouves
+            .into_iter()
+            .take(limit)
+            .map(AuditEvent::from)
+            .collect();
+
+        Ok(Json(ListAuditOutput {
+            matched,
+            returned: events.len(),
+            events,
         }))
     }
 
@@ -1044,6 +1154,100 @@ mod tests {
         );
         assert!(
             restreint.require_for("get_config").is_err(),
+            "hors portée, même pour un administrateur"
+        );
+    }
+
+    /// Le journal d'audit se lit avec le droit des **comptes** (`users.read`) :
+    /// celui de la page d'administration, et l'outil rend ce que le journal
+    /// contient — un agent doit pouvoir constater un refus, pas seulement le
+    /// lire dans une réponse qu'on lui aurait écrite.
+    #[test]
+    fn l_audit_se_lit_avec_le_droit_des_comptes() {
+        let dir = tempfile::tempdir().unwrap();
+        let comptes = crate::auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        comptes.db(crate::auth::db::ensure_builtin_roles).unwrap();
+
+        let admin = crate::auth::db::NewUser::new("root", "root@exemple.fr", None);
+        comptes
+            .db(|conn| crate::auth::db::insert_user(conn, &admin))
+            .unwrap();
+        comptes
+            .db(|conn| crate::auth::db::assign_role(conn, &admin.uuid, crate::auth::db::ADMIN_ROLE))
+            .unwrap();
+
+        // Deux événements, dont un refus : c'est la distinction qu'on vient
+        // chercher dans un journal.
+        comptes
+            .db(|conn| {
+                crate::auth::db::log_event(
+                    conn,
+                    "login_ok",
+                    Some(&admin.uuid),
+                    "root",
+                    "",
+                    "10.0.0.1",
+                    "test",
+                )
+            })
+            .unwrap();
+        comptes
+            .db(|conn| {
+                crate::auth::db::log_event(
+                    conn,
+                    "login_failed",
+                    None,
+                    "root",
+                    "invalid_credentials",
+                    "10.0.0.2",
+                    "test",
+                )
+            })
+            .unwrap();
+
+        let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
+        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
+            .with_auth(comptes);
+        let serveur = Easy3dMcp::for_user(state.clone(), Some(admin.uuid.clone()), None);
+
+        assert!(
+            serveur.require_for("list_audit").is_ok(),
+            "le droit des comptes ouvre le journal"
+        );
+
+        let journal = serveur
+            .list_audit(Parameters(ListAuditArgs::default()))
+            .unwrap()
+            .0;
+        assert_eq!(journal.matched, 2);
+        assert_eq!(journal.returned, 2);
+        assert!(
+            journal
+                .events
+                .iter()
+                .any(|event| event.kind == "login_failed" && event.actor.is_none()),
+            "un refus n'a pas de compte : {journal:?}"
+        );
+
+        // Les critères de l'outil sont ceux de la page d'audit.
+        let refuses = serveur
+            .list_audit(Parameters(ListAuditArgs {
+                kinds: Some(vec!["login_failed".to_string()]),
+                ..Default::default()
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(refuses.returned, 1);
+        assert_eq!(refuses.events[0].kind, "login_failed");
+
+        // Un jeton restreint à la lecture du catalogue ne le contourne pas.
+        let restreint = Easy3dMcp::for_user(
+            state,
+            Some(admin.uuid.clone()),
+            Some(vec!["catalog.read".to_string()]),
+        );
+        assert!(
+            restreint.require_for("list_audit").is_err(),
             "hors portée, même pour un administrateur"
         );
     }

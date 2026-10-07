@@ -7,7 +7,7 @@
     "menuDescription": "Navigation der Anwendung",
     "catalog": "Katalog",
     "system": "System",
-    "models": "Models",
+    "models": "Modelle",
     "admin": "Administration",
     "accounts": "Konten",
     "journal": "Audit-Log",
@@ -400,11 +400,36 @@
     }
   },
   "journal": {
-    "title": "Audit-Log",
     "hint": "Die letzten Aktionen: Anmeldungen, Ablehnungen, erstellte oder widerrufene Token, Rechteänderungen. Nur lesbar und begrenzt (die ältesten Einträge fallen weg).",
     "empty": "Nichts zu melden.",
     "days": "{count} Tage",
     "neverExpires": "kein Ablauf",
+    "search": "Suchen (Konto, Adresse, Detail…)",
+    "period": "Zeitraum",
+    "periods": {
+      "all": "Alles",
+      "day": "24 Std.",
+      "week": "7 Tage",
+      "month": "30 Tage"
+    },
+    "col": {
+      "when": "Datum",
+      "kind": "Ereignis",
+      "actor": "Konto",
+      "subject": "Betreff",
+      "detail": "Detail",
+      "ip": "Adresse"
+    },
+    "family": {
+      "sessions": "Sitzungen",
+      "refusals": "Ablehnungen",
+      "tokens": "Token",
+      "accounts": "Konten",
+      "roles": "Rollen"
+    },
+    "count": "{count} Ereignisse",
+    "filtered": "{count} von {total}",
+    "emptyFiltered": "Nichts entspricht diesen Filtern.",
     "errors": {
       "load": "Das Log konnte nicht gelesen werden."
     },

@@ -104,6 +104,9 @@ pub fn for_tool(tool: &str) -> Option<&'static str> {
         "create_note" | "update_note" | "append_note" | "delete_note" => Some(NOTE_WRITE),
         "get_config" => Some(CONFIG_READ),
         "set_display_mode" | "set_models_root" => Some(CONFIG_WRITE),
+        // Lire le journal d'audit : c'est le sujet des comptes, et la page
+        // d'administration demande déjà ce droit-là pour l'afficher.
+        "list_audit" => Some(USERS_READ),
         _ => None,
     }
 }
@@ -180,6 +183,7 @@ mod tests {
             "get_config",
             "set_display_mode",
             "set_models_root",
+            "list_audit",
         ] {
             let droit = for_tool(outil).unwrap_or_else(|| panic!("outil non classé : {outil}"));
             assert!(is_known(droit), "droit inconnu pour {outil} : {droit}");

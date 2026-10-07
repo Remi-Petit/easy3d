@@ -7,7 +7,7 @@
     "menuDescription": "Navigation de l’application",
     "catalog": "Catalogue",
     "system": "Système",
-    "models": "Models",
+    "models": "Modèles",
     "admin": "Administration",
     "accounts": "Comptes",
     "journal": "Journal",
@@ -402,11 +402,36 @@
     }
   },
   "journal": {
-    "title": "Journal d’audit",
     "hint": "Les dernières actions : connexions, refus, jetons créés ou révoqués, changements de droits. En lecture seule, et borné (les plus anciens partent).",
     "empty": "Rien à signaler.",
     "days": "{count} jours",
     "neverExpires": "sans expiration",
+    "search": "Rechercher (compte, adresse, détail…)",
+    "period": "Période",
+    "periods": {
+      "all": "Tout",
+      "day": "24 h",
+      "week": "7 jours",
+      "month": "30 jours"
+    },
+    "col": {
+      "when": "Date",
+      "kind": "Événement",
+      "actor": "Compte",
+      "subject": "Sujet",
+      "detail": "Détail",
+      "ip": "Adresse"
+    },
+    "family": {
+      "sessions": "Sessions",
+      "refusals": "Refus",
+      "tokens": "Jetons",
+      "accounts": "Comptes",
+      "roles": "Rôles"
+    },
+    "count": "{count} événements",
+    "filtered": "{count} sur {total}",
+    "emptyFiltered": "Rien ne correspond à ces filtres.",
     "errors": {
       "load": "Lecture du journal impossible."
     },

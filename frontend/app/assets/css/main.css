@@ -1882,6 +1882,100 @@ select.admin__input option {
   margin-top: 4px;
 }
 
+/* ---------- Journal d'audit ---------- */
+/*
+ * Un tableau **pleine largeur** : le journal se parcourt en colonnes (qui, quoi,
+ * quand), et chaque colonne garde sa largeur d'une ligne à l'autre. C'est ce que
+ * la grille à deux colonnes de la page Comptes ne permettait pas — la moitié
+ * droite restait vide.
+ *
+ * La rangée de commandes, elle, n'a rien de propre : c'est `.toolbar` (voir plus
+ * haut), donc exactement la facture du catalogue — champ large, boutons étirés à
+ * la même hauteur. Seule la marge du bas est neutralisée : ici, l'espace entre
+ * les rangées est porté par `.audit`.
+ */
+.audit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  /* La barre du catalogue est posée 16 px sous l'en-tête (`.topbar`, collée) ;
+     ici, `.page` n'en laisse que 4 : on rend l'aplomb identique. */
+  padding-top: 12px;
+}
+
+.audit .toolbar {
+  margin-bottom: 0;
+}
+
+/* Compte des lignes affichées, puis l'explication du journal en retrait. */
+.audit__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+
+.audit__table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Largeurs fixes : la date et l'adresse ne dansent pas d'une ligne à
+     l'autre, et le sujet / le détail prennent la place restante. */
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.audit__table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.audit__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Largeurs mesurées sur le vrai journal (date, type, compte, adresse) et non
+ * devinées : les colonnes qui restent — le sujet et le détail — se partagent ce
+ * qui reste, et c'est le sujet qu'on veut large (un e-mail, un nom de jeton ou
+ * l'identifiant d'un jeton). Sans ces largeurs, les deux se partageaient le
+ * reste à parts égales et un UUID se cassait en quatre lignes.
+ */
+.audit__table th:nth-child(1) { width: 165px; }
+.audit__table th:nth-child(2) { width: 130px; }
+.audit__table th:nth-child(3) { width: 90px; }
+.audit__table th:nth-child(5) { width: 150px; }
+.audit__table th:nth-child(6) { width: 95px; }
+
+/* Un refus se repère sans lire la ligne : c'est ce qu'on vient chercher. */
+.audit__row--alert td:first-child {
+  border-left: 2px solid var(--err);
+}
+
+.audit__row--alert .audit__kind {
+  color: var(--err);
+}
+
+.audit__table tbody tr:hover td {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.audit__when,
+.audit__ip {
+  white-space: nowrap;
+}
+
 /* ---------- Comptes utilisateurs ---------- */
 /* Fonctionnalité facultative (`EASY3D_AUTH`) : rien de ce bloc n'existe sur une
    installation sans comptes — ni page de connexion, ni bloc de compte. */

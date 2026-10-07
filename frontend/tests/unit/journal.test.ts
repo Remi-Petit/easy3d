@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { CHANGE_FIELDS, DETAIL_CODES, EVENT_KINDS, describeDetail, eventKey } from '~/utils/journal'
+import {
+  CHANGE_FIELDS,
+  DETAIL_CODES,
+  EVENT_FAMILIES,
+  EVENT_FAMILY_LIST,
+  EVENT_KINDS,
+  describeDetail,
+  eventKey,
+  familyCounts,
+  filterEvents,
+  sortEvents,
+  type JournalEvent,
+} from '~/utils/journal'
 
 /**
  * Le journal est ce qu'on relit le jour où un accès surprend : ce qui se teste
@@ -75,5 +87,122 @@ describe('champs modifiables', () => {
       'roles',
       'permissions',
     ])
+  })
+})
+
+/**
+ * Les puces de filtre ne doivent **jamais** cacher un type d'événement : un type
+ * qu'aucune famille ne reprend disparaît dès qu'un filtre est posé. C'est ce
+ * qu'un journal ne peut pas se permettre — on filtre pour trouver, pas pour
+ * perdre.
+ */
+describe('EVENT_FAMILIES', () => {
+  it('reprend tous les types du backend, et une seule fois chacun', () => {
+    const repris = EVENT_FAMILY_LIST.flatMap((famille) => [...EVENT_FAMILIES[famille]])
+    expect([...repris].sort()).toEqual([...EVENT_KINDS].sort())
+    expect(new Set(repris).size).toBe(repris.length)
+  })
+})
+
+/** Un événement minimal : on ne teste ici que ce qui sert au filtrage. */
+function evenement(kind: string, at: number, extra: Partial<JournalEvent> = {}): JournalEvent {
+  return { at, kind, actor: null, subject: '', detail: '', ip: '', user_agent: '', ...extra }
+}
+
+describe('filterEvents', () => {
+  const events = [
+    evenement('login_ok', 1_000, { actor: 'remi', ip: '10.0.0.1' }),
+    evenement('login_failed', 2_000, { subject: 'remi', detail: 'invalid_credentials' }),
+    evenement('token_created', 3_000, { subject: 'CI', detail: '30' }),
+    evenement('role_deleted', 4_000, { subject: 'invite' }),
+  ]
+  /** Aucun texte affiché : la recherche ne retient rien. */
+  const muet = () => ''
+
+  it('rend tout quand rien n’est demandé', () => {
+    expect(filterEvents(events, {}, muet)).toHaveLength(4)
+  })
+
+  it('garde ce qui est plus récent que la période', () => {
+    const recents = filterEvents(events, { since: 2_500 }, muet)
+    expect(recents.map((event) => event.kind)).toEqual(['token_created', 'role_deleted'])
+    // 0 = aucune borne : tout l'historique.
+    expect(filterEvents(events, { since: 0 }, muet)).toHaveLength(4)
+  })
+
+  it('réunit les familles choisies — un « ou », pas un « et »', () => {
+    const choix = filterEvents(events, { families: ['refusals', 'tokens'] }, muet)
+    expect(choix.map((event) => event.kind)).toEqual(['login_failed', 'token_created'])
+  })
+
+  it('cherche dans le texte affiché, sans tenir compte de la casse', () => {
+    const affiche = (event: JournalEvent) => `${event.actor ?? ''} ${event.subject} ${event.ip}`
+    expect(filterEvents(events, { text: 'REMI' }, affiche).map((event) => event.kind)).toEqual([
+      'login_ok',
+      'login_failed',
+    ])
+    // Les espaces autour ne comptent pas : un copier-coller passe.
+    expect(filterEvents(events, { text: '  10.0.0.1 ' }, affiche)).toHaveLength(1)
+  })
+
+  it('croise les trois filtres', () => {
+    const affiche = (event: JournalEvent) => event.subject
+    const choisis = filterEvents(
+      events,
+      { text: 'ci', families: ['refusals', 'tokens'], since: 2_500 },
+      affiche,
+    )
+    expect(choisis.map((event) => event.kind)).toEqual(['token_created'])
+  })
+})
+
+describe('familyCounts', () => {
+  const events = [
+    evenement('login_ok', 1_000),
+    evenement('logout', 1_100),
+    evenement('login_blocked', 2_000),
+    evenement('token_revoked', 2_100),
+  ]
+
+  it('compte par famille, sur la période demandée', () => {
+    expect(familyCounts(events)).toEqual({
+      sessions: 2,
+      refusals: 1,
+      tokens: 1,
+      accounts: 0,
+      roles: 0,
+    })
+    expect(familyCounts(events, 1_500)).toEqual({
+      sessions: 0,
+      refusals: 1,
+      tokens: 1,
+      accounts: 0,
+      roles: 0,
+    })
+  })
+})
+
+describe('sortEvents', () => {
+  const events = [
+    evenement('login_ok', 300),
+    evenement('logout', 100),
+    evenement('token_created', 200),
+  ]
+
+  it('laisse le journal dans son ordre naturel quand rien n’est demandé', () => {
+    // Le serveur rend déjà du plus récent au plus ancien : « normal » n'est pas
+    // un tri, c'est l'ordre du journal — comme le catalogue livré dans son ordre.
+    expect(sortEvents(events, 'none').map((event) => event.at)).toEqual([300, 100, 200])
+  })
+
+  it('range par date, dans les deux sens', () => {
+    expect(sortEvents(events, 'date-desc').map((event) => event.at)).toEqual([300, 200, 100])
+    expect(sortEvents(events, 'date-asc').map((event) => event.at)).toEqual([100, 200, 300])
+  })
+
+  it('ne modifie pas la liste reçue', () => {
+    const avant = events.map((event) => event.at)
+    sortEvents(events, 'date-asc')
+    expect(events.map((event) => event.at)).toEqual(avant)
   })
 })

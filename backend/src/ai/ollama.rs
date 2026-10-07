@@ -104,7 +104,7 @@ mod tests {
             &cfg(),
             "tu cherches",
             &[Turn::User("une roue".to_string())],
-            &super::super::tools::specs(),
+            &super::super::tools::specs(super::super::tools::Rights::default()),
         );
 
         assert_eq!(request.body["model"], MODEL);

@@ -34,7 +34,8 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
 - **Un serveur MCP intégré** : un agent liste les modèles, cherche dans les notes
   et les métadonnées des G-codes, lit et écrit les notes, consulte et modifie la
   configuration par le même chemin que l'interface, donc sans jamais écraser une
-  édition en cours.
+  édition en cours, et lit le **journal d'audit** (connexions, refus, jetons,
+  changements de droits) quand le compte y a droit.
 - **Recherche assistée (IA), optionnelle** : on décrit ce que l'on cherche —
   « une pièce en PETG », « le boîtier de la carte » — et un modèle de langage
   fouille le catalogue : noms, dossiers, notes Markdown et métadonnées annoncées
@@ -44,7 +45,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 421 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 440 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -146,7 +147,8 @@ claude mcp add --transport http easy3d http://localhost:8090/mcp \
 
 Un jeton **hérite des droits de son compte**, et chaque outil MCP réclame le droit
 correspondant : un compte qui n'a que `catalog.read` peut lister et lire, mais
-`get_config` lui répond `droit « config.read » requis pour l'outil « get_config »`.
+`get_config` lui répond `droit « config.read » requis pour l'outil « get_config »`,
+et `list_audit` (le journal) `droit « users.read » requis pour l'outil « list_audit »`.
 Révoquer le jeton depuis la même page coupe l'agent immédiatement (401).
 
 ## Recherche assistée (IA)
@@ -183,6 +185,12 @@ nom, dossier, note ou métadonnée de G-code, lecture d'une note) et conclut par
 une liste de propositions, chacune accompagnée de sa raison. Deux garde-fous :
 la boucle est plafonnée à six étapes, et les chemins proposés sont confrontés au
 catalogue réel — un fichier inventé est écarté.
+
+Quand la question porte sur autre chose que le catalogue, il change de registre :
+le **journal d'audit** s'interroge par le même assistant (outil `list_audit`, voir
+« Journal d'audit »), et la réponse revient en texte. Le droit est celui du
+compte : ouvrir la recherche assistée (`ai.use`) ne donne pas le journal, encore
+moins un jeton restreint.
 
 Côté conteneur, rien de plus à installer : l'appel sortant se fait en HTTPS
 (`rustls`), et il n'y a aucune dépendance à OpenSSL.
@@ -365,13 +373,28 @@ déconnexions, changements de mot de passe, jetons créés ou révoqués, et
 modifications de comptes, de rôles et de droits. Chaque ligne porte la date,
 l'auteur, la cible, le **motif** (mot de passe faux, trop de tentatives, compte
 en attente de validation, pas d'adresse e-mail chez le fournisseur…), l'adresse
-IP et le navigateur.
+IP et le navigateur (au survol de la ligne).
+
+La page se lit comme un **tableau** pleine largeur (date, événement, compte,
+sujet, détail, adresse), et trois filtres s'y combinent : une **période**
+(24 h, 7 jours, 30 jours), des **familles** d'événements — sessions, refus,
+jetons, comptes, rôles, chacune avec son nombre — et un champ de **recherche**
+qui couvre tout ce qui est affiché : compte, sujet, détail traduit, adresse. Les
+refus portent un trait rouge, pour se repérer sans lire.
 
 Deux principes : **aucun secret n'y entre** — ni mot de passe, ni jeton (seul son
 nom et sa durée apparaissent) — et la liste est **bornée** aux 5000 derniers
 événements, les plus anciens partant d'eux-mêmes : c'est un témoin des derniers
 jours, pas une archive à sauvegarder. La page est en lecture seule, et réservée
 aux comptes qui ont le droit de voir les utilisateurs.
+
+L'assistant (**✦**) y répond aux questions posées en clair — « qui s'est trompé
+de mot de passe cette nuit ? », « quels jetons ont été révoqués ? » : il lit le
+journal avec l'outil `list_audit` (mêmes filtres que la page) et répond en texte,
+sans proposer de fichiers. Le serveur **MCP** expose le même outil à un agent
+(Claude Code, Copilot…) : `list_audit`, en lecture seule, avec `since_hours`,
+`kinds`, `query` et `limit`. Les deux réclament le droit `users.read` — et un
+**jeton d'API restreint** ne lit pas plus que ce qu'on lui a accordé.
 
 ### Session
 
