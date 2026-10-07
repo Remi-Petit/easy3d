@@ -10,6 +10,7 @@ import { PERM } from '~/utils/permissions'
 // route, donc identique côté serveur et client — puis la barre de filtres,
 // collée sous ce titre.
 const route = useRoute()
+const router = useRouter()
 const header = usePageHeaderState()
 const { t, locale, locales, setLocale } = useI18n()
 
@@ -40,6 +41,7 @@ const {
   loading: aiLoading,
   run: runAi,
   toggle: toggleAi,
+  close: closeAi,
   refresh: refreshAi,
 } = useAiSearch()
 onMounted(() => {
@@ -101,6 +103,26 @@ const showFilter = computed(
  * n'y a pas de recherche de modèles, mais les mêmes commandes.
  */
 const aiPanel = computed(() => showFilter.value && aiMode.value)
+
+/**
+ * Changer de page referme la recherche assistée.
+ *
+ * Le mode est un état **partagé** (`useState`, voir `useAiSearch`) : sans ça, une
+ * question posée depuis le catalogue continuait de remplacer la page suivante —
+ * on ouvrait un dossier et on retombait sur la réponse.
+ *
+ * La réponse, elle, n'est pas oubliée : ✦ la rouvre telle quelle, et « ✕ Effacer »
+ * reste le seul geste qui l'efface.
+ *
+ * On écoute la route du **routeur**, et non celle du layout : celle du layout
+ * passe par un proxy que Nuxt ne rafraîchit qu'au rendu de la page (voir plus
+ * bas), si bien que ce `watch`-là ne se déclenchait jamais quand le panneau
+ * remplaçait la page.
+ */
+watch(
+  () => router.currentRoute.value.fullPath,
+  () => closeAi(),
+)
 
 /**
  * Dossier d'accueil d'un envoi de fichiers : celui de la page courante quand on
@@ -250,7 +272,11 @@ const languageItems = computed(() =>
 
 /** Le changement passe par `setLocale` : lui seul écrit le cookie relu au SSR. */
 function onLanguageChange(event: Event) {
-  setLocale((event.target as HTMLSelectElement).value)
+  // Les `<option>` sont construites à partir de `locales` : la valeur est donc
+  // toujours un code connu. Le cast ne fait que rétablir ce que le DOM efface
+  // (la valeur d'un `<select>` est un `string` quelconque), et il est pris sur
+  // `setLocale` lui-même pour suivre la liste de langues du i18n.
+  setLocale((event.target as HTMLSelectElement).value as Parameters<typeof setLocale>[0])
 }
 
 /**
@@ -475,7 +501,13 @@ const navUi = {
              la question (les filtres classiques n'ont pas la même sémantique). -->
         <AiResults v-if="aiPanel" />
 
-        <div v-if="!aiPanel" class="page">
+        <!--
+          La page reste **montée** quand le panneau est ouvert : `v-show`, et
+          surtout pas `v-if`. La démonter gelait la navigation — l'URL changeait,
+          la page non — parce que Nuxt lit la route du layout à travers un proxy
+          qui ne se rafraîchit qu'à son rendu, et que ce rendu suit la page.
+        -->
+        <div v-show="!aiPanel" class="page">
           <slot />
         </div>
 
