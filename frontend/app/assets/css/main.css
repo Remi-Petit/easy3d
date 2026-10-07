@@ -1950,53 +1950,67 @@ select.admin__input option {
   background: var(--bg);
 }
 
+/*
+ * En-tête et cellules : Nuxt UI pose 16 px de chaque côté. Ici, six colonnes
+ * dans 817 px ne le permettent pas — 12 px laissent **24 px entre deux valeurs**
+ * (ce qui se lit sans les coller) et rendent la place au sujet et au détail, les
+ * deux colonnes qui portent du texte libre. Seul l'horizontal est resserré : le
+ * vertical reste celui de Nuxt UI.
+ */
 .audit__th {
-  padding: 8px 10px;
+  padding-right: 12px;
+  padding-left: 12px;
   color: var(--muted);
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-align: left;
   text-transform: uppercase;
 }
 
-/*
- * Cellules : Nuxt UI les passe en `nowrap` (une valeur ne se coupe pas au
- * milieu). Ici, le sujet et le détail doivent pouvoir revenir à la ligne, sinon
- * la colonne du sujet déborde au lieu de se replier.
- */
 .audit__td {
-  padding: 8px 10px;
+  padding-right: 12px;
+  padding-left: 12px;
   color: var(--muted);
+  /* Nuxt UI passe ses cellules en `nowrap` (une valeur ne se coupe pas au
+     milieu) ; ici, le sujet et le détail doivent pouvoir revenir à la ligne,
+     sinon la colonne du sujet déborde au lieu de se replier. */
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-/* Date et adresse tiennent sur une ligne : on ne les coupe pas. */
-.audit__nowrap {
-  white-space: nowrap;
-}
-
 /*
- * Largeurs mesurées sur le vrai journal (date, type, compte, adresse) et non
- * devinées : les colonnes qui restent — le sujet et le détail — se partagent ce
- * qui reste, et c'est le sujet qu'on veut large (un e-mail, un nom de jeton ou
- * l'identifiant d'un jeton). Sans ces largeurs, les deux se partageaient le
- * reste à parts égales et un UUID se cassait en quatre lignes.
+ * Largeurs mesurées sur le vrai journal (contenu le plus large de chaque
+ * colonne, + le padding), et non devinées : les deux colonnes qui restent — le
+ * sujet et le détail — se partagent ce qui reste, et c'est le sujet qu'on veut
+ * large (un e-mail, un nom de jeton ou l'identifiant d'un jeton).
+ *
+ * Chacune de ces largeurs vient d'une contrainte :
+ *
+ * - la **date** est dimensionnée pour le format le plus long des quatre langues
+ *   (l'américain, avec AM/PM) — une colonne trop juste laissait la date dépasser
+ *   sur la colonne suivante ;
+ * - l'**événement** tient le libellé le plus long des **événements courants**
+ *   (« Connexion refusée »), icône comprise : c'est la colonne qu'on lit pour
+ *   savoir ce qui s'est passé ;
+ * - l'**adresse** tient une IPv4 (`192.168.96.1`) ;
+ * - le **détail** est une phrase (« identifiant ou mot de passe incorrect ») :
+ *   deux lignes au pire.
  */
 .audit__table th:nth-child(1) { width: 165px; }
-.audit__table th:nth-child(2) { width: 130px; }
-.audit__table th:nth-child(3) { width: 90px; }
+.audit__table th:nth-child(2) { width: 175px; }
+.audit__table th:nth-child(3) { width: 75px; }
 .audit__table th:nth-child(5) { width: 150px; }
-.audit__table th:nth-child(6) { width: 95px; }
+.audit__table th:nth-child(6) { width: 110px; }
 
 /* Le type d'événement, avec sa couleur de famille : un refus (rouge) et une
-   connexion (vert) se distinguent sans lire la ligne. */
+   connexion (vert) se distinguent sans lire la ligne. Le libellé **revient à la
+   ligne** s'il est trop long : c'est la largeur du mot le plus long des quatre
+   langues (« Anmeldung abgelehnt », 146 px) qui déciderait sinon, et elle ne
+   tient pas — un libellé qui déborde passerait par-dessus la colonne suivante. */
 .audit__kind {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  white-space: nowrap;
 }
 
 .audit__kind--sessions { color: var(--ok); }
