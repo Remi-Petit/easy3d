@@ -57,6 +57,13 @@ export default defineNuxtConfig({
       // `/collab/*` vers le backend (voir `server/routes/`). À poser seulement
       // si le temps réel doit être joint sur un autre hôte que l'interface.
       hpccatWsBase: process.env.NUXT_PUBLIC_HPCCAT_WS_BASE || '',
+      // Adresse **publique** du serveur MCP (le backend, chemin `/mcp`). Nitro
+      // ne relaie pas `/mcp` : l'interface ne peut donc pas la déduire de sa
+      // propre origine, contrairement au temps réel. Vide = « déduite du port
+      // publié par le compose livré » (voir `utils/mcp.ts`) ; un déploiement qui
+      // publie l'API ailleurs doit la poser, sans quoi l'adresse montrée serait
+      // fausse.
+      hpccatMcpBase: process.env.NUXT_PUBLIC_HPCCAT_MCP_BASE || '',
     },
   },
   // Le temps réel (catalogue `/ws`, notes `/collab/*`) est relayé par Nitro

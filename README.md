@@ -44,7 +44,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 413 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 421 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -90,6 +90,11 @@ Les deux sont **relus à chaud**. Ces fichiers ne sont pas à versionner :
 
 Le serveur MCP est **le backend lui-même** : rien à lancer en plus, il suffit que
 le conteneur tourne.
+
+L'adresse à utiliser est **rappelée dans l'interface** — *Mon compte* → onglet
+**MCP** — avec les extraits prêts à recopier pour VS Code et Claude Code : elle
+dépend du port publié pour l'API, et un déploiement qui ne publie pas `8090` doit
+poser `NUXT_PUBLIC_HPCCAT_MCP_BASE` pour que l'interface affiche la bonne.
 
 ```jsonc
 // .vscode/mcp.json  (VS Code / Copilot)

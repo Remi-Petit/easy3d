@@ -2146,3 +2146,39 @@ select.admin__input option {
   padding: 12px 20px;
   font-size: 14px;
 }
+
+/*
+ * Onglet MCP : l'adresse et les extraits se **recopient** tels quels — chasse
+ * fixe, et `pre` conserve la mise en forme des extraits JSON/shell sans qu'on
+ * ait à gérer l'indentation dans le template.
+ */
+.mcp__ligne {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp__url {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.mcp__code {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
