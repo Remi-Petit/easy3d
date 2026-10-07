@@ -129,6 +129,36 @@ export type EventFamily = keyof typeof EVENT_FAMILIES
 /** Les familles, dans l'ordre d'affichage. */
 export const EVENT_FAMILY_LIST = Object.keys(EVENT_FAMILIES) as EventFamily[]
 
+/**
+ * Icône de chaque famille (lucide, comme le reste de l'interface).
+ *
+ * Elle sert au tableau : la colonne « événement » montre l'icône **et** la
+ * couleur de la famille, pour qu'un refus se distingue d'une connexion sans
+ * lire la ligne. Même parti pris que `SORT_ICONS` (voir `utils/filter.ts`) : les
+ * icônes sont des données, elles se testent.
+ */
+export const EVENT_ICONS: Record<EventFamily, string> = {
+  sessions: 'i-lucide-log-in',
+  refusals: 'i-lucide-shield-alert',
+  tokens: 'i-lucide-key-round',
+  accounts: 'i-lucide-user-round',
+  roles: 'i-lucide-shield-check',
+}
+
+/**
+ * Famille d'un type d'événement (`null` si le type est inconnu).
+ *
+ * Un type venu d'un backend plus récent n'a ni icône ni couleur : la page
+ * l'affiche alors tel quel, sans inventer de famille.
+ */
+export function eventFamily(kind: string): EventFamily | null {
+  return (
+    EVENT_FAMILY_LIST.find((famille) =>
+      (EVENT_FAMILIES[famille] as readonly string[]).includes(kind),
+    ) ?? null
+  )
+}
+
 /** Filtres de la page d'audit : période (secondes epoch, `0` = pas de borne). */
 export interface JournalFilters {
   text?: string

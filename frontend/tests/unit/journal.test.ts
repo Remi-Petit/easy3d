@@ -4,8 +4,10 @@ import {
   DETAIL_CODES,
   EVENT_FAMILIES,
   EVENT_FAMILY_LIST,
+  EVENT_ICONS,
   EVENT_KINDS,
   describeDetail,
+  eventFamily,
   eventKey,
   familyCounts,
   filterEvents,
@@ -101,6 +103,31 @@ describe('EVENT_FAMILIES', () => {
     const repris = EVENT_FAMILY_LIST.flatMap((famille) => [...EVENT_FAMILIES[famille]])
     expect([...repris].sort()).toEqual([...EVENT_KINDS].sort())
     expect(new Set(repris).size).toBe(repris.length)
+  })
+
+  it('donne une icône à chaque famille', () => {
+    for (const famille of EVENT_FAMILY_LIST) {
+      expect(EVENT_ICONS[famille], famille).toMatch(/^i-lucide-/)
+    }
+  })
+})
+
+describe('eventFamily', () => {
+  it('range chaque type du backend dans sa famille', () => {
+    for (const kind of EVENT_KINDS) {
+      const famille = eventFamily(kind)
+      expect(famille, `type sans famille : ${kind}`).not.toBeNull()
+      if (famille) {
+        expect(EVENT_FAMILIES[famille] as readonly string[], kind).toContain(kind)
+      }
+    }
+  })
+
+  it('rend `null` pour un type inconnu, plutôt qu’une famille inventée', () => {
+    // Un backend plus récent peut écrire un type que cette version ne connaît
+    // pas : la page l'affiche tel quel, sans icône ni couleur.
+    expect(eventFamily('login_removed')).toBeNull()
+    expect(eventFamily('')).toBeNull()
   })
 })
 

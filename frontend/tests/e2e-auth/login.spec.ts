@@ -126,6 +126,9 @@ test('l’administration liste les comptes et le journal garde la connexion', as
   await expect(page.locator('.audit .types__item')).toHaveCount(5)
   await page.locator('.audit .types__item', { hasText: 'Sessions' }).click()
   await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
+  // L'en-tête du tableau est collant (`sticky` de Nuxt UI) : la page se lit en
+  // descendant, la ligne des titres reste.
+  await expect(page.locator('.audit .audit__head')).toHaveCSS('position', 'sticky')
   await page.locator('.audit .toolbar .search input').fill('personne-de-ce-nom')
   await expect(page.locator('.admin__empty')).toBeVisible()
 })

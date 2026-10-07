@@ -430,6 +430,7 @@
     "count": "{count} eventos",
     "filtered": "{count} de {total}",
     "emptyFiltered": "Nada coincide con estos filtros.",
+    "perPage": "Por página",
     "errors": {
       "load": "No se pudo leer el registro."
     },

@@ -432,6 +432,7 @@
     "count": "{count} événements",
     "filtered": "{count} sur {total}",
     "emptyFiltered": "Rien ne correspond à ces filtres.",
+    "perPage": "Par page",
     "errors": {
       "load": "Lecture du journal impossible."
     },
