@@ -4410,15 +4410,15 @@ mod tests {
         assert_eq!(maj["detail"], "disabled");
 
         assert_eq!(evenement(&events, "token_created")["subject"], "ci");
-        assert_eq!(
-            evenement(&events, "token_revoked")["subject"].as_str(),
-            Some(uuid.as_str())
-        );
+        // La révocation écrit le **nom**, pas l'identifiant : la ligne vient de
+        // partir, et « jeton révoqué : 01a116d0-… » ne dirait pas lequel.
+        assert_eq!(evenement(&events, "token_revoked")["subject"], "ci");
 
         // ⚠️ Le contrôle qui compte : **aucun** événement ne contient la valeur
-        // d'un jeton. Le journal est un témoin, pas un second endroit où un
-        // secret dort.
+        // d'un jeton, ni l'identifiant d'un jeton révoqué. Le journal est un
+        // témoin, pas un second endroit où un secret dort.
         let brut = serde_json::to_string(&events).unwrap();
+        assert!(!brut.contains(&uuid), "{brut}");
         assert!(!brut.contains("e3d_"), "{brut}");
         let _ = jeton;
     }
