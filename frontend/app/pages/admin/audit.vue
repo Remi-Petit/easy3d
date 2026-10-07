@@ -48,14 +48,23 @@ const {
 } = useAiSearch()
 
 /**
- * Date lisible, et l'heure (un journal se lit à la minute près).
+ * Date lisible, et l'heure (un journal se lit à la minute près — la seconde est
+ * là pour deux actions du même instant).
  *
- * La **langue de l'interface** est passée explicitement : `toLocaleString()` sans
- * argument suit celle du navigateur, et un journal en français afficherait alors
- * des dates au format américain.
+ * Deux choix explicites :
+ *
+ * - la **langue de l'interface** est passée : `toLocaleString()` sans argument
+ *   suit celle du navigateur, et un journal en français afficherait des dates
+ *   au format américain ;
+ * - `dateStyle: 'short'` borne la largeur de la colonne. Le format complet
+ *   américain (`10/7/2026, 6:27:16 PM`) est le plus long des quatre langues :
+ *   il débordait sur la colonne suivante.
  */
 function quand(secondes: number): string {
-  return new Date(secondes * 1000).toLocaleString(locale.value)
+  return new Date(secondes * 1000).toLocaleString(locale.value, {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  })
 }
 
 /** Libellé d'un type d'événement ; un type inconnu est montré tel quel. */
@@ -199,20 +208,12 @@ const lignes = computed<Ligne[]>(() => {
  * couleur de la famille.
  */
 const colonnes = computed<TableColumn<Ligne>[]>(() => [
-  {
-    accessorKey: 'date',
-    header: t('journal.col.when'),
-    meta: { class: { td: 'audit__nowrap' } },
-  },
+  { accessorKey: 'date', header: t('journal.col.when') },
   { accessorKey: 'libelle', header: t('journal.col.kind') },
   { accessorKey: 'acteur', header: t('journal.col.actor') },
   { accessorKey: 'sujet', header: t('journal.col.subject') },
   { accessorKey: 'detail', header: t('journal.col.detail') },
-  {
-    accessorKey: 'ip',
-    header: t('journal.col.ip'),
-    meta: { class: { td: 'audit__nowrap' } },
-  },
+  { accessorKey: 'ip', header: t('journal.col.ip') },
 ])
 
 /**
