@@ -86,7 +86,8 @@ const showFilter = computed(() => !route.params.rel && !isAdmin.value)
  *
  * `showFilter` la limite aux pages du catalogue : la barre d'outils disparaît
  * sur l'administration et sur la vue d'un fichier, le mode n'y aurait plus de
- * point d'entrée.
+ * point d'entrée. Le journal d'audit a la sienne (`pages/admin/audit.vue`) : il
+ * n'y a pas de recherche de modèles, mais les mêmes commandes.
  */
 const aiPanel = computed(() => showFilter.value && aiMode.value)
 

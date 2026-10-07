@@ -25,6 +25,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Nombre d'événements rendus par défaut.
 const DEFAULT_LIMIT: i64 = 100;
@@ -72,16 +73,37 @@ pub struct EventView {
 /// Réservé à qui peut **voir les comptes** (`users.read`) : c'est un journal de
 /// sécurité, il n'a pas à être lisible par un simple lecteur du catalogue.
 pub async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> Response {
+    match recent(&state, limit_of(&query)) {
+        Ok(vues) => Json(vues).into_response(),
+        Err(e) => auth::internal(&e),
+    }
+}
+
+/// Nombre d'événements relus avant filtrage, pour un agent.
+///
+/// Le journal se lit par le **haut** (les plus récents) : au-delà, ce n'est plus
+/// un journal qu'on consulte mais une archive qu'on interroge. La borne est donc
+/// assumée — les critères s'appliquent à cette fenêtre, et la réponse dit
+/// combien d'événements ont été vus.
+pub const SCAN: i64 = 500;
+
+/// Les derniers événements, prêts à être montrés.
+///
+/// Une seule lecture pour les trois lecteurs du journal — la route, l'outil MCP
+/// `list_audit` et l'assistant : mêmes bornes, et la même résolution des noms
+/// **à la lecture** (un compte renommé apparaît sous son nom courant, le journal
+/// ne recopie pas des noms qui vieilliraient mal).
+///
+/// Sans comptes (installation ouverte), il n'y a pas de journal : on rend une
+/// liste vide plutôt qu'une erreur — il n'y a rien à montrer, ce n'est pas une
+/// panne.
+pub fn recent(state: &AppState, limit: i64) -> Result<Vec<EventView>, String> {
     if !state.auth.is_enabled() {
-        return Json(Vec::<EventView>::new()).into_response();
+        return Ok(Vec::new());
     }
 
-    let limit = limit_of(&query);
-    match state.auth.db(|conn| {
-        // Les noms sont résolus **à la lecture** : un compte renommé apparaît
-        // sous son nom courant, et le journal ne recopie pas des noms qui
-        // vieilliraient mal.
-        let events = db::list_events(conn, limit)?;
+    state.auth.db(|conn| {
+        let events = db::list_events(conn, limit.clamp(1, MAX_LIMIT))?;
         let mut vues = Vec::with_capacity(events.len());
         for event in events {
             let actor = match event.actor_uuid.as_deref() {
@@ -99,10 +121,65 @@ pub async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>)
             });
         }
         Ok(vues)
-    }) {
-        Ok(vues) => Json(vues).into_response(),
-        Err(e) => auth::internal(&e),
+    })
+}
+
+/// Critères de lecture d'un agent (outil MCP `list_audit`, assistant).
+///
+/// Le pendant, côté serveur, des filtres de la page d'audit : les mêmes trois
+/// idées (période, types, texte), pour qu'une question posée à l'IA et un
+/// filtrage dans l'interface parlent de la même chose.
+#[derive(Debug, Clone, Default)]
+pub struct Criteria {
+    /// Types à retenir (`login_failed`, `token_created`…). Vide = tous.
+    pub kinds: Vec<String>,
+    /// Instant le plus ancien accepté (secondes epoch, `0` = aucune borne).
+    pub since: i64,
+    /// Mots à chercher dans le type, le compte, le sujet, la précision, l'adresse.
+    pub query: String,
+}
+
+impl Criteria {
+    /// Lit le journal (fenêtre [`SCAN`]) et applique les critères.
+    pub fn read(&self, state: &AppState) -> Result<Vec<EventView>, String> {
+        Ok(self.apply(recent(state, SCAN)?))
     }
+
+    /// Applique les critères à une lecture déjà faite.
+    ///
+    /// Séparé de [`Criteria::read`] pour être testable sans base : c'est ici
+    /// qu'est la logique, et c'est elle qui mérite des tests.
+    pub fn apply(&self, events: Vec<EventView>) -> Vec<EventView> {
+        let text = self.query.trim().to_lowercase();
+
+        events
+            .into_iter()
+            .filter(|event| event.at >= self.since)
+            .filter(|event| self.kinds.is_empty() || self.kinds.contains(&event.kind))
+            .filter(|event| {
+                text.is_empty()
+                    || [
+                        event.kind.as_str(),
+                        event.actor.as_deref().unwrap_or(""),
+                        event.subject.as_str(),
+                        event.detail.as_str(),
+                        event.ip.as_str(),
+                    ]
+                    .join(" ")
+                    .to_lowercase()
+                    .contains(&text)
+            })
+            .collect()
+    }
+}
+
+/// Instant le plus ancien des `hours` dernières heures (secondes epoch).
+pub fn since_hours(hours: u32) -> i64 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    now - i64::from(hours) * 3600
 }
 
 #[cfg(test)]
@@ -129,5 +206,101 @@ mod tests {
         // Une demande démesurée est plafonnée : le journal ne peut pas être
         // aspiré d'un coup.
         assert_eq!(limit_of(&demande(Some(10_000))), MAX_LIMIT);
+    }
+
+    /// Un événement minimal : ces tests ne portent que sur le filtrage.
+    fn evenement(at: i64, kind: &str, actor: Option<&str>, detail: &str) -> EventView {
+        EventView {
+            at,
+            kind: kind.to_string(),
+            actor: actor.map(str::to_string),
+            subject: "sujet".to_string(),
+            detail: detail.to_string(),
+            ip: "10.0.0.1".to_string(),
+            user_agent: String::new(),
+        }
+    }
+
+    fn kinds_of(events: &[EventView]) -> Vec<String> {
+        events.iter().map(|event| event.kind.clone()).collect()
+    }
+
+    #[test]
+    fn sans_critere_on_garde_tout_ce_qui_a_ete_lu() {
+        let events = vec![
+            evenement(100, "login_ok", Some("remi"), ""),
+            evenement(200, "login_failed", None, "invalid_credentials"),
+        ];
+        assert_eq!(Criteria::default().apply(events).len(), 2);
+    }
+
+    #[test]
+    fn les_criteres_filtrent_par_periode_type_et_texte() {
+        let events = vec![
+            evenement(100, "login_ok", Some("remi"), ""),
+            evenement(200, "login_failed", None, "invalid_credentials"),
+            evenement(300, "token_created", Some("remi"), "30"),
+            evenement(400, "role_deleted", Some("root"), "invite"),
+        ];
+
+        // Période : la borne est l'instant le plus ancien **accepté**.
+        let recents = Criteria {
+            since: 300,
+            ..Default::default()
+        }
+        .apply(events.clone());
+        assert_eq!(kinds_of(&recents), vec!["token_created", "role_deleted"]);
+
+        // Types : un « ou », comme les puces de la page d'audit.
+        let types = Criteria {
+            kinds: vec!["login_failed".to_string(), "token_created".to_string()],
+            ..Default::default()
+        }
+        .apply(events.clone());
+        assert_eq!(kinds_of(&types), vec!["login_failed", "token_created"]);
+
+        // Texte : le compte, la précision, l'adresse — sans tenir compte de la casse.
+        let par_acteur = Criteria {
+            query: "REMI".to_string(),
+            ..Default::default()
+        }
+        .apply(events.clone());
+        assert_eq!(kinds_of(&par_acteur), vec!["login_ok", "token_created"]);
+
+        let par_detail = Criteria {
+            query: "invalid".to_string(),
+            ..Default::default()
+        }
+        .apply(events.clone());
+        assert_eq!(kinds_of(&par_detail), vec!["login_failed"]);
+
+        // Un type que le journal n'écrit pas ne rend rien — et surtout pas tout.
+        let inconnu = Criteria {
+            kinds: vec!["login_removed".to_string()],
+            ..Default::default()
+        }
+        .apply(events.clone());
+        assert!(inconnu.is_empty());
+
+        // Les trois ensemble.
+        let croises = Criteria {
+            kinds: vec!["login_failed".to_string(), "token_created".to_string()],
+            since: 250,
+            query: "remi".to_string(),
+        }
+        .apply(events);
+        assert_eq!(kinds_of(&croises), vec!["token_created"]);
+    }
+
+    #[test]
+    fn le_since_des_heures_recule_dans_le_temps() {
+        let borne = since_hours(24);
+        let maintenant = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        // À quelques secondes près (le test dure moins que ça).
+        assert!((maintenant - borne - 86_400).abs() < 5, "borne : {borne}");
     }
 }

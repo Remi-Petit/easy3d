@@ -200,7 +200,7 @@ mod tests {
     }
 
     fn specs() -> Vec<Spec> {
-        super::super::tools::specs()
+        super::super::tools::specs(super::super::tools::Rights::default())
     }
 
     #[test]

@@ -7,6 +7,9 @@
  * connaissent pas la langue de l'utilisateur).
  */
 
+// Import explicite : l'auto-import Nuxt n'existe pas sous Vitest.
+import type { SortMode } from '~/utils/filter'
+
 /** Types d'événement écrits par le backend (`auth::journal`). */
 export const EVENT_KINDS = [
   'login_ok',
@@ -104,4 +107,81 @@ export function describeDetail(kind: string, detail: string): DetailShape {
     return { kind: 'code', code: value }
   }
   return { kind: 'raw', value }
+}
+
+/**
+ * Familles d'événements : les puces de filtre de la page d'audit.
+ *
+ * Les quinze types regroupés en cinq familles lisibles — c'est ainsi qu'on
+ * cherche : « les refus », « les jetons ». Une puce par type ferait une rangée
+ * illisible, et personne ne filtre sur `login_blocked` tout seul.
+ */
+export const EVENT_FAMILIES = {
+  sessions: ['login_ok', 'sso_login', 'logout'],
+  refusals: ['login_failed', 'login_blocked', 'sso_refused'],
+  tokens: ['token_created', 'token_revoked'],
+  accounts: ['account_created', 'account_updated', 'account_deleted', 'password_changed'],
+  roles: ['role_created', 'role_updated', 'role_deleted'],
+} as const satisfies Record<string, readonly string[]>
+
+export type EventFamily = keyof typeof EVENT_FAMILIES
+
+/** Les familles, dans l'ordre d'affichage. */
+export const EVENT_FAMILY_LIST = Object.keys(EVENT_FAMILIES) as EventFamily[]
+
+/** Filtres de la page d'audit : période (secondes epoch, `0` = pas de borne). */
+export interface JournalFilters {
+  text?: string
+  families?: EventFamily[]
+  since?: number
+}
+
+/**
+ * Les événements qui passent les filtres.
+ *
+ * `describe` fournit le texte **affiché** d'un événement (type traduit, détail
+ * traduit) : la recherche couvre donc exactement ce que l'utilisateur a sous les
+ * yeux, ce qu'il aurait tapé dans le champ. L'utilitaire, lui, ne connaît pas la
+ * langue — c'est la page qui la lui donne (règle du projet).
+ */
+export function filterEvents(
+  events: JournalEvent[],
+  filters: JournalFilters,
+  describe: (event: JournalEvent) => string,
+): JournalEvent[] {
+  const texte = (filters.text ?? '').trim().toLowerCase()
+  const borne = filters.since ?? 0
+  const familles = filters.families ?? []
+  const kinds = familles.flatMap((famille) => [...EVENT_FAMILIES[famille]])
+
+  return events.filter((event) => {
+    if (event.at < borne) return false
+    if (familles.length && !kinds.includes(event.kind)) return false
+    if (!texte) return true
+    return describe(event).toLowerCase().includes(texte)
+  })
+}
+
+/** Nombre d'événements par famille depuis `since` (`0` = tout). */
+export function familyCounts(events: JournalEvent[], since = 0): Record<EventFamily, number> {
+  const compte = {} as Record<EventFamily, number>
+  for (const famille of EVENT_FAMILY_LIST) {
+    const kinds: readonly string[] = EVENT_FAMILIES[famille]
+    compte[famille] = events.filter((event) => event.at >= since && kinds.includes(event.kind)).length
+  }
+  return compte
+}
+
+/**
+ * Trie les événements par date.
+ *
+ * `none` rend la liste telle qu'elle arrive du serveur : le journal est déjà rangé
+ * du plus récent au plus ancien, c'est son ordre naturel. Même vocabulaire et même
+ * cycle que le tri du catalogue (`utils/filter.ts`) — le bouton se comporte donc
+ * pareil des deux côtés. La liste d'entrée n'est pas modifiée.
+ */
+export function sortEvents(events: JournalEvent[], mode: SortMode): JournalEvent[] {
+  if (mode === 'none') return events
+  const sens = mode === 'date-asc' ? 1 : -1
+  return [...events].sort((a, b) => (a.at - b.at) * sens)
 }

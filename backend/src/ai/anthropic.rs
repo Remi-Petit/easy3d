@@ -224,7 +224,7 @@ mod tests {
             &cfg(),
             "tu cherches",
             &turn_avec_appel(),
-            &super::super::tools::specs(),
+            &super::super::tools::specs(super::super::tools::Rights::default()),
         );
 
         assert_eq!(request.url, "https://api.anthropic.com/v1/messages");

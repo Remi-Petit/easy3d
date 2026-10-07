@@ -471,12 +471,36 @@ pub struct AiSearchRequest {
 /// « appel de … impossible »).
 async fn ai_search(
     State(state): State<AppState>,
+    auth: Option<auth::AuthUser>,
     Json(request): Json<AiSearchRequest>,
 ) -> Result<Json<ai::Outcome>, (StatusCode, String)> {
-    ai::search(&state, &request.query)
+    ai::search(&state, &request.query, rights_of(&state, auth.as_ref()))
         .await
         .map(Json)
         .map_err(ai_error)
+}
+
+/// Ce que l'appelant peut lire, vu par les outils de l'assistant.
+///
+/// L'assistant tourne **au nom du compte** qui pose la question : il ne doit pas
+/// pouvoir lire plus que lui. `ai.use` ouvre la recherche assistée et ne dit rien
+/// du reste — le journal d'audit, lui, demande `users.read`.
+fn rights_of(state: &AppState, auth: Option<&auth::AuthUser>) -> ai::tools::Rights {
+    let Some(auth::AuthUser(compte)) = auth else {
+        // Installation sans comptes : tout est ouvert, comme le reste.
+        return ai::tools::Rights { audit: true };
+    };
+
+    let audit = state
+        .auth
+        .can_scoped(
+            &compte.uuid,
+            compte.scope.as_deref(),
+            auth::permissions::USERS_READ,
+        )
+        .unwrap_or(false);
+
+    ai::tools::Rights { audit }
 }
 
 /// Réponse de `/ai/models`.

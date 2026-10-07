@@ -1,15 +1,17 @@
 //! Outils que le modèle de langage peut appeler pendant une recherche.
 //!
-//! Trois lectures ([`catalog_overview`], [`search_models`], [`read_note`]) et une
-//! conclusion ([`submit_results`]). Le résultat part en JSON compact : le modèle
-//! paye chaque caractère, et un catalogue entier ne tiendrait de toute façon pas
-//! dans une conversation.
+//! Trois lectures du catalogue ([`catalog_overview`], [`search_models`],
+//! [`read_note`]), le **journal d'audit** pour qui a le droit de le lire
+//! ([`list_audit`]), et une conclusion ([`submit_results`]). Le résultat part en
+//! JSON compact : le modèle paye chaque caractère, et un catalogue entier ne
+//! tiendrait de toute façon pas dans une conversation.
 //!
 //! La conclusion est **vérifiée** : les chemins proposés par le modèle sont
 //! confrontés au catalogue réel, ce qui rend impossible de proposer un fichier
 //! inventé (les modèles en inventent, surtout quand la réponse est vide).
 
 use crate::api::{AppState, tidy_path};
+use crate::auth::journal::{self, Criteria};
 use crate::formats;
 use crate::notes;
 use crate::scanner;
@@ -32,6 +34,10 @@ const RESULTS_MAX: usize = 12;
 const NOTE_EXCERPT: usize = 200;
 const NOTE_FULL: usize = 2000;
 const REASON_MAX: usize = 300;
+
+/// Nombre d'événements du journal rendus à un appel.
+const AUDIT_DEFAULT: usize = 20;
+const AUDIT_MAX: usize = 100;
 
 /// Déclaration d'un outil, dans une forme commune à tous les fournisseurs (le
 /// schéma est du JSON Schema, que les quatre savent lire).
@@ -56,9 +62,23 @@ pub enum Ran {
     Final(Vec<Hit>),
 }
 
+/// Ce que l'appelant a le droit de lire, vu par les outils.
+///
+/// Les outils tournent **au nom du compte** qui a posé la question : `ai.use`
+/// ouvre la recherche, mais ne donne pas les autres droits pour autant. Le
+/// journal d'audit est le premier cas — le taire serait une fuite, l'annoncer
+/// puis le refuser serait un aller-retour perdu.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Rights {
+    /// `users.read` : lire le journal d'audit.
+    pub audit: bool,
+}
+
 /// Les outils annoncés au modèle, dans l'ordre où il doit s'en servir.
-pub fn specs() -> Vec<Spec> {
-    vec![
+///
+/// Le journal d'audit n'y figure que pour qui a le droit de le lire (`rights`).
+pub fn specs(rights: Rights) -> Vec<Spec> {
+    let mut specs = vec![
         Spec {
             name: "catalog_overview",
             description: "Vue d'ensemble du catalogue : dossiers de premier niveau (nombre de \
@@ -123,51 +143,92 @@ pub fn specs() -> Vec<Spec> {
                 "additionalProperties": false
             }),
         },
-        Spec {
-            name: "submit_results",
-            description: "Conclut la recherche. À appeler **obligatoirement** en dernier, avec les \
-                          éléments retenus (liste vide si rien ne correspond) et, pour chacun, une \
-                          raison courte fondée sur un fait de la fiche.",
+    ];
+
+    if rights.audit {
+        specs.push(Spec {
+            name: "list_audit",
+            description: "Journal d'audit de l'installation : connexions (réussies, refusées, \
+                          bloquées), connexions par le fournisseur d'identité, déconnexions, \
+                          jetons d'API créés ou révoqués, changements de comptes ou de rôles. \
+                          En lecture seule. À appeler quand la question porte sur qui a fait \
+                          quoi, et quand — puis réponds en texte : ces événements ne sont pas \
+                          des éléments du catalogue, ne les propose pas dans `submit_results`.",
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "results": {
+                    "since_hours": {
+                        "type": "integer",
+                        "description": "Ne garder que les N dernières heures (ex. 24)."
+                    },
+                    "kinds": {
                         "type": "array",
-                        "description": "Résultats, du plus pertinent au moins pertinent.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "rel": {
-                                    "type": "string",
-                                    "description": "Chemin relatif exact renvoyé par les outils."
-                                },
-                                "reason": {
-                                    "type": "string",
-                                    "description": "Pourquoi cet élément correspond (une phrase)."
-                                }
-                            },
-                            "required": ["rel", "reason"],
-                            "additionalProperties": false
-                        }
+                        "items": { "type": "string" },
+                        "description": "Types d'événement à retenir (login_failed, token_created, \
+                                        account_updated...). Vide = tous."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Mots à chercher dans le compte, le sujet, la précision \
+                                        ou l'adresse."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Nombre maximal d'événements (défaut 20, maximum 100)."
                     }
                 },
-                "required": ["results"],
                 "additionalProperties": false
             }),
-        },
-    ]
+        });
+    }
+
+    specs.push(Spec {
+        name: "submit_results",
+        description: "Conclut la recherche. À appeler **obligatoirement** en dernier, avec les \
+                      éléments retenus (liste vide si rien ne correspond) et, pour chacun, une \
+                      raison courte fondée sur un fait de la fiche.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "description": "Résultats, du plus pertinent au moins pertinent.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rel": {
+                                "type": "string",
+                                "description": "Chemin relatif exact renvoyé par les outils."
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Pourquoi cet élément correspond (une phrase)."
+                            }
+                        },
+                        "required": ["rel", "reason"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["results"],
+            "additionalProperties": false
+        }),
+    });
+
+    specs
 }
 
 /// Exécute un appel d'outil.
-pub fn run(state: &AppState, call: &ToolCall) -> Ran {
+pub fn run(state: &AppState, call: &ToolCall, rights: Rights) -> Ran {
     match call.name.as_str() {
         "catalog_overview" => Ran::Continue(overview(state)),
         "search_models" => Ran::Continue(search_models(state, &call.arguments)),
         "read_note" => Ran::Continue(read_note(state, &call.arguments)),
+        "list_audit" => Ran::Continue(list_audit(state, &call.arguments, rights)),
         "submit_results" => Ran::Final(submit_results(state, &call.arguments)),
         other => Ran::Continue(format!(
             "outil inconnu : « {other} ». Outils disponibles : {}.",
-            specs()
+            specs(rights)
                 .iter()
                 .map(|s| s.name)
                 .collect::<Vec<_>>()
@@ -621,6 +682,85 @@ fn read_note(state: &AppState, args: &Value) -> String {
     }
 }
 
+/// Lit le journal d'audit, avec les mêmes critères que l'outil MCP `list_audit`.
+///
+/// Le droit est vérifié **ici aussi**, et pas seulement à l'annonce des outils :
+/// un modèle qui appellerait `list_audit` sans qu'on le lui ait annoncé ne doit
+/// pas obtenir davantage qu'un autre.
+fn list_audit(state: &AppState, args: &Value, rights: Rights) -> String {
+    if !rights.audit {
+        return "Le journal d'audit demande le droit « users.read », que ce compte n'a pas : \
+                il n'y a rien à lire ici."
+            .to_string();
+    }
+
+    let criteria = Criteria {
+        kinds: args
+            .get("kinds")
+            .and_then(Value::as_array)
+            .map(|kinds| {
+                kinds
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|kind| kind.trim().to_lowercase())
+                    .filter(|kind| !kind.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        since: args
+            .get("since_hours")
+            .and_then(Value::as_u64)
+            .map(|hours| journal::since_hours(hours.min(u64::from(u32::MAX)) as u32))
+            .unwrap_or(0),
+        query: text(args, "query").unwrap_or_default(),
+    };
+
+    let trouves = match criteria.read(state) {
+        Ok(events) => events,
+        Err(msg) => return format!("lecture du journal impossible : {msg}"),
+    };
+
+    let matched = trouves.len();
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|limit| limit as usize)
+        .unwrap_or(AUDIT_DEFAULT)
+        .clamp(1, AUDIT_MAX);
+
+    // `user_agent` reste dehors : c'est la donnée la plus bavarde du journal, et
+    // la seule qui ne dit rien de qui a fait quoi.
+    let events: Vec<Value> = trouves
+        .iter()
+        .take(limit)
+        .map(|event| {
+            json!({
+                "at": event.at,
+                "kind": event.kind,
+                "actor": event.actor,
+                "subject": event.subject,
+                "detail": event.detail,
+                "ip": event.ip,
+            })
+        })
+        .collect();
+
+    let mut out = json!({
+        "matched": matched,
+        "returned": events.len(),
+        "events": events,
+    });
+    if matched > events.len() {
+        // Le journal est relu par le haut (fenêtre bornée) : le dire évite de
+        // laisser croire à un historique complet.
+        out["note"] = json!(format!(
+            "{} autres événements, non affichés : filtre par `since_hours`, `kinds` ou `query`.",
+            matched - events.len()
+        ));
+    }
+    to_json(out)
+}
+
 /// Conclusion : on ne garde que des chemins réellement présents.
 fn submit_results(state: &AppState, args: &Value) -> Vec<Hit> {
     let empty = Vec::new();
@@ -793,14 +933,19 @@ mod tests {
     }
 
     fn text_of(state: &AppState, tool: &str, args: &str) -> String {
-        match run(state, &call(tool, args)) {
+        text_with(state, tool, args, Rights::default())
+    }
+
+    /// Appel avec des droits explicites : ce que le modèle verrait s'il les avait.
+    fn text_with(state: &AppState, tool: &str, args: &str, rights: Rights) -> String {
+        match run(state, &call(tool, args), rights) {
             Ran::Continue(text) => text,
             Ran::Final(_) => panic!("{tool} ne conclut pas la recherche"),
         }
     }
 
     fn hits_of(state: &AppState, args: &str) -> Vec<Hit> {
-        match run(state, &call("submit_results", args)) {
+        match run(state, &call("submit_results", args), Rights::default()) {
             Ran::Final(hits) => hits,
             Ran::Continue(_) => panic!("submit_results doit conclure"),
         }
@@ -1032,7 +1177,7 @@ mod tests {
 
     #[test]
     fn les_specs_sont_exploitables_par_un_modele() {
-        let specs = specs();
+        let specs = specs(Rights::default());
         assert_eq!(specs.len(), 4);
         for spec in &specs {
             assert!(
@@ -1052,6 +1197,36 @@ mod tests {
             submit.schema["properties"]["results"]["items"]["required"][0],
             "rel"
         );
+    }
+
+    /// Le journal d'audit n'est annoncé **qu'à qui peut le lire**, et le droit
+    /// est revérifié à l'appel : un modèle ne doit pas obtenir plus que le compte
+    /// au nom duquel il travaille (voir `Rights`).
+    #[test]
+    fn l_audit_n_est_annonce_qu_avec_le_droit() {
+        let sans = specs(Rights::default());
+        assert!(!sans.iter().any(|spec| spec.name == "list_audit"));
+
+        let avec = specs(Rights { audit: true });
+        assert_eq!(avec.len(), 5);
+        // L'outil qui conclut reste le dernier annoncé.
+        assert_eq!(avec.last().unwrap().name, "submit_results");
+
+        let audit = avec.iter().find(|spec| spec.name == "list_audit").unwrap();
+        assert!(!audit.description.is_empty());
+        assert!(audit.schema["properties"]["since_hours"]["description"].is_string());
+
+        // Sans le droit, l'appel ne rend rien — même inventé de toutes pièces.
+        let (_dir, state) = state_with_catalog();
+        let refus = text_of(&state, "list_audit", "{}");
+        assert!(refus.contains("users.read"), "{refus}");
+
+        // Avec le droit, l'appel répond du JSON exploitable (vide ici : le
+        // catalogue de test n'a pas de comptes, donc pas de journal).
+        let rendu = text_with(&state, "list_audit", "{}", Rights { audit: true });
+        let value: Value = serde_json::from_str(&rendu).unwrap();
+        assert_eq!(value["matched"], 0);
+        assert!(value["events"].as_array().unwrap().is_empty());
     }
 
     #[test]

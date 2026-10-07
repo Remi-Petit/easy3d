@@ -7,7 +7,7 @@
     "menuDescription": "Navegación de la aplicación",
     "catalog": "Catálogo",
     "system": "Sistema",
-    "models": "Models",
+    "models": "Modelos",
     "admin": "Administración",
     "accounts": "Cuentas",
     "journal": "Registro",
@@ -400,11 +400,36 @@
     }
   },
   "journal": {
-    "title": "Registro de auditoría",
     "hint": "Las últimas acciones: conexiones, rechazos, claves creadas o revocadas, cambios de permisos. Solo lectura y acotado (las entradas más antiguas se descartan).",
     "empty": "Nada que señalar.",
     "days": "{count} días",
     "neverExpires": "sin caducidad",
+    "search": "Buscar (cuenta, dirección, detalle…)",
+    "period": "Periodo",
+    "periods": {
+      "all": "Todo",
+      "day": "24 h",
+      "week": "7 días",
+      "month": "30 días"
+    },
+    "col": {
+      "when": "Fecha",
+      "kind": "Evento",
+      "actor": "Cuenta",
+      "subject": "Asunto",
+      "detail": "Detalle",
+      "ip": "Dirección"
+    },
+    "family": {
+      "sessions": "Sesiones",
+      "refusals": "Rechazos",
+      "tokens": "Claves",
+      "accounts": "Cuentas",
+      "roles": "Roles"
+    },
+    "count": "{count} eventos",
+    "filtered": "{count} de {total}",
+    "emptyFiltered": "Nada coincide con estos filtros.",
     "errors": {
       "load": "No se pudo leer el registro."
     },
