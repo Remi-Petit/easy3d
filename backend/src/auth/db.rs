@@ -952,15 +952,38 @@ pub fn touch_token(conn: &Connection, uuid: &str) -> Result<(), String> {
     .map_err(err)
 }
 
-/// Révoque un jeton **du compte** (renvoie `false` s'il n'existe pas ou
-/// appartient à quelqu'un d'autre).
-pub fn delete_token(conn: &Connection, user_uuid: &str, uuid: &str) -> Result<bool, String> {
+/// Révoque un jeton **du compte**, et rend son **nom**.
+///
+/// Le nom plutôt qu'un simple « c'est fait » : c'est lui qui part au journal. La
+/// ligne, elle, disparaît — l'identifiant du jeton ne désignerait plus rien, et
+/// le journal dirait « jeton révoqué : 01a116d0-… » sans qu'on sache lequel.
+/// `None` quand il n'y a rien à supprimer : jeton inconnu, ou appartenant à
+/// quelqu'un d'autre.
+pub fn delete_token(
+    conn: &Connection,
+    user_uuid: &str,
+    uuid: &str,
+) -> Result<Option<String>, String> {
+    let name = conn
+        .query_row(
+            "SELECT name FROM api_tokens WHERE uuid = ?1 AND user_uuid = ?2",
+            params![uuid, user_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(err)?;
+
+    if name.is_none() {
+        return Ok(None);
+    }
+
     conn.execute(
         "DELETE FROM api_tokens WHERE uuid = ?1 AND user_uuid = ?2",
         params![uuid, user_uuid],
     )
-    .map(|count| count > 0)
-    .map_err(err)
+    .map_err(err)?;
+
+    Ok(name)
 }
 
 /// Retire les jetons expirés. Renvoie le nombre de lignes supprimées.
@@ -1268,6 +1291,27 @@ mod tests {
         create_session(&conn, "b", &user.uuid, now + 60, "", "").unwrap();
         assert_eq!(delete_sessions_of(&conn, &user.uuid).unwrap(), 2);
         assert!(session_user(&conn, "a", now).unwrap().is_none());
+    }
+
+    #[test]
+    fn la_revocation_rend_le_nom_du_jeton_revoque() {
+        let (_dir, conn) = base();
+        let user = NewUser::new("remi", "remi@exemple.fr", None);
+        insert_user(&conn, &user).unwrap();
+        insert_token(&conn, "j-1", &user.uuid, "CI", "empreinte", None, None).unwrap();
+
+        // C'est le **nom** qui revient : le jeton, lui, n'existe plus.
+        assert_eq!(
+            delete_token(&conn, &user.uuid, "j-1").unwrap().as_deref(),
+            Some("CI")
+        );
+        assert!(list_tokens(&conn, &user.uuid).unwrap().is_empty());
+
+        // Rien à supprimer : jeton déjà parti, ou celui d'un autre compte.
+        assert_eq!(delete_token(&conn, &user.uuid, "j-1").unwrap(), None);
+        insert_token(&conn, "j-2", &user.uuid, "perso", "empreinte", None, None).unwrap();
+        assert_eq!(delete_token(&conn, "autre-uuid", "j-2").unwrap(), None);
+        assert_eq!(list_tokens(&conn, &user.uuid).unwrap().len(), 1);
     }
 
     #[test]

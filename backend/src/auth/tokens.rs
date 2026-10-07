@@ -226,8 +226,11 @@ impl Auth {
         self.db(|conn| db::list_tokens(conn, user_uuid))
     }
 
-    /// Révoque un jeton du compte (et de lui seul).
-    pub fn revoke_token(&self, user_uuid: &str, uuid: &str) -> Result<bool, String> {
+    /// Révoque un jeton du compte (et de lui seul), et rend son **nom**.
+    ///
+    /// Le nom, parce que c'est ce que le journal écrit : la ligne part avec la
+    /// révocation, et son identifiant ne désignerait plus rien pour personne.
+    pub fn revoke_token(&self, user_uuid: &str, uuid: &str) -> Result<Option<String>, String> {
         self.db(|conn| db::delete_token(conn, user_uuid, uuid))
     }
 }
@@ -330,13 +333,16 @@ pub async fn revoke(
     Path(uuid): Path<String>,
 ) -> Response {
     match state.auth.revoke_token(&caller.0.uuid, &uuid) {
-        Ok(true) => {
+        Ok(Some(nom)) => {
+            // Le **nom**, jamais l'identifiant : le jeton vient d'être supprimé, et
+            // un UUID ne désigne alors plus rien. Le journal doit rester lisible
+            // par celui qui le relit des mois plus tard (voir `Auth::revoke_token`).
             state
                 .auth
-                .log(&headers, "token_revoked", Some(&caller.0.uuid), &uuid, "");
+                .log(&headers, "token_revoked", Some(&caller.0.uuid), &nom, "");
             Json(serde_json::json!({ "ok": true })).into_response()
         }
-        Ok(false) => auth::error(StatusCode::NOT_FOUND, "not_found"),
+        Ok(None) => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) => auth::internal(&e),
     }
 }
