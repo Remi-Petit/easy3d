@@ -77,7 +77,7 @@ test('carte : le clic droit propose de renommer', async ({ page }) => {
  * des e2e servent aux autres tests. On annule.
  */
 test('carte dossier : le clic droit propose de renommer', async ({ page }) => {
-  await page.goto('/dossiers/DemaAuto')
+  await page.goto('/folders/DemaAuto')
 
   // Un sous-dossier : son nom seul (`sous-structure`) ne suffit pas à le
   // retrouver, d'où le chemin complet attendu dans la fenêtre.

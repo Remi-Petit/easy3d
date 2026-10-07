@@ -3,8 +3,8 @@ import { PERM } from '~/utils/permissions'
 /**
  * Garde des pages d'administration.
  *
- * `/admin` montre les réglages (droit `config.read`), `/admin/comptes` les
- * comptes et les rôles (`users.read` ou `roles.read`), `/admin/journal` le
+ * `/admin` montre les réglages (droit `config.read`), `/admin/accounts` les
+ * comptes et les rôles (`users.read` ou `roles.read`), `/admin/audit` le
  * journal d'audit (`users.read` : c'est un journal de comptes). Un compte qui n'a
  * aucun de ces droits n'a rien à y faire : mieux vaut le renvoyer au catalogue
  * que lui montrer des écrans vides et des refus.
@@ -17,9 +17,9 @@ import { PERM } from '~/utils/permissions'
 export default defineNuxtRouteMiddleware((to) => {
   const { can } = useAuth()
 
-  const droits = to.path.startsWith('/admin/comptes')
+  const droits = to.path.startsWith('/admin/accounts')
     ? [PERM.usersRead, PERM.rolesRead]
-    : to.path.startsWith('/admin/journal')
+    : to.path.startsWith('/admin/audit')
       ? [PERM.usersRead]
       : [PERM.configRead]
 

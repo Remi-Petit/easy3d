@@ -7,7 +7,7 @@ const { t } = useI18n()
 
 /**
  * Chemin relatif du dossier, encodé dans l'URL exactement comme pour les fichiers
- * (`/dossiers/Maison%2Fsous`) : un dossier de premier niveau comme un sous-dossier
+ * (`/folders/Maison%2Fsous`) : un dossier de premier niveau comme un sous-dossier
  * passent par la même page.
  */
 const rel = computed(() =>

@@ -39,7 +39,10 @@
  *   PUBLIC_URL      base vue par le navigateur (défaut http://localhost:<PORT>)
  *   CLIENT_ID       client attendu (défaut easy3d) ; vide = n'importe lequel
  *   CLIENT_SECRET   secret attendu ; vide = aucun contrôle
- *   SUBJECT/EMAIL/USERNAME/NAME   le compte simulé décrit par `userinfo`
+ *   ACCOUNTS        plusieurs comptes simulés, en JSON :
+ *                   `[{"id":"admin","email":"…","username":"…"}, …]`
+ *                   Au-delà d'un compte, `/authorize` propose de choisir.
+ *   SUBJECT/EMAIL/USERNAME/NAME   le compte simulé **unique** (sans `ACCOUNTS`)
  *
  * Tout est journalisé sur la sortie du conteneur (`docker compose logs -f fake-oidc`).
  */
@@ -51,12 +54,48 @@ const PUBLIC_URL = (process.env.PUBLIC_URL ?? `http://localhost:${PORT}`).replac
 const CLIENT_ID = process.env.CLIENT_ID ?? 'easy3d'
 const CLIENT_SECRET = process.env.CLIENT_SECRET ?? ''
 
-/** Le compte que `userinfo` décrira toujours. */
-const ACCOUNT = {
-  sub: process.env.SUBJECT ?? 'fake-oidc-1',
-  email: (process.env.EMAIL ?? 'sso@example.com').toLowerCase(),
-  preferred_username: process.env.USERNAME ?? 'sso',
-  name: process.env.NAME ?? process.env.USERNAME ?? 'Compte simulé',
+/**
+ * Comptes simulés, dans l'ordre où la page de choix les propose.
+ *
+ * `ACCOUNTS` (JSON) en décrit plusieurs ; sinon `SUBJECT`/`EMAIL`/`USERNAME`/
+ * `NAME` décrivent l'unique compte. Avec un seul compte, `/authorize` redirige
+ * aussitôt (comportement d'origine) ; au-delà, il propose de choisir.
+ */
+const ACCOUNTS = comptesDepuisEnv()
+
+function comptesDepuisEnv() {
+  const brut = (process.env.ACCOUNTS ?? '').trim()
+  if (brut) {
+    let liste
+    try {
+      liste = JSON.parse(brut)
+    } catch {
+      throw new Error(`ACCOUNTS n'est pas du JSON valide : ${brut}`)
+    }
+    if (!Array.isArray(liste) || liste.length === 0) {
+      throw new Error('ACCOUNTS doit être un tableau JSON non vide')
+    }
+    return liste.map((compte, index) => {
+      const username = String(compte.username ?? compte.preferred_username ?? `compte-${index + 1}`)
+      return {
+        id: String(compte.id ?? username),
+        sub: String(compte.sub ?? `fake-oidc-${index + 1}`),
+        email: String(compte.email ?? '').toLowerCase(),
+        preferred_username: username,
+        name: String(compte.name ?? username),
+      }
+    })
+  }
+  const username = process.env.USERNAME ?? 'sso'
+  return [
+    {
+      id: username,
+      sub: process.env.SUBJECT ?? 'fake-oidc-1',
+      email: (process.env.EMAIL ?? 'sso@example.com').toLowerCase(),
+      preferred_username: username,
+      name: process.env.NAME ?? username,
+    },
+  ]
 }
 
 /** Durée de vie annoncée du jeton d'accès, en secondes. */
@@ -133,7 +172,10 @@ function discovery(req, res) {
   send(res, 200, document)
 }
 
-/** 2. Autorisation : aucune saisie, on repart aussitôt avec un code. */
+/**
+ * 2. Autorisation : aucune saisie. Un seul compte → on repart aussitôt avec un
+ * code ; plusieurs → on propose d'abord lequel (`?as=<id>`).
+ */
 function authorize(url, req, res) {
   const redirectUri = url.searchParams.get('redirect_uri')
   const state = url.searchParams.get('state')
@@ -146,19 +188,72 @@ function authorize(url, req, res) {
     return redirectError(res, redirectUri, 'unauthorized_client', state)
   }
 
+  const demande = url.searchParams.get('as')
+  const compte = ACCOUNTS.find((a) => a.id === demande)
+  // Plusieurs comptes et aucun choix valable : on affiche la page de choix.
+  if (!compte && ACCOUNTS.length > 1) {
+    return choisirCompte(url, res)
+  }
+  const choisi = compte ?? ACCOUNTS[0]
+
   const code = randomBytes(24).toString('hex')
   codes.set(code, {
     redirectUri,
     clientId,
+    account: choisi,
     expiresAt: Date.now() + CODE_TTL,
   })
-  log(`autorisation : client=${clientId} → ${redirectUri} (code ${code.slice(0, 12)}…)`)
+  log(`autorisation : client=${clientId} compte=${choisi.email} → ${redirectUri} (code ${code.slice(0, 12)}…)`)
 
   const target = new URL(redirectUri)
   target.searchParams.set('code', code)
   if (state) target.searchParams.set('state', state)
   res.writeHead(302, { location: target.toString() })
   res.end()
+}
+
+/** Échappe un texte inséré dans du HTML (noms et adresses viennent de l'environnement). */
+function echapper(texte) {
+  return String(texte).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  )
+}
+
+/**
+ * Page de choix du compte, quand `ACCOUNTS` en décrit plusieurs.
+ *
+ * Chaque entrée renvoie la **même** demande d'autorisation avec `as=<id>` : le
+ * navigateur reste chez le fournisseur, et le code délivré désigne ensuite le
+ * compte choisi.
+ */
+function choisirCompte(url, res) {
+  const liens = ACCOUNTS.map((compte) => {
+    const cible = new URL(url.toString())
+    cible.searchParams.set('as', compte.id)
+    return `<li><a href="${echapper(cible.pathname + cible.search)}"><strong>${echapper(compte.name)}</strong> <small>${echapper(compte.email)}</small></a></li>`
+  }).join('\n    ')
+  log(`choix du compte (${ACCOUNTS.length}) → ${url.searchParams.get('redirect_uri')}`)
+  send(
+    res,
+    200,
+    `<!doctype html>
+<meta charset="utf-8">
+<title>easy3d — choisir un compte</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; margin: 3rem auto; max-width: 30rem; padding: 0 1rem; }
+  ul { list-style: none; padding: 0; display: grid; gap: .5rem; }
+  a { display: block; padding: .7rem 1rem; border: 1px solid #d0d0d0; border-radius: 8px; text-decoration: none; color: inherit; }
+  a:hover { border-color: #888; }
+  small { color: #777; }
+</style>
+<h1>Choisir un compte</h1>
+<p>Fournisseur d'identité fictif (développement) — aucun mot de passe n'est demandé.</p>
+<ul>
+    ${liens}
+</ul>`,
+    'text/html; charset=utf-8',
+  )
 }
 
 /** 3. Échange du code contre un jeton d'accès. */
@@ -200,8 +295,8 @@ async function token(req, res) {
   }
 
   const accessToken = randomBytes(32).toString('hex')
-  tokens.set(accessToken, { account: { ...ACCOUNT }, expiresAt: Date.now() + TOKEN_TTL * 1000 })
-  log(`jeton délivré pour ${ACCOUNT.email} (${accessToken.slice(0, 12)}…)`)
+  tokens.set(accessToken, { account: { ...demande.account }, expiresAt: Date.now() + TOKEN_TTL * 1000 })
+  log(`jeton délivré pour ${demande.account.email} (${accessToken.slice(0, 12)}…)`)
 
   send(res, 200, {
     access_token: accessToken,
@@ -255,7 +350,10 @@ function home(req, res) {
   <li>échange du code : <code>${internal}/token</code></li>
   <li>identité : <code>${internal}/userinfo</code></li>
 </ul>
-<p>Compte simulé : <code>${ACCOUNT.email}</code> (<code>sub</code> = <code>${ACCOUNT.sub}</code>).</p>
+<p>Comptes simulés :</p>
+<ul>
+  ${ACCOUNTS.map((compte) => `<li><code>${compte.email}</code> (<code>sub</code> = <code>${compte.sub}</code>)</li>`).join('\n  ')}
+</ul>
 <p>Interrupteur : <code>EASY3D_OIDC_ISSUER=${internal}</code>.</p>`,
     'text/html; charset=utf-8',
   )
@@ -294,6 +392,10 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   log(`fournisseur d'identité fictif à l'écoute sur http://0.0.0.0:${PORT}`)
-  log(`  client_id=${CLIENT_ID || '(aucun contrôle)'}  compte=${ACCOUNT.email}`)
+  log(`  client_id=${CLIENT_ID || '(aucun contrôle)'}`)
+  for (const compte of ACCOUNTS) log(`  compte=${compte.email} (id=${compte.id})`)
+  if (ACCOUNTS.length > 1) {
+    log(`  ${ACCOUNTS.length} comptes : la page d'autorisation propose de choisir`)
+  }
   log(`  autorisation annoncée sur ${PUBLIC_URL}`)
 })

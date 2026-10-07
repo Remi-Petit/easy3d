@@ -3,40 +3,40 @@ import { folderHref, parentPath } from '~/utils/navigation'
 
 describe('parentPath', () => {
   it('remonte un fichier de dossier vers son dossier', () => {
-    expect(parentPath('/fichier/DemaAuto%2Fboitier.stl')).toBe('/dossiers/DemaAuto')
+    expect(parentPath('/files/DemaAuto%2Fboitier.stl')).toBe('/folders/DemaAuto')
     // Les espaces et accents sont ré-encodés pour l'URL du dossier.
-    expect(parentPath('/fichier/DemaAuto%2FBoitier%20d%C3%A9ma%20auto.stl')).toBe(
-      '/dossiers/DemaAuto',
+    expect(parentPath('/files/DemaAuto%2FBoitier%20d%C3%A9ma%20auto.stl')).toBe(
+      '/folders/DemaAuto',
     )
   })
 
   it('rattache un fichier imbriqué au dossier de premier niveau', () => {
     // Le backend regroupe les fichiers sous leur dossier de premier niveau :
     // c'est donc là que le fichier est réellement listé.
-    expect(parentPath('/fichier/DemaAuto%2Fsous%2Fpiece.stl')).toBe('/dossiers/DemaAuto')
+    expect(parentPath('/files/DemaAuto%2Fsous%2Fpiece.stl')).toBe('/folders/DemaAuto')
   })
 
   it('reencode le nom du dossier', () => {
-    expect(parentPath('/fichier/Mes%20pi%C3%A8ces%2Fx.stl')).toBe(
-      '/dossiers/Mes%20pi%C3%A8ces',
+    expect(parentPath('/files/Mes%20pi%C3%A8ces%2Fx.stl')).toBe(
+      '/folders/Mes%20pi%C3%A8ces',
     )
   })
 
   it('renvoie l’accueil pour un fichier à la racine', () => {
-    expect(parentPath('/fichier/Capuchon%20LMB.stl')).toBe('/')
-    expect(parentPath('/fichier/x.gcode')).toBe('/')
+    expect(parentPath('/files/Capuchon%20LMB.stl')).toBe('/')
+    expect(parentPath('/files/x.gcode')).toBe('/')
   })
 
   it('renvoie l’accueil depuis une page dossier', () => {
-    expect(parentPath('/dossiers/DemaAuto')).toBe('/')
-    expect(parentPath('/dossiers/Mes%20pi%C3%A8ces')).toBe('/')
+    expect(parentPath('/folders/DemaAuto')).toBe('/')
+    expect(parentPath('/folders/Mes%20pi%C3%A8ces')).toBe('/')
   })
 
   it('remonte un sous-dossier à son parent', () => {
     // Le paramètre porte le chemin complet, encodé : le parent est le chemin
     // moins son dernier segment.
-    expect(parentPath('/dossiers/Maison%2FMaison')).toBe('/dossiers/Maison')
-    expect(parentPath('/dossiers/Maison%2Fsous%2Fencore')).toBe('/dossiers/Maison%2Fsous')
+    expect(parentPath('/folders/Maison%2FMaison')).toBe('/folders/Maison')
+    expect(parentPath('/folders/Maison%2Fsous%2Fencore')).toBe('/folders/Maison%2Fsous')
   })
 
   it('renvoie l’accueil depuis l’accueil ou un chemin inconnu', () => {
@@ -48,13 +48,13 @@ describe('parentPath', () => {
 
 describe('folderHref', () => {
   it('encode le chemin du dossier', () => {
-    expect(folderHref('DemaAuto')).toBe('/dossiers/DemaAuto')
-    expect(folderHref('Mes pièces')).toBe('/dossiers/Mes%20pi%C3%A8ces')
+    expect(folderHref('DemaAuto')).toBe('/folders/DemaAuto')
+    expect(folderHref('Mes pièces')).toBe('/folders/Mes%20pi%C3%A8ces')
   })
 
   it('garde un sous-dossier en un seul segment d’URL', () => {
-    // Même convention que `/fichier/[rel]` : la barre oblique est encodée, la
+    // Même convention que `/files/[rel]` : la barre oblique est encodée, la
     // route reste `[name]`.
-    expect(folderHref('Maison/sous')).toBe('/dossiers/Maison%2Fsous')
+    expect(folderHref('Maison/sous')).toBe('/folders/Maison%2Fsous')
   })
 })

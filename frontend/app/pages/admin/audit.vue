@@ -2,7 +2,7 @@
 import { describeDetail, eventKey, type DetailShape, type JournalEvent } from '~/utils/journal'
 
 /**
- * Journal d'audit (`/admin/journal`).
+ * Journal d'audit (`/admin/audit`).
  *
  * Qui s'est connecté, qui a été refusé, quels jetons ont été créés ou révoqués,
  * quels droits ont changé. C'est ce qu'on relit le jour où un accès surprend —

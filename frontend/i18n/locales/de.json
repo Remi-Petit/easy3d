@@ -335,6 +335,8 @@
     "failed": "Löschen fehlgeschlagen."
   },
   "account": {
+    "tabAccount": "Konto",
+    "tabApi": "API",
     "identity": "Identität",
     "userName": "Benutzername",
     "email": "E-Mail-Adresse",

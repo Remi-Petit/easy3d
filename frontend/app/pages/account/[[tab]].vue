@@ -1,6 +1,9 @@
 <script setup lang="ts">
 /**
- * Mon compte (`/compte`) : identité, mot de passe, et **jetons d'API**.
+ * Mon compte (`/account`) : identité, mot de passe, et **jetons d'API**.
+ *
+ * Deux URL pour une même page : `/account` montre l'identité et le mot de passe,
+ * `/account/api` les jetons (voir la section « Onglets »).
  *
  * Page réservée au compte connecté — la garde `auth.global.ts` a déjà renvoyé
  * vers la connexion qui n'en a pas. Sans gestion des comptes (installation
@@ -14,6 +17,7 @@
 import { TOKEN_DEFAULT_DAYS, TOKEN_DURATIONS, durationKey, expiryKind } from '~/utils/tokens'
 const { t, te } = useI18n()
 const { status, ready, user } = useAuth()
+const route = useRoute()
 const jetons = useTokens()
 onMounted(() => {
   if (status.value.enabled) void jetons.refresh()
@@ -32,6 +36,49 @@ const error = computed(() => {
   const key = `account.errors.${code}`
   return te(key) ? t(key) : t('account.errors.unknown')
 })
+
+// ── Onglets ──────────────────────────────────────────────────────────────
+/**
+ * Deux vues, deux URL : `/account` (identité, mot de passe) et `/account/api`
+ * (jetons). L'onglet **découle de l'URL** : un lien vers `/account/api` ouvre
+ * donc directement les jetons, et le bouton « retour » du navigateur refait le
+ * trajet inverse. Le contenu de l'onglet masqué n'est pas monté (`v-if`/`v-else`).
+ */
+type Onglet = 'compte' | 'api'
+
+/** Segment de chaque onglet : « compte » est la racine de la page. */
+const chemins: Record<Onglet, string> = { compte: '/account', api: '/account/api' }
+
+const onglet = computed<Onglet>(() => (route.params.tab === 'api' ? 'api' : 'compte'))
+
+const refOngletCompte = ref<HTMLButtonElement | null>(null)
+const refOngletApi = ref<HTMLButtonElement | null>(null)
+
+/** Changer d'onglet, c'est changer d'URL : c'est elle qui fait foi. */
+function ouvreOnglet(cible: Onglet) {
+  if (cible !== onglet.value) void navigateTo(chemins[cible])
+}
+
+/**
+ * Un segment inconnu (`/account/xyz`) n'est pas une vue : on revient à l'onglet
+ * par défaut, sans laisser l'adresse fautive dans l'historique.
+ */
+watchEffect(() => {
+  const segment = route.params.tab
+  if (segment !== undefined && segment !== '' && segment !== 'api') {
+    void navigateTo(chemins.compte, { replace: true })
+  }
+})
+
+/** Flèches gauche/droite : on passe d'un onglet à l'autre, focus compris. */
+function ongletTouches(e: KeyboardEvent) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+  e.preventDefault()
+  const suivant: Onglet = onglet.value === 'compte' ? 'api' : 'compte'
+  const cible = suivant === 'compte' ? refOngletCompte.value : refOngletApi.value
+  ouvreOnglet(suivant)
+  cible?.focus()
+}
 
 // ── Mot de passe ─────────────────────────────────────────────────────────
 const password = reactive({ current: '', next: '', again: '' })
@@ -128,8 +175,53 @@ const quand = (valeur: number | null) =>
 </script>
 
 <template>
-  <div class="admin">
-    <div class="admin__col">
+  <div class="account">
+    <!--
+      Deux onglets, deux URL : `/account` (identité, mot de passe) et
+      `/account/api` (jetons). C'est un vrai `tablist` : les flèches
+      gauche/droite passent d'un onglet à l'autre, et l'URL suit.
+    -->
+    <div class="account__tabs" role="tablist" :aria-label="t('nav.account')">
+      <button
+        id="onglet-compte"
+        ref="refOngletCompte"
+        type="button"
+        role="tab"
+        class="account__tab"
+        :class="{ 'account__tab--on': onglet === 'compte' }"
+        :aria-selected="onglet === 'compte'"
+        :tabindex="onglet === 'compte' ? 0 : -1"
+        aria-controls="panneau-compte"
+        @click="ouvreOnglet('compte')"
+        @keydown="ongletTouches"
+      >
+        {{ t('account.tabAccount') }}
+      </button>
+      <button
+        id="onglet-api"
+        ref="refOngletApi"
+        type="button"
+        role="tab"
+        class="account__tab"
+        :class="{ 'account__tab--on': onglet === 'api' }"
+        :aria-selected="onglet === 'api'"
+        :tabindex="onglet === 'api' ? 0 : -1"
+        aria-controls="panneau-api"
+        @click="ouvreOnglet('api')"
+        @keydown="ongletTouches"
+      >
+        {{ t('account.tabApi') }}
+      </button>
+    </div>
+
+    <!-- Compte : identité puis mot de passe. -->
+    <div
+      v-if="onglet === 'compte'"
+      id="panneau-compte"
+      role="tabpanel"
+      aria-labelledby="onglet-compte"
+      class="admin__col"
+    >
       <section class="admin__card">
         <h2 class="admin__title">{{ t('account.identity') }}</h2>
         <dl class="admin__applied">
@@ -200,7 +292,14 @@ const quand = (valeur: number | null) =>
       </section>
     </div>
 
-    <div class="admin__col">
+    <div
+      v-else
+      id="panneau-api"
+      role="tabpanel"
+      aria-labelledby="onglet-api"
+      class="admin__col"
+    >
+      <!-- API : les jetons, qui servent aux agents sans navigateur. -->
       <section class="admin__card">
         <h2 class="admin__title">
           {{ t('account.tokens') }}

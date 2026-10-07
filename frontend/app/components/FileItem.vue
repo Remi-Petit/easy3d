@@ -21,8 +21,8 @@ const isGcode = computed(() => viewer.value === 'gcode')
  * mode `3d` (en mode `image` on préfère l'aperçu statique du slicer).
  */
 const show3d = computed(() => showsViewer(props.file.rel, props.displayMode))
-/** Chemin relatif encodé -> URL `/fichier/[rel]`. */
-const href = computed(() => `/fichier/${encodeURIComponent(props.file.rel)}`)
+/** Chemin relatif encodé -> URL `/files/[rel]`. */
+const href = computed(() => `/files/${encodeURIComponent(props.file.rel)}`)
 
 /** Aperçu statique image si le mode "image" est actif et qu'une image existe. */
 const showImage = computed(() => props.displayMode === 'image' && !!props.file.image)

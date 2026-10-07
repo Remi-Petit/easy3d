@@ -3,6 +3,22 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  // **Un seul worker**, et ce n'est pas un choix de confort.
+  //
+  // Le serveur de dev Nuxt tourne dans un processus **forké** qui se tue au
+  // **premier rejet de promesse non capturé** — le parent le relance alors, et
+  // le port reste fermé pendant la recompilation. Or, sous plusieurs workers,
+  // les navigateurs réinitialisent leurs sockets WebSocket en pleine écriture
+  // (onglet fermé) et le `ws` embarqué par crossws rejette dans un chemin que
+  // rien, côté application, ne peut intercepter (`NodePeer.send()` est
+  // synchrone). Résultat : environ deux exécutions sur trois voyaient le serveur
+  // de dev mourir en pleine campagne, et tous les tests suivants échouaient en
+  // `ERR_CONNECTION_REFUSED`.
+  //
+  // Ce n'est pas un défaut du code testé : le conteneur sert un build de
+  // production, sans fork ni surveillance, et n'est pas concerné. En série, la
+  // campagne est passée 16/16 à chaque essai.
+  workers: 1,
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   // Le serveur de dev **compile à la demande** : la première visite d'une page

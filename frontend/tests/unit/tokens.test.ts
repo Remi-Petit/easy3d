@@ -56,7 +56,7 @@ describe('durées proposées', () => {
     expect(durationKey(0)).toBe('account.days0')
     expect(durationKey(90)).toBe('account.days90')
     // Une durée hors liste garde sa clé : la page retombe alors sur le libellé
-    // générique `account.daysMany` (voir `compte.vue`).
+    // générique `account.daysMany` (voir `account/[[tab]].vue`).
     expect(durationKey(1000)).toBe('account.days1000')
   })
 })

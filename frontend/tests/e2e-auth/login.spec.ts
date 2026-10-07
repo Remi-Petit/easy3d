@@ -56,11 +56,11 @@ test('sans session, le catalogue mène à la connexion', async ({ page }) => {
 })
 
 test('sans session, l’administration mène aussi à la connexion', async ({ page }) => {
-  await page.goto('/admin/journal')
+  await page.goto('/admin/audit')
 
   await expect(page).toHaveURL((url) => url.pathname === '/login', { timeout: 30_000 })
   // Le chemin demandé voyage avec la redirection : on repart d'où l'on venait.
-  expect(new URL(page.url()).searchParams.get('redirect')).toBe('/admin/journal')
+  expect(new URL(page.url()).searchParams.get('redirect')).toBe('/admin/audit')
 })
 
 test('la connexion par mot de passe ouvre le catalogue, la déconnexion le referme', async ({
@@ -111,12 +111,12 @@ test('le SSO traverse le fournisseur et ouvre une session', async ({ page }) => 
 test('l’administration liste les comptes et le journal garde la connexion', async ({ page }) => {
   await seConnecter(page)
 
-  await page.goto('/admin/comptes')
+  await page.goto('/admin/accounts')
   await expect(page.locator('h1')).toHaveText('Comptes', { timeout: 30_000 })
   // L'administrateur créé au démarrage figure dans la liste.
   await expect(page.locator('.admin__item', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
 
-  await page.goto('/admin/journal')
+  await page.goto('/admin/audit')
   await expect(page.locator('h1')).toHaveText('Journal', { timeout: 30_000 })
   // La connexion qui vient d'avoir lieu est journalisée : c'est un témoin, pas
   // une navigation dans le catalogue (qui, elle, n'y figure pas).

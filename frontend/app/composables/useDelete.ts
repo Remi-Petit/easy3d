@@ -63,9 +63,9 @@ export function useDelete() {
       const current = path.slice(prefix.length)
       return current === rel || current.startsWith(`${rel}/`)
     }
-    const isFile = path.startsWith('/fichier/')
-    const isFolder = path.startsWith('/dossiers/')
-    if (!(isFile && under('/fichier/')) && !(isFolder && under('/dossiers/'))) return
+    const isFile = path.startsWith('/files/')
+    const isFolder = path.startsWith('/folders/')
+    if (!(isFile && under('/files/')) && !(isFolder && under('/folders/'))) return
 
     const parent = parentOf(rel)
     await navigateTo(parent ? folderHref(parent) : '/')
