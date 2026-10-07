@@ -45,6 +45,10 @@
   --muted: #94a3b8;
   --accent: #6366f1;
   --accent-2: #22d3ee;
+  /* Troisième teinte d'accent : les cinq familles du journal d'audit en ont
+     besoin (connexions, refus, jetons, comptes, rôles), et la palette n'en
+     proposait que quatre. */
+  --accent-3: #c084fc;
   /* Accent très dilué : fond des éléments « actifs » (puces de filtre). */
   --accent-soft: rgba(99, 102, 241, 0.16);
   --ok: #34d399;
@@ -1890,15 +1894,10 @@ select.admin__input option {
 
 /* ---------- Journal d'audit ---------- */
 /*
- * Un tableau **pleine largeur** : le journal se parcourt en colonnes (qui, quoi,
- * quand), et chaque colonne garde sa largeur d'une ligne à l'autre. C'est ce que
- * la grille à deux colonnes de la page Comptes ne permettait pas — la moitié
- * droite restait vide.
- *
- * La rangée de commandes, elle, n'a rien de propre : c'est `.toolbar` (voir plus
- * haut), donc exactement la facture du catalogue — champ large, boutons étirés à
- * la même hauteur. Seule la marge du bas est neutralisée : ici, l'espace entre
- * les rangées est porté par `.audit`.
+ * La page : une rangée de commandes (celle du catalogue, voir `.toolbar` un peu
+ * plus haut), puis le journal — un `UTable` de Nuxt UI (TanStack Table), avec la
+ * pagination de `UPagination`. Ce qui est écrit ici, c'est l'**habillage** : les
+ * couleurs de familles, la largeur des colonnes, l'en-tête collant.
  */
 .audit {
   display: flex;
@@ -1923,18 +1922,36 @@ select.admin__input option {
   margin: 0;
 }
 
+/*
+ * Racine du tableau : Nuxt UI y met `overflow-auto`, ce qui en fait un
+ * conteneur de défilement — et un en-tête `sticky` ne colle alors plus qu'à
+ * *lui*, qui ne défile jamais. On rend donc le défilement à la page : l'en-tête
+ * se fixe en haut du panneau, comme la barre du catalogue.
+ */
+.audit .audit__table-root {
+  overflow: visible;
+}
+
 .audit__table {
   width: 100%;
-  border-collapse: collapse;
-  /* Largeurs fixes : la date et l'adresse ne dansent pas d'une ligne à
-     l'autre, et le sujet / le détail prennent la place restante. */
+  /* Largeurs fixes : la date et l'adresse ne dansent pas d'une ligne à l'autre,
+     et le sujet / le détail prennent la place restante. */
   table-layout: fixed;
   font-size: 13px;
 }
 
-.audit__table th {
+/* En-tête collant (voir la racine ci-dessus) : il reste sous les yeux pendant
+   qu'on lit la page, et son fond est opaque — sinon les lignes passeraient
+   dessous. */
+.audit .audit__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+.audit__th {
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 11.5px;
   font-weight: 700;
@@ -1943,11 +1960,21 @@ select.admin__input option {
   text-transform: uppercase;
 }
 
-.audit__table td {
+/*
+ * Cellules : Nuxt UI les passe en `nowrap` (une valeur ne se coupe pas au
+ * milieu). Ici, le sujet et le détail doivent pouvoir revenir à la ligne, sinon
+ * la colonne du sujet déborde au lieu de se replier.
+ */
+.audit__td {
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
   color: var(--muted);
+  white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Date et adresse tiennent sur une ligne : on ne les coupe pas. */
+.audit__nowrap {
+  white-space: nowrap;
 }
 
 /*
@@ -1963,13 +1990,24 @@ select.admin__input option {
 .audit__table th:nth-child(5) { width: 150px; }
 .audit__table th:nth-child(6) { width: 95px; }
 
+/* Le type d'événement, avec sa couleur de famille : un refus (rouge) et une
+   connexion (vert) se distinguent sans lire la ligne. */
+.audit__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.audit__kind--sessions { color: var(--ok); }
+.audit__kind--refusals { color: var(--err); }
+.audit__kind--tokens { color: var(--accent-2); }
+.audit__kind--accounts { color: var(--accent); }
+.audit__kind--roles { color: var(--accent-3); }
+
 /* Un refus se repère sans lire la ligne : c'est ce qu'on vient chercher. */
 .audit__row--alert td:first-child {
   border-left: 2px solid var(--err);
-}
-
-.audit__row--alert .audit__kind {
-  color: var(--err);
 }
 
 .audit__table tbody tr:hover td {
@@ -1977,9 +2015,21 @@ select.admin__input option {
   color: var(--text);
 }
 
-.audit__when,
-.audit__ip {
-  white-space: nowrap;
+/* Pagination : la taille de page à gauche, les numéros à droite. */
+.audit__pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audit__perpage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 /* ---------- Comptes utilisateurs ---------- */

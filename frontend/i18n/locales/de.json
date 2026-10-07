@@ -430,6 +430,7 @@
     "count": "{count} Ereignisse",
     "filtered": "{count} von {total}",
     "emptyFiltered": "Nichts entspricht diesen Filtern.",
+    "perPage": "Pro Seite",
     "errors": {
       "load": "Das Log konnte nicht gelesen werden."
     },

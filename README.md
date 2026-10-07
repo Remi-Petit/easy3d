@@ -45,7 +45,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 440 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 441 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -376,11 +376,17 @@ en attente de validation, pas d'adresse e-mail chez le fournisseur…), l'adress
 IP et le navigateur (au survol de la ligne).
 
 La page se lit comme un **tableau** pleine largeur (date, événement, compte,
-sujet, détail, adresse), et trois filtres s'y combinent : une **période**
-(24 h, 7 jours, 30 jours), des **familles** d'événements — sessions, refus,
-jetons, comptes, rôles, chacune avec son nombre — et un champ de **recherche**
-qui couvre tout ce qui est affiché : compte, sujet, détail traduit, adresse. Les
-refus portent un trait rouge, pour se repérer sans lire.
+sujet, détail, adresse) : en-tête **collant**, parcours **page par page**
+(25, 50 ou 100 lignes), et une **couleur et une icône par famille** — un refus ne
+se lit pas comme une connexion. Le tableau vient de Nuxt UI (`UTable`, TanStack
+Table) : ce qui est écrit à la main ici, c'est ce que ce journal a de
+particulier, pas la mécanique du tableau.
+
+Trois filtres s'y combinent : une **période** (24 h, 7 jours, 30 jours), des
+**familles** d'événements — sessions, refus, jetons, comptes, rôles, chacune avec
+son nombre — et un champ de **recherche** qui couvre tout ce qui est affiché :
+compte, sujet, détail traduit, adresse. Les refus portent un trait rouge, pour se
+repérer sans lire.
 
 Deux principes : **aucun secret n'y entre** — ni mot de passe, ni jeton (seul son
 nom et sa durée apparaissent) — et la liste est **bornée** aux 5000 derniers

@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import {
   describeDetail,
+  eventFamily,
   eventKey,
   EVENT_FAMILY_LIST,
+  EVENT_ICONS,
   familyCounts,
   filterEvents,
   sortEvents,
@@ -134,8 +137,25 @@ function detailText(event: JournalEvent): string {
   }
 }
 
+/** Une ligne du tableau : l'événement, et tout ce qu'il faut pour l'afficher. */
+type Ligne = {
+  /** Code stable du type : c'est lui qui porte la famille, l'icône et la couleur. */
+  kind: string
+  famille: EventFamily | null
+  icone: string
+  libelle: string
+  date: string
+  acteur: string
+  sujet: string
+  detail: string
+  ip: string
+  /** Le client HTTP, montré au survol de la ligne. */
+  agent: string
+  refus: boolean
+}
+
 /** Une ligne : le type, puis de quoi le situer (qui, quoi, quand). */
-const lignes = computed(() => {
+const lignes = computed<Ligne[]>(() => {
   const retenus = sortEvents(
     filterEvents(
       events.value,
@@ -150,13 +170,80 @@ const lignes = computed(() => {
     tri.value,
   )
 
-  return retenus.map((event) => ({
-    event,
-    kind: kindLabel(event.kind),
-    detail: detailText(event),
-    refus: estRefus(event.kind),
-    quand: quand(event.at),
-  }))
+  return retenus.map((event) => {
+    const famille = eventFamily(event.kind)
+    return {
+      kind: event.kind,
+      famille,
+      // Une famille inconnue (type d'un backend plus récent) reste lisible : le
+      // point neutre plutôt qu'une icône qui voudrait dire quelque chose.
+      icone: famille ? EVENT_ICONS[famille] : 'i-lucide-dot',
+      libelle: kindLabel(event.kind),
+      date: quand(event.at),
+      acteur: event.actor ?? '—',
+      sujet: event.subject || '—',
+      detail: detailText(event) || '—',
+      ip: event.ip || '—',
+      agent: event.user_agent,
+      refus: estRefus(event.kind),
+    }
+  })
+})
+
+/**
+ * Les colonnes, décrites pour TanStack (le moteur de `UTable`) : Nuxt UI les
+ * habille, la page n'écrit plus de `<td>`.
+ *
+ * Le libellé du type est pris sur `libelle` — sa valeur **traduite** — et c'est
+ * la seule colonne qui a un rendu à elle (voir le gabarit) : l'icône et la
+ * couleur de la famille.
+ */
+const colonnes = computed<TableColumn<Ligne>[]>(() => [
+  {
+    accessorKey: 'date',
+    header: t('journal.col.when'),
+    meta: { class: { td: 'audit__nowrap' } },
+  },
+  { accessorKey: 'libelle', header: t('journal.col.kind') },
+  { accessorKey: 'acteur', header: t('journal.col.actor') },
+  { accessorKey: 'sujet', header: t('journal.col.subject') },
+  { accessorKey: 'detail', header: t('journal.col.detail') },
+  {
+    accessorKey: 'ip',
+    header: t('journal.col.ip'),
+    meta: { class: { td: 'audit__nowrap' } },
+  },
+])
+
+/**
+ * La seule classe qui dépend de la ligne : un refus porte un trait rouge
+ * (l'API de Nuxt UI accepte une fonction, voir `meta.class.tr`).
+ */
+const meta = computed(() => ({
+  class: {
+    tr: (row: { original: Ligne }) => (row.original.refus ? 'audit__row--alert' : ''),
+  },
+}))
+
+// ── Pagination ──────────────────────────────────────────────────────────
+/** Tailles de page proposées : le journal se lit par petits bouts, ou par gros. */
+const TAILLES = [25, 50, 100]
+
+const page = ref(1)
+const taillePage = ref(TAILLES[0])
+
+/** Les lignes de la page courante (`UPagination` travaille en pages de 1). */
+const pageCourante = computed(() =>
+  lignes.value.slice((page.value - 1) * taillePage.value, page.value * taillePage.value),
+)
+
+/**
+ * Toucher à un filtre ramène à la première page : sans ça, resserrer la
+ * recherche laisserait sur une page devenue vide, et on croirait le journal
+ * vide.
+ */
+watch([recherche, famillesChoisies, periode, taillePage], () => {
+  page.value = 1
 })
 </script>
 
@@ -284,42 +371,72 @@ const lignes = computed(() => {
         <span class="admin__hint">{{ t('journal.hint') }}</span>
       </p>
 
-      <table v-if="lignes.length" class="audit__table">
-        <thead>
-          <tr>
-            <th scope="col">{{ t('journal.col.when') }}</th>
-            <th scope="col">{{ t('journal.col.kind') }}</th>
-            <th scope="col">{{ t('journal.col.actor') }}</th>
-            <th scope="col">{{ t('journal.col.subject') }}</th>
-            <th scope="col">{{ t('journal.col.detail') }}</th>
-            <th scope="col">{{ t('journal.col.ip') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="(ligne, index) in lignes"
-            :key="index"
-            :class="{ 'audit__row--alert': ligne.refus }"
-            :title="ligne.event.user_agent"
+      <!--
+        Le tableau vient de Nuxt UI (`UTable`, TanStack Table sous le capot) : il
+        apporte l'en-tête collant, l'état vide, le rendu des cellules et les
+        colonnes. Ce qui reste à cette page, c'est ce que ce journal a de
+        particulier : les familles, leurs couleurs, et les refus marqués.
+      -->
+      <UTable
+        :data="pageCourante"
+        :columns="colonnes"
+        :loading="loading"
+        sticky="header"
+        :meta="meta"
+        :ui="{
+          root: 'audit__table-root',
+          base: 'audit__table',
+          thead: 'audit__head',
+          th: 'audit__th',
+          td: 'audit__td',
+          empty: 'admin__empty',
+        }"
+      >
+        <!-- Le type d'événement : l'icône et la couleur de sa famille — un refus
+             ne se lit pas comme une connexion. -->
+        <template #libelle-cell="{ row }">
+          <span
+            class="audit__kind"
+            :class="row.original.famille && `audit__kind--${row.original.famille}`"
           >
-            <td class="audit__when">{{ ligne.quand }}</td>
-            <td class="audit__kind">{{ ligne.kind }}</td>
-            <td>{{ ligne.event.actor ?? '—' }}</td>
-            <td class="audit__subject">{{ ligne.event.subject || '—' }}</td>
-            <td>{{ ligne.detail || '—' }}</td>
-            <td class="audit__ip">{{ ligne.event.ip || '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="admin__empty">
-        {{
-          loading
-            ? t('common.loading')
-            : filtreActif
-              ? t('journal.emptyFiltered')
-              : t('journal.empty')
-        }}
-      </p>
+            <UIcon :name="row.original.icone" aria-hidden="true" />
+            {{ row.original.libelle }}
+          </span>
+        </template>
+
+        <!-- La date porte le client HTTP en infobulle : c'est là qu'on va le
+             chercher, et ça ne tient pas dans une colonne. -->
+        <template #date-cell="{ row }">
+          <span :title="row.original.agent">{{ row.original.date }}</span>
+        </template>
+
+        <template #empty>
+          {{
+            loading
+              ? t('common.loading')
+              : filtreActif
+                ? t('journal.emptyFiltered')
+                : t('journal.empty')
+          }}
+        </template>
+      </UTable>
+
+      <!-- Pagination : la taille de page à gauche, les numéros à droite. Elle
+           n'apparaît que s'il y a plus d'une page à parcourir. -->
+      <div v-if="lignes.length > taillePage" class="audit__pages">
+        <label class="audit__perpage">
+          {{ t('journal.perPage') }}
+          <select v-model.number="taillePage" class="admin__input admin__input--short">
+            <option v-for="taille in TAILLES" :key="taille" :value="taille">{{ taille }}</option>
+          </select>
+        </label>
+        <UPagination
+          v-model:page="page"
+          :items-per-page="taillePage"
+          :total="lignes.length"
+          :sibling-count="1"
+        />
+      </div>
     </template>
   </div>
 </template>
