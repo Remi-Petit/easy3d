@@ -196,3 +196,41 @@ test('recherche IA : configurée, elle s’ouvre et explique l’échec du fourn
   await expect(page.locator('.ai')).toHaveCount(0)
   await expect(page.locator('.file-grid').first()).toBeVisible()
 })
+
+test('recherche IA : changer de page referme le panneau', async ({ page }) => {
+  await ouvrirCarteIA(page)
+  await configurerOllamaFerme(page)
+
+  // Panneau ouvert sur le catalogue : il recouvre la page **sans la démonter** —
+  // `v-show`, et non `v-if`, dans `layouts/default.vue` — parce que démonter la
+  // page gelait la navigation (Nuxt n'y rafraîchit la route du layout qu'au
+  // rendu de la page).
+  await page.goto('/')
+  await page.getByRole('button', { name: /IA/ }).click()
+  await expect(page.locator('.ai')).toBeVisible()
+  await expect(page.locator('.page')).toBeHidden()
+
+  // La barre latérale est le seul chemin qui reste cliquable pendant que le
+  // panneau recouvre la liste : c'est par elle qu'on change de page. Le mode est
+  // un état partagé (voir `useAiSearch`) : sans garde, le panneau suivait la
+  // navigation et masquait la page demandée.
+  await page.getByRole('link', { name: 'Administration' }).click()
+  await expect(page.locator('.page')).toBeVisible()
+  await expect(page.locator('.ai')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Administration', level: 1 })).toBeVisible()
+
+  // Même chose depuis un dossier, où la barre du catalogue est toujours là
+  // (le dossier s'appelle `name`, seul un fichier occupe `rel`) : c'est là qu'on
+  // poserait une question avant de revenir au catalogue.
+  await page.getByRole('link', { name: 'Modèles' }).click()
+  const dossier = page.locator('a[href*="/folders/"]').first()
+  await expect(dossier).toBeVisible()
+  await dossier.click()
+  await expect(page.locator('a[href*="/files/"]').first()).toBeVisible()
+
+  await page.getByRole('button', { name: /IA/ }).click()
+  await expect(page.locator('.ai')).toBeVisible()
+  await page.getByRole('link', { name: 'Modèles' }).click()
+  await expect(page.locator('a[href*="/folders/"]').first()).toBeVisible()
+  await expect(page.locator('.ai')).toHaveCount(0)
+})
