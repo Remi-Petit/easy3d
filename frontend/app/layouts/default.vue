@@ -78,8 +78,19 @@ const title = computed(() => {
 })
 
 const isHome = computed(() => route.path === '/')
-/** Barre de recherche du catalogue : ni sur la vue fichier, ni sur l'admin. */
-const showFilter = computed(() => !route.params.rel && !isAdmin.value)
+
+/**
+ * Barre de recherche du catalogue : ni sur la vue d'un fichier, ni ailleurs
+ * qu'au catalogue.
+ *
+ * « Mon compte » n'est pas sous `/admin`, mais n'a pas plus à filtrer des
+ * modèles qu'une page d'administration : sans cette exclusion, sa route
+ * héritait de la barre entière — recherche, tri, envoi de fichiers et puces de
+ * formats, tous branchés sur le catalogue et donc sans effet ici.
+ */
+const showFilter = computed(
+  () => !route.params.rel && !isAdmin.value && !isAccount.value,
+)
 
 /**
  * Recherche assistée ouverte, et applicable ici.
@@ -293,11 +304,11 @@ const navUi = {
 
           <!-- Compte connecté (`EASY3D_AUTH`). Absent d'une installation sans
                comptes : le pied de sidebar est alors celui d'avant. -->
-          <div v-if="authUser" class="account">
-            <span class="account__who" :title="authUser.email">{{ authUser.username }}</span>
+          <div v-if="authUser" class="sidebar-user">
+            <span class="sidebar-user__who" :title="authUser.email">{{ authUser.username }}</span>
             <button
               type="button"
-              class="account__out"
+              class="sidebar-user__out"
               :title="$t('auth.signOut')"
               :aria-label="$t('auth.signOut')"
               @click="signOut()"

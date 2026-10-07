@@ -42,7 +42,7 @@ async function seConnecter(page: Page): Promise<void> {
   await saisirIdentifiants(page, ADMIN_EMAIL, ADMIN_PASSWORD)
 
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
-  await expect(page.locator('.account__who')).toHaveText(ADMIN_USERNAME)
+  await expect(page.locator('.sidebar-user__who')).toHaveText(ADMIN_USERNAME)
 }
 
 test('sans session, le catalogue mène à la connexion', async ({ page }) => {
@@ -70,7 +70,7 @@ test('la connexion par mot de passe ouvre le catalogue, la déconnexion le refer
 
   // Le compte est bien celui que l'on a créé au démarrage, et le lien SSO est
   // proposé puisque le serveur annonce un fournisseur.
-  await expect(page.locator('.account__who')).toHaveAttribute('title', ADMIN_EMAIL)
+  await expect(page.locator('.sidebar-user__who')).toHaveAttribute('title', ADMIN_EMAIL)
 
   await page.getByRole('button', { name: 'Se déconnecter' }).click()
 
@@ -104,7 +104,7 @@ test('le SSO traverse le fournisseur et ouvre une session', async ({ page }) => 
 
   // Le compte n'existait pas : c'est le provisionnement automatique qui l'a
   // créé, avec le rôle livré `lecteur` — d'où le catalogue accessible.
-  await expect(page.locator('.account__who')).toHaveText(SSO_USERNAME)
+  await expect(page.locator('.sidebar-user__who')).toHaveText(SSO_USERNAME)
   await expect(page.locator('h1')).toContainText('Models')
 })
 
@@ -128,4 +128,47 @@ test('l’administration liste les comptes et le journal garde la connexion', as
   await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
   await page.locator('.audit .toolbar .search input').fill('personne-de-ce-nom')
   await expect(page.locator('.admin__empty')).toBeVisible()
+})
+
+test('la barre du catalogue ne suit pas sur « mon compte »', async ({ page }) => {
+  await seConnecter(page)
+
+  // Le catalogue, lui, a la sienne.
+  await page.goto('/')
+  await expect(page.locator('.topbar .search input')).toBeVisible()
+
+  // « Mon compte » ne filtre pas des modèles : ni recherche, ni tri, ni envoi de
+  // fichiers, ni puces de formats. Sans garde, sa route héritait de la barre
+  // entière — branchée sur le catalogue, donc sans effet ici.
+  for (const onglet of ['/account', '/account/api', '/account/mcp']) {
+    await page.goto(onglet)
+    await expect(page.locator('.account__tabs')).toBeVisible()
+    await expect(page.locator('.topbar')).toHaveCount(0)
+    await expect(page.locator('.ai-btn')).toHaveCount(0)
+  }
+
+  // L'administration a la sienne (le journal), et pas celle du catalogue.
+  await page.goto('/admin/audit')
+  await expect(page.locator('.audit .toolbar')).toBeVisible()
+})
+
+test('les onglets de « mon compte » occupent toute la largeur', async ({ page }) => {
+  await seConnecter(page)
+
+  // Le contenu d'un onglet ne décide pas de la largeur de la page : les deux vues
+  // n'ont pas le même contenu (identité et mot de passe d'un côté, la liste des
+  // jetons de l'autre), et un panneau qui suit son contenu — ou qui se centre —
+  // fait sauter la page au changement d'onglet.
+  for (const onglet of ['/account', '/account/api', '/account/mcp']) {
+    await page.goto(onglet)
+    await expect(page.locator('[role="tabpanel"]')).toBeVisible()
+
+    const ecart = await page.evaluate(() => {
+      const conteneur = document.querySelector('.account')
+      const panel = document.querySelector('[role="tabpanel"]')
+      if (!conteneur || !panel) return -1
+      return Math.abs(conteneur.getBoundingClientRect().width - panel.getBoundingClientRect().width)
+    })
+    expect(ecart, `onglet ${onglet}`).toBeLessThanOrEqual(1)
+  }
 })
