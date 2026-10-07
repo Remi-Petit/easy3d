@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import frLocale from '../../i18n/locales/fr.json'
 import {
   SOON_DAYS,
   TOKEN_DEFAULT_DAYS,
@@ -59,4 +60,22 @@ describe('durées proposées', () => {
     // générique `account.daysMany` (voir `account/[[tab]].vue`).
     expect(durationKey(1000)).toBe('account.days1000')
   })
+})
+
+/**
+ * Les refus de **portée** d'un jeton viennent du backend sous forme de codes
+ * (`auth/tokens.rs`), que la page traduit par `account.errors.<code>`. Le test
+ * i18n ne peut pas les voir : la clé est construite, jamais écrite en toutes
+ * lettres. On vérifie donc ici que chaque code pouvant sortir du formulaire a un
+ * libellé — sans quoi la page afficherait « Opération impossible », qui ne dit
+ * pas quoi corriger.
+ */
+describe('libellés des refus de jeton', () => {
+  const erreurs = frLocale.account.errors as Record<string, string>
+
+  for (const code of ['unknown_permission', 'permission_required']) {
+    it(`${code} est traduit`, () => {
+      expect(erreurs[code]).toBeTruthy()
+    })
+  }
 })

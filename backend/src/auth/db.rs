@@ -40,7 +40,7 @@ pub const ADMIN_ROLE: &str = "0199e3d0-0000-7000-8000-000000000001";
 pub const READER_ROLE: &str = "0199e3d0-0000-7000-8000-000000000002";
 
 /// Version du schéma. À incrémenter en ajoutant une table ou une colonne.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Schéma initial (v1).
 const SCHEMA_V1: &str = r#"
@@ -148,6 +148,17 @@ CREATE INDEX IF NOT EXISTS auth_events_at ON auth_events(at DESC);
 CREATE INDEX IF NOT EXISTS auth_events_actor ON auth_events(actor_uuid);
 "#;
 
+/// Schéma v3 : **portée des jetons d'API**.
+///
+/// Un jeton peut être limité à une partie des droits de son compte : la colonne
+/// porte un tableau JSON d'identifiants (`["catalog.read","ai.use"]`).
+/// `NULL` = **aucune restriction** (les droits du compte) — c'est le cas de tous
+/// les jetons créés avant que ce réglage existe, et ils continuent donc de
+/// fonctionner à l'identique.
+const SCHEMA_V3: &str = r#"
+ALTER TABLE api_tokens ADD COLUMN permissions TEXT;
+"#;
+
 /// Horodatage courant, en secondes depuis l'époque.
 ///
 /// Les dates sont stockées en entier (et non en texte ISO) : les comparaisons
@@ -214,6 +225,17 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     if version < 2 {
         conn.execute_batch(SCHEMA_V2).map_err(err)?;
     }
+    if version < 3 {
+        // `ALTER TABLE … ADD COLUMN` n'est **pas** idempotent, contrairement au
+        // reste des migrations : une interruption entre l'ajout de la colonne et
+        // la bascule de version ferait échouer la reprise. On tolère donc
+        // explicitement la colonne déjà présente, et seulement celle-là.
+        if let Err(erreur) = conn.execute_batch(SCHEMA_V3)
+            && !erreur.to_string().contains("duplicate column name")
+        {
+            return Err(err(erreur));
+        }
+    }
 
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(err)?;
@@ -234,6 +256,12 @@ pub struct User {
     pub oidc_subject: Option<String>,
     pub disabled: bool,
     pub created_at: i64,
+    /// **Portée du jeton** qui a authentifié la requête, quand il y en a une.
+    ///
+    /// Ce n'est pas une propriété du compte : elle est posée par
+    /// `Auth::resolve_token`, et vaut `None` pour une session navigateur. Les
+    /// droits d'une requête en sont l'intersection (voir `Auth::can`).
+    pub scope: Option<Vec<String>>,
 }
 
 /// Compte en cours de création (UUID et date générés par [`NewUser::new`]).
@@ -273,6 +301,7 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         oidc_subject: row.get(4)?,
         disabled: row.get::<_, i64>(5)? != 0,
         created_at: row.get(6)?,
+        scope: None,
     })
 }
 
@@ -841,17 +870,26 @@ pub struct ApiToken {
     /// Dernière utilisation (dit si le jeton sert encore).
     pub last_used_at: Option<i64>,
     pub expires_at: Option<i64>,
+    /// Droits que le jeton peut exercer. `None` = **aucune restriction** (ceux
+    /// du compte, et l'`admin` garde alors son contournement).
+    pub permissions: Option<Vec<String>>,
 }
 
-const TOKEN_COLUMNS: &str = "uuid, name, created_at, last_used_at, expires_at";
+const TOKEN_COLUMNS: &str = "uuid, name, created_at, last_used_at, expires_at, permissions";
 
 fn row_to_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiToken> {
+    // Colonne JSON. Une valeur **illisible** vaut « aucun droit » et non « sans
+    // restriction » : en cas de doute on réduit la portée, on ne l'élargit pas.
+    let permissions = row
+        .get::<_, Option<String>>(5)?
+        .map(|texte| serde_json::from_str::<Vec<String>>(&texte).unwrap_or_default());
     Ok(ApiToken {
         uuid: row.get(0)?,
         name: row.get(1)?,
         created_at: row.get(2)?,
         last_used_at: row.get(3)?,
         expires_at: row.get(4)?,
+        permissions,
     })
 }
 
@@ -866,11 +904,16 @@ pub fn insert_token(
     name: &str,
     token_hash: &str,
     expires_at: Option<i64>,
+    permissions: Option<&[String]>,
 ) -> Result<(), String> {
+    // `None` reste `NULL` (aucune restriction) : c'est ce qui distingue « tous
+    // les droits à venir » d'une liste, qui elle est figée.
+    let permissions = permissions
+        .map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()));
     conn.execute(
-        "INSERT INTO api_tokens (uuid, user_uuid, name, token_hash, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![uuid, user_uuid, name.trim(), token_hash, now(), expires_at],
+        "INSERT INTO api_tokens (uuid, user_uuid, name, token_hash, created_at, expires_at, permissions)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![uuid, user_uuid, name.trim(), token_hash, now(), expires_at, permissions],
     )
     .map(|_| ())
     .map_err(err)
@@ -893,7 +936,7 @@ pub fn find_token(conn: &Connection, token_hash: &str) -> Result<Option<(ApiToke
     conn.query_row(
         &format!("SELECT {TOKEN_COLUMNS}, user_uuid FROM api_tokens WHERE token_hash = ?1"),
         params![token_hash],
-        |row| Ok((row_to_token(row)?, row.get::<_, String>(5)?)),
+        |row| Ok((row_to_token(row)?, row.get::<_, String>(6)?)),
     )
     .optional()
     .map_err(err)
@@ -1061,6 +1104,60 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// La migration v3 ajoute la colonne `permissions` aux jetons, et se
+    /// **rattrape** si elle a été interrompue entre l'ajout de la colonne et la
+    /// bascule de version — `ALTER TABLE … ADD COLUMN` n'est pas rejouable.
+    #[test]
+    fn la_migration_des_portees_de_jeton_se_rattrape() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("easy3d.db");
+        let conn = open(&path).unwrap();
+
+        let colonnes: Vec<String> = conn
+            .prepare("PRAGMA table_info(api_tokens)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            colonnes.iter().any(|nom| nom == "permissions"),
+            "colonne manquante : {colonnes:?}"
+        );
+
+        // Version remise en arrière **sans** retirer la colonne : la reprise doit
+        // passer au lieu d'échouer sur « duplicate column name ».
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// La portée d'un jeton fait l'aller-retour en base, et `NULL` veut bien dire
+    /// « aucune restriction » (les jetons d'avant la colonne).
+    #[test]
+    fn la_portee_d_un_jeton_fait_l_aller_retour() {
+        let (_dir, conn) = base();
+        ensure_builtin_roles(&conn).unwrap();
+        let user = NewUser::new("bob", "bob@exemple.fr", None);
+        insert_user(&conn, &user).unwrap();
+
+        insert_token(&conn, "t1", &user.uuid, "sans", "h1", None, None).unwrap();
+        let portee = vec!["catalog.read".to_string(), "ai.use".to_string()];
+        insert_token(&conn, "t2", &user.uuid, "avec", "h2", None, Some(&portee)).unwrap();
+
+        let (sans, _) = find_token(&conn, "h1").unwrap().unwrap();
+        assert_eq!(sans.permissions, None, "NULL = aucune restriction");
+
+        let (avec, uuid) = find_token(&conn, "h2").unwrap().unwrap();
+        assert_eq!(avec.permissions, Some(portee));
+        assert_eq!(uuid, user.uuid);
     }
 
     #[test]

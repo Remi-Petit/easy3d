@@ -20,6 +20,8 @@ export interface TokenView {
   last_used_at: number | null
   /** `null` = sans expiration (le jeton vit jusqu'à sa révocation). */
   expires_at: number | null
+  /** Droits que le jeton peut exercer, ou `null` s'il n'est pas restreint. */
+  permissions: string[] | null
 }
 
 /** Réponse de la création : le jeton en clair, **une seule fois**. */
@@ -65,13 +67,17 @@ export function useTokens() {
    * empreinte. La durée, elle, est appliquée **à chaque appel** côté serveur :
    * un jeton arrivé à échéance est refusé même si sa ligne est encore en base.
    */
-  async function create(name: string, days: number): Promise<boolean> {
+  async function create(
+    name: string,
+    days: number,
+    permissions: string[] | null = null,
+  ): Promise<boolean> {
     busy.value = true
     errorCode.value = null
     try {
       created.value = await $fetch<CreatedToken>('/api/tokens', {
         method: 'POST',
-        body: { name, expires_in_days: days },
+        body: { name, expires_in_days: days, permissions },
       })
       await refresh()
       return true

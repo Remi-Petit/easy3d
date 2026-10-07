@@ -14,13 +14,23 @@
  * hérite des droits du compte — avec une durée de vie au choix, pour qu'un jeton
  * oublié finisse par mourir tout seul.
  */
+import type { PermissionInfo } from '~/utils/permissions'
 import { TOKEN_DEFAULT_DAYS, TOKEN_DURATIONS, durationKey, expiryKind } from '~/utils/tokens'
 const { t, te } = useI18n()
 const { status, ready, user } = useAuth()
 const route = useRoute()
 const jetons = useTokens()
 onMounted(() => {
-  if (status.value.enabled) void jetons.refresh()
+  if (!status.value.enabled) return
+  void jetons.refresh()
+  // Le catalogue sert au sélecteur de droits ; sans lui, la restriction n'est
+  // pas proposée du tout (voir `catalogueMesDroits`), plutôt que d'afficher une
+  // liste vide qu'on ne comprendrait pas.
+  void $fetch<PermissionInfo[]>('/api/permissions')
+    .then((liste) => {
+      catalogue.value = liste
+    })
+    .catch(() => {})
 })
 
 // Sans comptes, cette page n'existe pas : on renvoie au catalogue plutôt que
@@ -121,12 +131,51 @@ const newTokenName = ref('')
 const newTokenDays = ref<number>(TOKEN_DEFAULT_DAYS)
 const copied = ref(false)
 
+// ── Portée du jeton (facultative) ────────────────────────────────────────
+/**
+ * Catalogue des droits publié par le backend, et ceux que **ce compte**
+ * détient : on ne propose que ces derniers — on n'accorde pas à un jeton un
+ * droit qu'on n'a pas (le backend refuse, de toute façon).
+ */
+const catalogue = ref<PermissionInfo[]>([])
+const mesDroits = computed(() => new Set(user.value?.permissions ?? []))
+const catalogueMesDroits = computed(() =>
+  catalogue.value.filter((droit) => mesDroits.value.has(droit.id)),
+)
+
+/** Restriction active, et droits cochés — tout est coché à l'activation. */
+const restreindre = ref(false)
+const droitsJeton = ref<string[]>([])
+
+function basculeRestriction() {
+  droitsJeton.value = restreindre.value ? [...mesDroits.value] : []
+}
+
+/**
+ * Création possible : un nom est **obligatoire** (le backend refuse un jeton
+ * sans nom), une portée vide n'aurait pas de sens, et pas deux créations en même
+ * temps. La touche Entrée suit la même règle que le bouton — sinon elle
+ * déclencherait un refus pour rien.
+ */
+const peutCreer = computed(
+  () =>
+    !jetons.busy.value &&
+    !!newTokenName.value.trim() &&
+    (!restreindre.value || droitsJeton.value.length > 0),
+)
+
 /** Horloge partagée : les mentions « expire bientôt » se rafraîchissent seules. */
 const maintenant = useNow()
 
 async function createToken() {
   copied.value = false
-  if (await jetons.create(newTokenName.value, newTokenDays.value)) newTokenName.value = ''
+  const portee = restreindre.value ? droitsJeton.value : null
+  if (!(await jetons.create(newTokenName.value, newTokenDays.value, portee))) return
+  newTokenName.value = ''
+  // La restriction est un réglage **du jeton créé** : on revient au défaut,
+  // sinon le suivant hériterait d'un choix qu'on n'a pas refait.
+  restreindre.value = false
+  droitsJeton.value = []
 }
 
 /** Libellé d'une durée proposée, avec repli sur le libellé générique. */
@@ -305,7 +354,6 @@ const quand = (valeur: number | null) =>
           {{ t('account.tokens') }}
           <span class="admin__count">{{ jetons.tokens.value.length }}</span>
         </h2>
-        <p class="admin__count">{{ t('account.tokensHint') }}</p>
 
         <!-- Le jeton en clair : montré **une fois**, avec de quoi le copier. -->
         <div v-if="jetons.created.value" class="admin__field token__new">
@@ -330,6 +378,11 @@ const quand = (valeur: number | null) =>
                    cessé de fonctionner. -->
               <span v-if="expiryClass(token.expires_at)" :class="expiryClass(token.expires_at)">
                 {{ expiryLabel(token.expires_at) }}
+              </span>
+              <!-- Jeton restreint : on dit à quoi il se limite, sinon il
+                   faudrait le deviner. -->
+              <span v-if="token.permissions" class="accounts__tag">
+                {{ t('account.rightsCount', { count: token.permissions.length }) }}
               </span>
             </span>
             <span class="admin__item-where">
@@ -360,7 +413,7 @@ const quand = (valeur: number | null) =>
         </ul>
         <p v-else class="admin__empty">{{ t('account.noToken') }}</p>
 
-        <div class="admin__field">
+        <div class="admin__field token__form">
           <span class="admin__label">{{ t('account.newToken') }}</span>
           <div class="admin__row">
             <input
@@ -368,6 +421,7 @@ const quand = (valeur: number | null) =>
               class="admin__input"
               :placeholder="t('account.tokenName')"
               :aria-label="t('account.tokenName')"
+              @keydown.enter.prevent="peutCreer && createToken()"
             />
             <!--
               Durée de vie : `0` (en tête, et par défaut) veut dire « sans
@@ -383,16 +437,38 @@ const quand = (valeur: number | null) =>
                 {{ durationLabel(days) }}
               </option>
             </select>
+          </div>
+          <p class="admin__hint">{{ t('account.durationHint') }}</p>
+
+          <!--
+            Restriction des droits : facultative, et repliée tant qu'on n'y
+            touche pas — la plupart des jetons prennent tous les droits du
+            compte. On ne propose que les droits **du compte** : on n'accorde pas
+            ce qu'on ne détient pas (le backend refuse aussi, de son côté).
+          -->
+          <template v-if="catalogueMesDroits.length">
+            <label class="admin__choice" :class="{ 'admin__choice--on': restreindre }">
+              <input v-model="restreindre" type="checkbox" @change="basculeRestriction" />
+              <span>{{ t('account.limitRights') }}</span>
+            </label>
+            <PermissionPicker
+              v-if="restreindre"
+              v-model="droitsJeton"
+              :permissions="catalogueMesDroits"
+            />
+            <p class="admin__hint">{{ t('account.limitRightsHint') }}</p>
+          </template>
+
+          <div class="admin__field--actions">
             <button
               type="button"
               class="admin__action admin__action--primary"
-              :disabled="jetons.busy.value || !newTokenName.trim()"
+              :disabled="!peutCreer"
               @click="createToken()"
             >
               {{ t('account.create') }}
             </button>
           </div>
-          <p class="admin__hint">{{ t('account.durationHint') }}</p>
         </div>
 
         <p class="admin__hint">{{ t('account.mcpHint') }}</p>

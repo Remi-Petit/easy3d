@@ -6,6 +6,13 @@
 //! révoque quand il veut. Un jeton **hérite des droits du compte** : il n'en
 //! donne jamais plus, et la révocation est immédiate.
 //!
+//! Un jeton peut en outre être **restreint** à une partie des droits de son
+//! compte (`permissions`) : les droits d'une requête sont alors l'intersection
+//! des deux, recalculée à chaque appel (voir `Auth::permissions_for`). Un jeton
+//! restreint ne bénéficie pas du contournement du superutilisateur `admin` —
+//! c'est même là son intérêt : donner à une CI exactement ce qu'elle doit
+//! pouvoir faire, sans plus.
+//!
 //! Deux précautions, et une limite assumée :
 //!
 //! - **seule l'empreinte est stockée** — BLAKE2s-256, un hachage *rapide* : le
@@ -91,6 +98,9 @@ pub struct TokenView {
     pub last_used_at: Option<i64>,
     /// `null` = sans expiration.
     pub expires_at: Option<i64>,
+    /// Droits que le jeton peut exercer, ou `null` quand il n'est pas restreint
+    /// (il a alors ceux de son compte, superutilisateur compris).
+    pub permissions: Option<Vec<String>>,
 }
 
 impl From<&db::ApiToken> for TokenView {
@@ -101,6 +111,7 @@ impl From<&db::ApiToken> for TokenView {
             created_at: token.created_at,
             last_used_at: token.last_used_at,
             expires_at: token.expires_at,
+            permissions: token.permissions.clone(),
         }
     }
 }
@@ -124,6 +135,13 @@ pub struct NewToken {
     /// Durée de vie en jours : `0` (ou absent) = sans expiration.
     #[serde(default)]
     pub expires_in_days: Option<i64>,
+    /// Droits que le jeton pourra exercer, parmi **ceux du compte**.
+    ///
+    /// `null` (ou absent) = aucune restriction. Une liste **vide** est refusée :
+    /// un jeton qui ne peut rien faire n'a pas de raison d'exister, et le laisser
+    /// passer donnerait un agent qui échoue partout sans qu'on devine pourquoi.
+    #[serde(default)]
+    pub permissions: Option<Vec<String>>,
 }
 
 impl Auth {
@@ -137,6 +155,7 @@ impl Auth {
         user_uuid: &str,
         name: &str,
         expires_at: Option<i64>,
+        permissions: Option<&[String]>,
     ) -> Result<(String, db::ApiToken), String> {
         let token = new_token();
         let hash = hash(&token);
@@ -149,7 +168,7 @@ impl Auth {
             // liste, et la ligne ne sert plus à rien. C'est le seul moment où
             // l'occasion se présente sans requête supplémentaire périodique.
             db::purge_expired_tokens(conn)?;
-            db::insert_token(conn, &uuid, user_uuid, &name, &hash, expires_at)
+            db::insert_token(conn, &uuid, user_uuid, &name, &hash, expires_at, permissions)
         })?;
         Ok((
             token,
@@ -159,6 +178,7 @@ impl Auth {
                 created_at: created,
                 last_used_at: None,
                 expires_at,
+                permissions: permissions.map(<[String]>::to_vec),
             },
         ))
     }
@@ -189,6 +209,11 @@ impl Auth {
             .ok()
             .flatten()
             .filter(|user| !user.disabled)?;
+
+        // La portée du jeton **voyage avec le compte** : `Auth::can` la prend en
+        // compte pour tout le reste de la requête (voir `permissions_for`).
+        let mut user = user;
+        user.scope = ticket.permissions.clone();
 
         // Trace d'usage : une écriture minuscule par appel authentifié, et
         // l'interface peut dire quels jetons servent encore.
@@ -225,6 +250,10 @@ pub async fn list(State(state): State<AppState>, caller: AuthUser) -> Response {
 /// jamais ». C'est le choix le plus sûr par défaut — un agent qui s'arrête tout
 /// seul au bout de trois mois sans que personne ne l'ait demandé serait une
 /// surprise désagréable — et l'interface propose les durées usuelles.
+///
+/// `permissions` est facultatif lui aussi : absent, le jeton a **tous** les
+/// droits de son compte ; fourni, il n'a que ceux-là (et jamais plus que ce que
+/// le compte détient au moment de l'appel).
 pub async fn create(
     State(state): State<AppState>,
     caller: AuthUser,
@@ -241,8 +270,32 @@ pub async fn create(
         return auth::error(StatusCode::BAD_REQUEST, "name_too_long");
     }
 
+    // Portée demandée, vérifiée contre les droits **du compte appelant** — et
+    // non contre le catalogue : on ne peut pas accorder à un jeton un droit
+    // qu'on ne détient pas soi-même. Un jeton restreint ne peut donc pas en
+    // engendrer un plus large.
+    let scope = match &request.permissions {
+        None => None,
+        Some(ids) if ids.is_empty() => {
+            return auth::error(StatusCode::BAD_REQUEST, "permission_required")
+        }
+        Some(ids) => {
+            let detenus = match state.auth.permissions_for(&caller.0) {
+                Ok(droits) => droits,
+                Err(e) => return auth::internal(&e),
+            };
+            if ids.iter().any(|id| !detenus.contains(id)) {
+                return auth::error(StatusCode::BAD_REQUEST, "unknown_permission");
+            }
+            Some(ids.clone())
+        }
+    };
+
     let expires_at = expiry_from_days(request.expires_in_days, db::now());
-    match state.auth.issue_token(&caller.0.uuid, name, expires_at) {
+    match state
+        .auth
+        .issue_token(&caller.0.uuid, name, expires_at, scope.as_deref())
+    {
         Ok((token, created)) => {
             // Le nom du jeton, jamais le jeton : le journal n'a pas à devenir un
             // second endroit où un secret dort.
@@ -351,20 +404,20 @@ mod tests {
         // Période passée : le jeton est refusé **même si la ligne est encore
         // là** (le ménage n'a pas forcément tourné).
         let (perime, _) = auth
-            .issue_token(&user.uuid, "vieil agent", Some(db::now() - 1))
+            .issue_token(&user.uuid, "vieil agent", Some(db::now() - 1), None)
             .unwrap();
         assert!(auth.resolve_token(&perime).is_none());
 
         // Encore valable, et sans expiration : les deux passent.
         let (frais, _) = auth
-            .issue_token(&user.uuid, "agent", Some(db::now() + 3_600))
+            .issue_token(&user.uuid, "agent", Some(db::now() + 3_600), None)
             .unwrap();
         assert!(auth.resolve_token(&frais).is_some());
-        let (sans_fin, _) = auth.issue_token(&user.uuid, "éternel", None).unwrap();
+        let (sans_fin, _) = auth.issue_token(&user.uuid, "éternel", None, None).unwrap();
         assert!(auth.resolve_token(&sans_fin).is_some());
 
         // Le ménage (à la création suivante) emporte la ligne expirée.
-        auth.issue_token(&user.uuid, "suivant", None).unwrap();
+        auth.issue_token(&user.uuid, "suivant", None, None).unwrap();
         let restants = auth.tokens_of(&user.uuid).unwrap();
         assert_eq!(restants.len(), 3, "la ligne expirée est retirée : {restants:?}");
         assert!(restants.iter().all(|t| t.name != "vieil agent"));

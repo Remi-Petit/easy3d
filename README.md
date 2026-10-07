@@ -44,7 +44,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 409 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 413 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -252,6 +252,16 @@ expiration, c'est le défaut proposé : un agent ne doit pas s'arrêter tout seu
 sans qu'on l'ait demandé). L'échéance est vérifiée **à chaque appel** — un jeton
 périmé vaut un jeton révoqué, même si sa ligne traîne encore en base — et la
 liste affiche la date, en signalant ceux qui arrivent à terme.
+
+À la création, un jeton peut aussi être **restreint à une partie des droits de
+son compte** : on coche ce qu'il aura le droit de faire. Les droits effectifs
+sont alors l'**intersection** des deux, recalculée à chaque appel — retirer un
+rôle au compte réduit donc aussi ce que ses jetons peuvent faire. Un jeton
+restreint ne bénéficie **pas** du contournement réservé au superutilisateur
+`admin` : c'est ainsi qu'on donne à une CI exactement ce qu'elle doit pouvoir
+faire, sans plus. On ne peut cocher qu'un droit que **l'on détient** (le serveur
+refuse le reste), et un jeton sans restriction — le défaut — garde tous les
+droits du compte, y compris ceux qu'on lui ajouterait plus tard.
 
 ### Connexion par un fournisseur d'identité (SSO)
 

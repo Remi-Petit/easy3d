@@ -351,8 +351,10 @@
     "changed": "Passwort geändert. Die anderen Sitzungen wurden geschlossen.",
     "passwordHint": "Mindestens 8 Zeichen. Die Änderung schließt die anderen Sitzungen: offen gelassene Geräte müssen sich neu anmelden.",
     "tokens": "API-Token",
-    "tokensHint": "Für Agenten (Claude Code, ein Skript, eine CI): sie weisen sich mit einem Token statt mit einem Cookie aus und haben nie mehr Rechte als du.",
     "tokenOnce": "Kopiere dieses Token jetzt: es wird nicht wieder angezeigt.",
+    "limitRights": "Rechte einschränken",
+    "limitRightsHint": "Das Token erhält nur die angekreuzten Rechte, und nie mehr als du. Ein eingeschränktes Token profitiert nicht von der Ausnahme für Administratoren — genau das ist der Sinn.",
+    "rightsCount": "{count} Recht | {count} Rechte",
     "copy": "Kopieren",
     "copied": "Kopiert",
     "done": "Fertig",
@@ -383,6 +385,8 @@
       "unauthenticated": "Sitzung abgelaufen: bitte erneut anmelden.",
       "not_found": "Token nicht gefunden.",
       "name_required": "Ein Name ist erforderlich.",      "name_too_long": "Der Name ist zu lang (höchstens 80 Zeichen).",      "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
+      "unknown_permission": "Unbekanntes Recht, oder eines, das du nicht hast.",
+      "permission_required": "Wähle mindestens ein Recht.",
       "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
       "invalid_credentials": "Aktuelles Passwort ist falsch."
     }
