@@ -1,4 +1,17 @@
 import { defineConfig, devices } from '@playwright/test'
+import { port } from './tests/ports'
+
+/**
+ * Ports de la campagne **catalogue**.
+ *
+ * Réglables par l'environnement (`tests/ports.ts`) : sur une machine où Windows
+ * a réservé la plage, le backend de test ne peut pas ouvrir son port
+ * (`os error 10013`) et la campagne s'arrête avant le premier test — un
+ * `frontend/.env` suffit alors à en choisir d'autres.
+ */
+const API_PORT = port('E2E_API_PORT', 8091)
+const WEB_PORT = port('E2E_WEB_PORT', 3200)
+const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -28,7 +41,7 @@ export default defineConfig({
     // Port propre aux e2e : **3100 est occupé par le conteneur** (voir
     // `docker-compose.yml`), et le réutiliser ferait tester le conteneur au lieu
     // du code en cours.
-    baseURL: 'http://localhost:3200',
+    baseURL: WEB_ORIGIN,
     trace: 'on-first-retry',
     // Langue du navigateur épinglée sur la langue de référence : sans ça, les
     // assertions sur du texte dépendraient de la langue du poste (l'app suit
@@ -46,17 +59,25 @@ export default defineConfig({
   webServer: [
     {
       command: 'node tests/e2e/start-backend.mjs',
-      url: 'http://127.0.0.1:8091/health',
+      url: `http://127.0.0.1:${API_PORT}/health`,
       reuseExistingServer: true,
       // Large : le premier lancement compile le backend dans son propre
       // répertoire de build (`backend/target/e2e`, voir le script).
       timeout: 300_000,
+      // Les scripts lisent ces variables pour eux-mêmes : sans ça, le port
+      // attendu par Playwright et celui écouté par le backend divergeraient.
+      env: { ...process.env, E2E_API_PORT: String(API_PORT) },
     },
     {
       command: 'node tests/e2e/start-frontend.mjs',
-      url: 'http://localhost:3200',
+      url: WEB_ORIGIN,
       reuseExistingServer: true,
       timeout: 180_000,
+      env: {
+        ...process.env,
+        E2E_WEB_PORT: String(WEB_PORT),
+        E2E_API_BASE: `http://127.0.0.1:${API_PORT}`,
+      },
     },
   ],
 })
