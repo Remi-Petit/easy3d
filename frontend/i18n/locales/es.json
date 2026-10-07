@@ -335,6 +335,8 @@
     "failed": "No se pudo eliminar."
   },
   "account": {
+    "tabAccount": "Cuenta",
+    "tabApi": "API",
     "identity": "Identidad",
     "userName": "Usuario",
     "email": "Correo electrónico",

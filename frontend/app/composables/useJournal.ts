@@ -1,7 +1,7 @@
 import type { JournalEvent } from '~/utils/journal'
 
 /**
- * Journal d'audit (`/admin/journal`).
+ * Journal d'audit (`/admin/audit`).
  *
  * Lecture seule, et **volontairement** : un journal que l'interface pourrait
  * modifier ne vaudrait rien comme témoin. Le serveur le borne (les plus anciens

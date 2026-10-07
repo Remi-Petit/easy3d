@@ -335,6 +335,8 @@
     "failed": "Suppression impossible."
   },
   "account": {
+    "tabAccount": "Compte",
+    "tabApi": "API",
     "identity": "Identité",
     "userName": "Nom d’utilisateur",
     "email": "Adresse e-mail",

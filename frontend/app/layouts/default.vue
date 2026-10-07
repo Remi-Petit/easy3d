@@ -52,21 +52,21 @@ onMounted(() => {
 // d'afficher la page — inutile de redemander.
 const { user: authUser, status: authStatus, signOut, can } = useAuth()
 
-/** `true` sur la page des comptes (`/admin/comptes`). */
-const isAccounts = computed(() => route.path.startsWith('/admin/comptes'))
+/** `true` sur la page des comptes (`/admin/accounts`). */
+const isAccounts = computed(() => route.path.startsWith('/admin/accounts'))
 
-/** `true` sur le journal d'audit (`/admin/journal`). */
-const isJournal = computed(() => route.path.startsWith('/admin/journal'))
+/** `true` sur le journal d'audit (`/admin/audit`). */
+const isJournal = computed(() => route.path.startsWith('/admin/audit'))
 
-/** `true` sur « mon compte » (`/compte`). */
-const isCompte = computed(() => route.path.startsWith('/compte'))
+/** `true` sur « mon compte » (`/account`). */
+const isAccount = computed(() => route.path.startsWith('/account'))
 
 /** `true` sur la page d'administration : section distincte du catalogue. */
 const isAdmin = computed(() => route.path.startsWith('/admin'))
 
 /** Titre de la page courante, déduit de la route (pas de flash à l'hydratation). */
 const title = computed(() => {
-  if (isCompte.value) return t('nav.account')
+  if (isAccount.value) return t('nav.account')
   if (isAccounts.value) return t('nav.accounts')
   if (isJournal.value) return t('nav.journal')
   if (isAdmin.value) return t('nav.admin')
@@ -166,7 +166,7 @@ const statusLabel = computed(() =>
 
 /** Routes rattachées à une section dont l'URL ne porte pas le préfixe. */
 const SECTION_ROUTES: Record<string, string[]> = {
-  '/': ['/dossiers', '/fichier'],
+  '/': ['/folders', '/files'],
 }
 
 /** Une entrée est active si la route courante appartient à sa section. */
@@ -201,7 +201,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     systeme.push({
       label: t('nav.accounts'),
       icon: 'i-lucide-users',
-      to: '/admin/comptes',
+      to: '/admin/accounts',
       active: isAccounts.value,
     })
   }
@@ -210,7 +210,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     systeme.push({
       label: t('nav.journal'),
       icon: 'i-lucide-scroll-text',
-      to: '/admin/journal',
+      to: '/admin/audit',
       active: isJournal.value,
     })
   }
@@ -220,8 +220,8 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     systeme.push({
       label: t('nav.account'),
       icon: 'i-lucide-user',
-      to: '/compte',
-      active: isCompte.value,
+      to: '/account',
+      active: isAccount.value,
     })
   }
   if (systeme.length) items.push({ type: 'label', label: t('nav.system') }, ...systeme)

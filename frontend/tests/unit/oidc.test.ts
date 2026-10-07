@@ -10,8 +10,8 @@ import { PROVISIONING_MODES, emptyOidc, oidcBody, oidcUsable, redirectUri } from
 describe('oidcStartUrl', () => {
   it('transmet la page à rejoindre, encodée', () => {
     expect(oidcStartUrl()).toBe('/api/auth/oidc/start')
-    expect(oidcStartUrl('/dossiers/Maison')).toBe(
-      '/api/auth/oidc/start?redirect=%2Fdossiers%2FMaison',
+    expect(oidcStartUrl('/folders/Maison')).toBe(
+      '/api/auth/oidc/start?redirect=%2Ffolders%2FMaison',
     )
     // Une espace ou un `&` ne doit pas casser la requête.
     expect(oidcStartUrl('/a&b c')).toBe('/api/auth/oidc/start?redirect=%2Fa%26b%20c')

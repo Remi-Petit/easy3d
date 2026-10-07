@@ -3,7 +3,7 @@ import type { AccountPatch, AccountView, RolePatch, RoleView } from '~/composabl
 import { PERM } from '~/utils/permissions'
 
 /**
- * Comptes et rôles (`/admin/comptes`).
+ * Comptes et rôles (`/admin/accounts`).
  *
  * Page **à part** de `/admin` : les réglages et les notes y occupent déjà deux
  * colonnes, et un écran de gestion des comptes demande de la place (liste, rôle

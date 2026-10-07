@@ -39,17 +39,17 @@ function hit(kind: AiHit['kind'], rel: string): AiHit {
 
 describe('hitHref', () => {
   it('dirige vers la page du fichier ou du dossier', () => {
-    expect(hitHref(hit('file', 'DemaAuto/boitier.stl'))).toBe('/fichier/DemaAuto%2Fboitier.stl')
-    expect(hitHref(hit('folder', 'DemaAuto'))).toBe('/dossiers/DemaAuto')
+    expect(hitHref(hit('file', 'DemaAuto/boitier.stl'))).toBe('/files/DemaAuto%2Fboitier.stl')
+    expect(hitHref(hit('folder', 'DemaAuto'))).toBe('/folders/DemaAuto')
   })
 
   it('encode les chemins tels que les pages les attendent', () => {
     // Les noms du catalogue contiennent des espaces et des accents : le chemin
     // doit être encodé segment par segment, comme `FileItem`/`FolderCard`.
     expect(hitHref(hit('file', 'Boitier dema auto.stl'))).toBe(
-      '/fichier/Boitier%20dema%20auto.stl',
+      '/files/Boitier%20dema%20auto.stl',
     )
-    expect(hitHref(hit('folder', 'Maison/étage 2'))).toBe('/dossiers/Maison%2F%C3%A9tage%202')
+    expect(hitHref(hit('folder', 'Maison/étage 2'))).toBe('/folders/Maison%2F%C3%A9tage%202')
   })
 })
 

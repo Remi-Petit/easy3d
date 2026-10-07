@@ -8,25 +8,25 @@ test('accueil : dossiers et fichiers racine listés', async ({ page }) => {
   // page est servie avant que le catalogue soit chargé.
   await expect(page.locator('.file-grid').first()).toBeVisible()
   // Au moins un dossier (DemaAuto / Maison) est affiché.
-  await expect(page.locator('a[href*="/dossiers/"]').first()).toBeVisible()
+  await expect(page.locator('a[href*="/folders/"]').first()).toBeVisible()
   // Au moins un fichier racine est listé.
-  await expect(page.locator('a[href*="/fichier/"]').first()).toBeVisible()
+  await expect(page.locator('a[href*="/files/"]').first()).toBeVisible()
 })
 
 test('dossier : la navigation vers le détail liste ses fichiers', async ({ page }) => {
   await page.goto('/')
-  const folderLink = page.locator('a[href*="/dossiers/"]').first()
+  const folderLink = page.locator('a[href*="/folders/"]').first()
   await expect(folderLink).toBeVisible()
   await folderLink.click()
   // Le titre de l'en-tête devient le nom du dossier (plus "Models").
   await expect(page.locator('h1')).not.toHaveText('Models')
   // Les fichiers du dossier sont listés et cliquables.
-  await expect(page.locator('a[href*="/fichier/"]').first()).toBeVisible()
+  await expect(page.locator('a[href*="/files/"]').first()).toBeVisible()
 })
 
 test('fichier : le détail charge le viewer et la table de méta', async ({ page }) => {
   await page.goto('/')
-  const fileLink = page.locator('a[href*="/fichier/"]').first()
+  const fileLink = page.locator('a[href*="/files/"]').first()
   await expect(fileLink).toBeVisible()
   await fileLink.click()
   await expect(page.locator('.viewer-card')).toBeVisible()
@@ -35,7 +35,7 @@ test('fichier : le détail charge le viewer et la table de méta', async ({ page
 
 test('fichier : le modèle est téléchargeable', async ({ page }) => {
   await page.goto('/')
-  await page.locator('a[href*="/fichier/"]').first().click()
+  await page.locator('a[href*="/files/"]').first().click()
   const dl = page.locator('.detail-bar a[download]')
   await expect(dl).toBeVisible()
   await expect(dl).toHaveAttribute('href', /\/api\/file\?path=.+&download=1$/)
@@ -47,7 +47,7 @@ test('fichier : le modèle est téléchargeable', async ({ page }) => {
 })
 
 test('dossier : sous-dossiers et fichiers sont distingués', async ({ page }) => {
-  await page.goto('/dossiers/DemaAuto')
+  await page.goto('/folders/DemaAuto')
 
   // Deux sections : les sous-dossiers d'abord, puis les fichiers du dossier.
   await expect(page.getByText('Sous-dossiers (1)')).toBeVisible()
@@ -57,7 +57,7 @@ test('dossier : sous-dossiers et fichiers sont distingués', async ({ page }) =>
   await expect(page.locator('.model-card__name', { hasText: 'vis' })).toHaveCount(0)
 
   // La carte du sous-dossier mène à sa propre page.
-  await page.locator('a[href*="/dossiers/"]', { hasText: 'sous-structure' }).click()
+  await page.locator('a[href*="/folders/"]', { hasText: 'sous-structure' }).click()
   await expect(page.locator('h1')).toHaveText('sous-structure')
   await expect(page.locator('.model-card__name', { hasText: 'vis' })).toBeVisible()
   // Aucun sous-dossier à ce niveau : pas de section « Sous-dossiers ».

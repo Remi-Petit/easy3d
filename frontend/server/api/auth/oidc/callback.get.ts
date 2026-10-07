@@ -9,7 +9,7 @@ import { callerHeaders } from '../../../utils/backend'
  *
  * Même piège que pour le départ : la redirection est recopiée, pas suivie
  * (`redirect: 'manual'`). Sans ça, Nitro suivrait le `302` vers `/` ou
- * `/dossiers/…`, renverrait le HTML de cette page à la place de la redirection —
+ * `/folders/…`, renverrait le HTML de cette page à la place de la redirection —
  * le navigateur ne verrait jamais le `Set-Cookie` et l'utilisateur resterait
  * déconnecté après avoir pourtant saisi son mot de passe chez le fournisseur.
  */

@@ -84,7 +84,16 @@ check('token_endpoint joignable', disc.token_endpoint === `${base}/token`, disc.
 
 const authUrl = `${disc.authorization_endpoint}?response_type=code&client_id=${clientId}` +
   `&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20email%20profile&state=st-1`
-const redir = await fetch(authUrl, { redirect: 'manual' })
+let redir = await fetch(authUrl, { redirect: 'manual' })
+// Plusieurs comptes décrits par `ACCOUNTS` : la page propose d'abord lequel.
+// On suit la première entrée, puis on attend la redirection habituelle.
+if (redir.status === 200) {
+  const html = await redir.text()
+  // `&` est échappé en `&amp;` dans l'attribut : on le redécode avant de suivre.
+  const lien = /<a href="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, '&')
+  check('choix de compte proposé', !!lien)
+  redir = await fetch(new URL(lien, disc.authorization_endpoint).toString(), { redirect: 'manual' })
+}
 check('autorisation = 302', redir.status === 302, String(redir.status))
 const location = redir.headers.get('location') ?? ''
 const params = new URL(location).searchParams

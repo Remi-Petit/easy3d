@@ -1340,6 +1340,50 @@ select.admin__input option {
   margin: 0;
 }
 
+/* ---------- Mon compte (onglets) ---------- */
+/* Deux vues sous une même page : le compte (identité, mot de passe) et les
+   jetons d'API. L'onglet actif porte un trait d'accent ; le contenu suit dans
+   un `.admin__col`, qui empile les cartes comme ailleurs. */
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.account__tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Un onglet : texte seul, trait d'accent quand il est actif. Le trait se pose
+   sur la ligne du bas (`margin-bottom: -1px`) pour la recouvrir, pas la
+   décaler. */
+.account__tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.account__tab:hover {
+  color: var(--text);
+}
+
+.account__tab--on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
 @media (max-width: 1000px) {
   .admin {
     grid-template-columns: minmax(0, 1fr);

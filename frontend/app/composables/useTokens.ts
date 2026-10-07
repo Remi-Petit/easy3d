@@ -1,7 +1,7 @@
 import { errorCodeOf } from '~/composables/useAccounts'
 
 /**
- * Jetons d'API du compte connecté (`/compte`).
+ * Jetons d'API du compte connecté (`/account`).
  *
  * Un agent — Claude Code, un script, une CI — n'a pas de navigateur, donc pas de
  * cookie : il présente un jeton en `Authorization: Bearer`. Ces jetons

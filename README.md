@@ -44,7 +44,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 407 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 409 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -118,7 +118,7 @@ agent s'authentifie (le portail web, lui, attend un login navigateur).
 
 Sans `EASY3D_AUTH`, `/mcp` est **ouvert** : garde-le sur `localhost`. Avec les
 comptes activés, `/mcp` exige une identité, et un agent n'a pas de navigateur —
-il présente donc un **jeton d'API** créé depuis **Mon compte** (`/compte`) :
+il présente donc un **jeton d'API** créé depuis **Mon compte** (`/account`) :
 
 ```jsonc
 // .vscode/mcp.json  (VS Code / Copilot)
@@ -301,13 +301,30 @@ lui).
 Essayer cette fonctionnalité demanderait sinon un compte chez un vrai
 fournisseur. Le dépôt en livre donc un **fictif**, pour le développement :
 `docker/fake-oidc/server.mjs` — un serveur OIDC minimal, sans aucune dépendance,
-qui accepte **n'importe quelle** connexion sans mot de passe et décrit toujours
-le même compte simulé.
+qui accepte **n'importe quelle** connexion sans mot de passe et décrit les
+comptes simulés déclarés en JSON (`ACCOUNTS`).
 
 Le `docker-compose.yml` de développement le démarre avec l'application, déjà
 branché (`EASY3D_OIDC_ISSUER: http://fake-oidc:8788`) : la page de connexion
-affiche alors **Continuer avec…**, et un clic ouvre une session sous le compte
-simulé.
+affiche alors **Continuer avec…**. Avec **deux** comptes déclarés, un clic ouvre
+la page de choix du fournisseur ; avec un seul, la session s'ouvre directement.
+
+Le compose de développement en livre deux :
+
+| Compte | Comment s'y connecter | Droits |
+| --- | --- | --- |
+| Administrateur | mot de passe `admin` / `adminadmin`, ou SSO « Administrateur » | tout (superutilisateur `admin`) |
+| Utilisateur | SSO « Utilisateur » (compte créé au premier login) | rôle par défaut (`lecteur`) |
+
+Le mot de passe doit faire **8 caractères minimum** (règle du backend) : c'est
+pourquoi celui du compte de développement est `adminadmin` et non `admin`.
+
+Le compte « Administrateur » est un compte **local** (`EASY3D_ADMIN_*`) que le
+SSO **rattache** : c'est le même e-mail qui les relie, et la session ouverte
+porte donc les droits d'administrateur. Le compte « Utilisateur », lui, n'existe
+pas d'avance — le provisionnement automatique le crée. `EASY3D_ADMIN_*`
+n'agissant qu'à la **première** création, repartir de ces comptes demande de
+supprimer `config/easy3d.db`.
 
 ```bash
 docker compose logs -f fake-oidc        # le flux : autorisation, jeton, userinfo

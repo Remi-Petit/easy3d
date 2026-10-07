@@ -335,6 +335,8 @@
     "failed": "Delete failed."
   },
   "account": {
+    "tabAccount": "Account",
+    "tabApi": "API",
     "identity": "Identity",
     "userName": "Username",
     "email": "E-mail address",

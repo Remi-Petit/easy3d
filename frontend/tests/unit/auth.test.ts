@@ -23,7 +23,7 @@ describe('authErrorKey', () => {
 
 describe('safeRedirect', () => {
   it('accepte un chemin interne', () => {
-    expect(safeRedirect('/dossiers/Maison')).toBe('/dossiers/Maison')
+    expect(safeRedirect('/folders/Maison')).toBe('/folders/Maison')
     expect(safeRedirect('  /admin  ')).toBe('/admin')
   })
 

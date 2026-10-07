@@ -65,15 +65,19 @@ services:
     environment:
       # Comptes activés, avec l'administrateur initial.
       #
-      # `EASY3D_DEV_EMAIL` n'est pas une variable d'easy3d : c'est un nom
-      # partagé entre ce service et `fake-oidc`, pour que les deux e-mails
-      # coïncident. Poser `EASY3D_DEV_EMAIL=vous@exemple.fr` dans un `.env` à
-      # la racine du dépôt (chargé automatiquement, non versionné) règle les
-      # deux d'un coup.
+      # Ces trois variables ne servent qu'à la **première** création : dès qu'un
+      # administrateur existe, elles sont ignorées (on change ensuite le mot de
+      # passe dans l'interface). Pour repartir de ces comptes, supprimer
+      # `config/easy3d.db`.
+      #
+      # L'e-mail est la clé de rattachement : le **même** que le compte
+      # « admin » de `fake-oidc` (plus bas) fait ouvrir la session
+      # administrateur par le SSO, au lieu de créer un second compte.
       EASY3D_AUTH: "on"
-      EASY3D_ADMIN_EMAIL: ${EASY3D_DEV_EMAIL:-remi@example.com}
-      EASY3D_ADMIN_PASSWORD: "motdepasse"
-      EASY3D_ADMIN_USERNAME: remi
+      EASY3D_ADMIN_EMAIL: admin@example.com
+      EASY3D_ADMIN_USERNAME: admin
+      # 8 caractères minimum (règle du backend) : « admin » est refusé.
+      EASY3D_ADMIN_PASSWORD: "adminadmin"
 
       # SSO : l'adresse publique de l'interface — celle que le **navigateur**
       # visite, et qui construit le `redirect_uri` — puis le fournisseur
@@ -142,7 +146,8 @@ services:
   # Un serveur OIDC minimal (`docker/fake-oidc/server.mjs`, aucune dépendance)
   # pour exercer le SSO sans compte chez un vrai fournisseur : il annonce ses
   # adresses, accepte **n'importe quelle** connexion — aucun mot de passe n'est
-  # demandé — et décrit toujours le même compte simulé.
+  # demandé — et décrit le ou les comptes simulés de `ACCOUNTS` (un seul : on
+  # entre directement ; plusieurs : une page propose lequel).
   #
   # Deux adresses pour une même instance, et c'est le point à comprendre :
   #
@@ -178,14 +183,12 @@ services:
       # Doivent correspondre à `EASY3D_OIDC_CLIENT_ID` / `_SECRET` plus haut.
       CLIENT_ID: easy3d
       CLIENT_SECRET: secret-idp
-      # Le compte simulé, tel que `userinfo` le décrira. L'e-mail est la clé de
-      # rattachement : le **même** que l'administrateur (`EASY3D_DEV_EMAIL`,
-      # plus haut) fait ouvrir la session administrateur ; une autre adresse
-      # crée un compte de plus, sans rôle.
-      SUBJECT: fake-oidc-remi
-      EMAIL: ${EASY3D_DEV_EMAIL:-remi@example.com}
-      USERNAME: remi
-      NAME: Remi (SSO fictif)
+      # Les comptes simulés, tels que `userinfo` les décrira. L'e-mail est la
+      # clé de rattachement : celui du compte « admin » correspond à
+      # `EASY3D_ADMIN_EMAIL` (plus haut) → la connexion SSO **rattache** cet
+      # administrateur ; tout autre e-mail crée un compte de plus, avec le rôle
+      # par défaut. Au-delà d'un compte, `/authorize` affiche une page de choix.
+      ACCOUNTS: '[{"id":"admin","sub":"fake-oidc-admin","email":"admin@example.com","username":"admin","name":"Administrateur (SSO fictif)"},{"id":"user","sub":"fake-oidc-user","email":"user@example.com","username":"user","name":"Utilisateur (SSO fictif)"}]'
     healthcheck:
       test:
         [

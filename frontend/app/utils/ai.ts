@@ -167,8 +167,8 @@ export function presetFor(
 /** URL de la page d'un élément proposé. */
 export function hitHref(hit: AiHit): string {
   return hit.kind === 'folder'
-    ? `/dossiers/${encodeURIComponent(hit.rel)}`
-    : `/fichier/${encodeURIComponent(hit.rel)}`
+    ? `/folders/${encodeURIComponent(hit.rel)}`
+    : `/files/${encodeURIComponent(hit.rel)}`
 }
 
 /**
