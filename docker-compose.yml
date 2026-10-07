@@ -96,6 +96,12 @@ services:
       # Autres modes : « manual » (rattachement seulement) ou « approval ».
       EASY3D_OIDC_PROVISIONING: auto
 
+      # Adresse du serveur MCP telle qu'on la **montre** dans Mon compte → MCP.
+      # Nitro ne relaie pas `/mcp` : l'interface ne peut pas la déduire de sa
+      # propre origine, et ce compose publie l'API sur 3101 (le compose livré,
+      # lui, utilise 8090 — le défaut de `utils/mcp.ts`).
+      NUXT_PUBLIC_HPCCAT_MCP_BASE: http://localhost:3101
+
     # ── Catalogue des variables (non actif) ────────────────────────────────
     #
     # Le bloc `environment:` réellement utilisé est plus haut, et vise le

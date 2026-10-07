@@ -49,20 +49,34 @@ const error = computed(() => {
 
 // ── Onglets ──────────────────────────────────────────────────────────────
 /**
- * Deux vues, deux URL : `/account` (identité, mot de passe) et `/account/api`
- * (jetons). L'onglet **découle de l'URL** : un lien vers `/account/api` ouvre
- * donc directement les jetons, et le bouton « retour » du navigateur refait le
- * trajet inverse. Le contenu de l'onglet masqué n'est pas monté (`v-if`/`v-else`).
+ * Trois vues, trois URL : `/account` (identité, mot de passe), `/account/api`
+ * (jetons) et `/account/mcp` (brancher un agent). L'onglet **découle de l'URL** :
+ * un lien vers `/account/mcp` ouvre directement la bonne vue, et le bouton
+ * « retour » du navigateur refait le trajet inverse. Le contenu des onglets
+ * masqués n'est pas monté (`v-if`/`v-else`).
  */
-type Onglet = 'compte' | 'api'
+type Onglet = 'compte' | 'api' | 'mcp'
+
+/** Onglets, dans l'ordre d'affichage — sert aussi à la navigation clavier. */
+const ONGLETS: Onglet[] = ['compte', 'api', 'mcp']
 
 /** Segment de chaque onglet : « compte » est la racine de la page. */
-const chemins: Record<Onglet, string> = { compte: '/account', api: '/account/api' }
+const chemins: Record<Onglet, string> = {
+  compte: '/account',
+  api: '/account/api',
+  mcp: '/account/mcp',
+}
 
-const onglet = computed<Onglet>(() => (route.params.tab === 'api' ? 'api' : 'compte'))
+/** L'onglet porté par l'URL, ou « compte » pour tout segment inconnu. */
+const onglet = computed<Onglet>(
+  () => ONGLETS.find((nom) => nom === route.params.tab) ?? 'compte',
+)
 
 const refOngletCompte = ref<HTMLButtonElement | null>(null)
 const refOngletApi = ref<HTMLButtonElement | null>(null)
+const refOngletMcp = ref<HTMLButtonElement | null>(null)
+
+const refsOnglets = { compte: refOngletCompte, api: refOngletApi, mcp: refOngletMcp }
 
 /** Changer d'onglet, c'est changer d'URL : c'est elle qui fait foi. */
 function ouvreOnglet(cible: Onglet) {
@@ -75,19 +89,20 @@ function ouvreOnglet(cible: Onglet) {
  */
 watchEffect(() => {
   const segment = route.params.tab
-  if (segment !== undefined && segment !== '' && segment !== 'api') {
+  if (segment !== undefined && segment !== '' && !ONGLETS.some((nom) => nom === segment)) {
     void navigateTo(chemins.compte, { replace: true })
   }
 })
 
-/** Flèches gauche/droite : on passe d'un onglet à l'autre, focus compris. */
+/** Flèches gauche/droite : on fait le tour des onglets, focus compris. */
 function ongletTouches(e: KeyboardEvent) {
   if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
   e.preventDefault()
-  const suivant: Onglet = onglet.value === 'compte' ? 'api' : 'compte'
-  const cible = suivant === 'compte' ? refOngletCompte.value : refOngletApi.value
+  const pas = e.key === 'ArrowRight' ? 1 : -1
+  const index = ONGLETS.indexOf(onglet.value)
+  const suivant = ONGLETS[(index + pas + ONGLETS.length) % ONGLETS.length]!
   ouvreOnglet(suivant)
-  cible?.focus()
+  refsOnglets[suivant].value?.focus()
 }
 
 // ── Mot de passe ─────────────────────────────────────────────────────────
@@ -178,6 +193,46 @@ async function createToken() {
   droitsJeton.value = []
 }
 
+// ── Onglet MCP ───────────────────────────────────────────────────────────
+/** Adresse du serveur MCP, telle qu'on la montre (voir `~/utils/mcp`). */
+const adresseMcp = computed(() => mcpUrl(useRuntimeConfig().public, useRequestURL()))
+
+const copieAdresse = ref(false)
+
+/** Copie l'adresse (le presse-papiers peut être refusé : on l'ignore). */
+async function copierAdresse() {
+  try {
+    await navigator.clipboard.writeText(adresseMcp.value)
+    copieAdresse.value = true
+  } catch {
+    copieAdresse.value = false
+  }
+}
+
+/**
+ * Extraits à recopier, avec l'adresse **réelle** et un jeton d'exemple : c'est
+ * tout ce qu'il faut pour brancher un agent, et le seul endroit où un
+ * utilisateur trouverait cette adresse.
+ */
+const extraitVscode = computed(
+  () => `{
+  "servers": {
+    "easy3d": {
+      "type": "http",
+      "url": "${adresseMcp.value}",
+      "headers": { "Authorization": "Bearer e3d_…" }
+    }
+  }
+}`,
+)
+
+const extraitClaude = computed(() =>
+  [
+    `claude mcp add --transport http easy3d ${adresseMcp.value} \\`,
+    '  --header "Authorization: Bearer e3d_…"',
+  ].join('\n'),
+)
+
 /** Libellé d'une durée proposée, avec repli sur le libellé générique. */
 function durationLabel(days: number): string {
   const key = durationKey(days)
@@ -261,6 +316,21 @@ const quand = (valeur: number | null) =>
       >
         {{ t('account.tabApi') }}
       </button>
+      <button
+        id="onglet-mcp"
+        ref="refOngletMcp"
+        type="button"
+        role="tab"
+        class="account__tab"
+        :class="{ 'account__tab--on': onglet === 'mcp' }"
+        :aria-selected="onglet === 'mcp'"
+        :tabindex="onglet === 'mcp' ? 0 : -1"
+        aria-controls="panneau-mcp"
+        @click="ouvreOnglet('mcp')"
+        @keydown="ongletTouches"
+      >
+        {{ t('account.mcp') }}
+      </button>
     </div>
 
     <!-- Compte : identité puis mot de passe. -->
@@ -342,7 +412,7 @@ const quand = (valeur: number | null) =>
     </div>
 
     <div
-      v-else
+      v-else-if="onglet === 'api'"
       id="panneau-api"
       role="tabpanel"
       aria-labelledby="onglet-api"
@@ -471,8 +541,53 @@ const quand = (valeur: number | null) =>
           </div>
         </div>
 
-        <p class="admin__hint">{{ t('account.mcpHint') }}</p>
         <p v-if="error" class="admin__status admin__status--err">{{ error }}</p>
+      </section>
+    </div>
+
+    <!-- MCP : de quoi brancher un agent (Claude Code, VS Code, un script). -->
+    <div
+      v-else
+      id="panneau-mcp"
+      role="tabpanel"
+      aria-labelledby="onglet-mcp"
+      class="admin__col"
+    >
+      <section class="admin__card">
+        <h2 class="admin__title">{{ t('account.mcp') }}</h2>
+        <p class="admin__hint">{{ t('account.mcpIntro') }}</p>
+
+        <div class="admin__field">
+          <span class="admin__label">{{ t('account.mcpAddress') }}</span>
+          <div class="mcp__ligne">
+            <code class="mcp__url">{{ adresseMcp }}</code>
+            <button type="button" class="admin__action" @click="copierAdresse()">
+              {{ copieAdresse ? t('account.copied') : t('account.copy') }}
+            </button>
+          </div>
+          <p class="admin__hint">{{ t('account.mcpAddressHint') }}</p>
+        </div>
+      </section>
+
+      <section class="admin__card">
+        <h2 class="admin__title">{{ t('account.mcpClients') }}</h2>
+
+        <div class="admin__field">
+          <span class="admin__label">{{ t('account.mcpVscode') }}</span>
+          <pre class="mcp__code"><code>{{ extraitVscode }}</code></pre>
+        </div>
+
+        <div class="admin__field">
+          <span class="admin__label">{{ t('account.mcpClaude') }}</span>
+          <pre class="mcp__code"><code>{{ extraitClaude }}</code></pre>
+        </div>
+
+        <p class="admin__hint">{{ t('account.mcpTokenHint') }}</p>
+        <div class="admin__field--actions">
+          <button type="button" class="admin__action" @click="ouvreOnglet('api')">
+            {{ t('account.mcpGetToken') }}
+          </button>
+        </div>
       </section>
     </div>
   </div>
