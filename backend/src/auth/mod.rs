@@ -395,7 +395,7 @@ impl Auth {
             username: user.username.clone(),
             email: user.email.clone(),
             roles: self.db(|conn| db::roles_of(conn, &user.uuid))?,
-            permissions: self.permissions_of(user)?,
+            permissions: self.permissions_for(user)?,
         })
     }
 
@@ -435,17 +435,57 @@ impl Auth {
         self.db(|conn| db::effective_permissions(conn, user_uuid))
     }
 
-    /// `true` si le compte a ce droit.
-    pub fn can(&self, user: &db::User, permission: &str) -> Result<bool, String> {
-        self.can_uuid(&user.uuid, permission)
+    /// Droits d'une **requête** : ceux du compte, restreints par la portée du
+    /// jeton quand la requête en présente un.
+    ///
+    /// L'intersection est recalculée à **chaque appel** (rien n'est figé dans le
+    /// jeton) : retirer un rôle au compte réduit donc aussi ce que ses jetons
+    /// peuvent faire, dès la requête suivante. Un `admin` reste élargi à tous
+    /// les droits avant l'intersection — sauf par un jeton restreint, qui n'a
+    /// alors que ce qu'on a coché.
+    pub fn permissions_for(&self, user: &db::User) -> Result<Vec<String>, String> {
+        let droits = self.permissions_of_uuid(&user.uuid)?;
+        let Some(portee) = &user.scope else {
+            return Ok(droits);
+        };
+        // On filtre les droits du compte (et non la portée) : l'ordre reste
+        // celui du catalogue, comme partout ailleurs.
+        Ok(droits
+            .into_iter()
+            .filter(|id| portee.contains(id))
+            .collect())
     }
 
-    /// Variante par identifiant (voir [`Auth::is_admin_uuid`]).
-    pub fn can_uuid(&self, user_uuid: &str, permission: &str) -> Result<bool, String> {
+    /// `true` si la requête a ce droit (voir [`Auth::permissions_for`]).
+    pub fn can(&self, user: &db::User, permission: &str) -> Result<bool, String> {
         Ok(self
-            .permissions_of_uuid(user_uuid)?
+            .permissions_for(user)?
             .iter()
             .any(|id| id == permission))
+    }
+
+    /// Variante par identifiant, avec la portée fournie par l'appelant.
+    ///
+    /// Les sessions MCP ne gardent pas le compte sous la main : elles portent
+    /// l'uuid **et** la portée du jeton qui les a ouvertes (voir
+    /// `api::AppState::mcp_service`).
+    pub fn can_scoped(
+        &self,
+        user_uuid: &str,
+        scope: Option<&[String]>,
+        permission: &str,
+    ) -> Result<bool, String> {
+        if !self
+            .permissions_of_uuid(user_uuid)?
+            .iter()
+            .any(|id| id == permission)
+        {
+            return Ok(false);
+        }
+        Ok(match scope {
+            None => true,
+            Some(portee) => portee.iter().any(|id| id == permission),
+        })
     }
 
     /// `true` si cet identifiant a trop échoué récemment.

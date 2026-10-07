@@ -2120,3 +2120,29 @@ select.admin__input option {
   font-size: 12.5px;
   word-break: break-all;
 }
+
+/*
+ * Formulaire de création d'un jeton : c'est la **seule action** de la carte, et
+ * on y tape un nom qu'on veut pouvoir relire — d'où des champs plus grands que
+ * la moyenne de l'administration, et un bouton à leur hauteur.
+ */
+.token__form .admin__input {
+  font-size: 15px;
+  padding: 12px 14px;
+}
+
+/* Le nom prend la place disponible ; la durée reste courte, à sa mesure. */
+.token__form .admin__row > .admin__input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.token__form .admin__input--short {
+  flex: 0 0 auto;
+  width: 140px;
+}
+
+.token__form .admin__action--primary {
+  padding: 12px 20px;
+  font-size: 14px;
+}

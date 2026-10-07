@@ -53,6 +53,13 @@ pub struct Easy3dMcp {
     /// `None` quand l'authentification est éteinte (ou dans les tests) : le
     /// serveur est alors celui d'avant les comptes, ouvert comme le reste.
     user: Option<String>,
+    /// Droits que le **jeton** qui a ouvert cette session autorise (`None` = pas
+    /// de jeton, ou jeton sans restriction).
+    ///
+    /// ⚠️ Les sessions survivent à la requête qui les a ouvertes : la portée est
+    /// donc portée par le service, et chaque portée a le sien (voir la clé de
+    /// `api::AppState::mcp_service`).
+    scope: Option<Vec<String>>,
     /// Table des outils, générée par `#[tool_router]`.
     tool_router: ToolRouter<Self>,
 }
@@ -64,9 +71,14 @@ impl Easy3dMcp {
     }
 
     /// Serveur au nom d'un compte (voir `api::AppState::mcp_service`).
-    pub fn for_user(state: AppState, user: Option<String>) -> Self {
+    pub fn for_user(
+        state: AppState,
+        user: Option<String>,
+        scope: Option<Vec<String>>,
+    ) -> Self {
         Self {
             user,
+            scope,
             ..Self::with_permissions(state, destructive_allowed_from_env())
         }
     }
@@ -77,6 +89,7 @@ impl Easy3dMcp {
             state,
             allow_destructive,
             user: None,
+            scope: None,
             tool_router: Self::tool_router(),
         }
     }
@@ -93,7 +106,11 @@ impl Easy3dMcp {
             return Ok(());
         };
 
-        match self.state.auth.can_uuid(uuid, permission) {
+        match self
+            .state
+            .auth
+            .can_scoped(uuid, self.scope.as_deref(), permission)
+        {
             Ok(true) => Ok(()),
             // MCP n'a pas de code « accès refusé » : `invalid_params` est ce qui
             // s'en approche le plus, et le message dit **quel** droit manque — un
@@ -970,7 +987,7 @@ mod tests {
         let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
         let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
             .with_auth(comptes);
-        let serveur = Easy3dMcp::for_user(state.clone(), Some(user.uuid.clone()));
+        let serveur = Easy3dMcp::for_user(state.clone(), Some(user.uuid.clone()), None);
 
         // Lire le catalogue, ses notes et les formats : oui.
         for outil in ["list_formats", "list_models", "find_models", "get_model", "list_notes", "read_note"] {
@@ -988,8 +1005,47 @@ mod tests {
 
         // Sans compte (installation ouverte), tout passe : le serveur MCP est
         // celui d'avant les comptes.
-        let ouvert = Easy3dMcp::for_user(state, None);
+        let ouvert = Easy3dMcp::for_user(state, None, None);
         assert!(ouvert.require_for("delete_note").is_ok());
+    }
+
+    /// Un jeton **restreint** refuse aussi les outils hors de sa portée, même
+    /// quand le compte a le droit par ailleurs — c'est tout l'intérêt de la
+    /// restriction, et c'est pourquoi le service MCP est mis en cache par
+    /// **compte et portée** (voir `mcp_cache_key`).
+    #[test]
+    fn un_jeton_restreint_limite_aussi_les_outils_mcp() {
+        let dir = tempfile::tempdir().unwrap();
+        let comptes = crate::auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        comptes.db(crate::auth::db::ensure_builtin_roles).unwrap();
+
+        // Un compte administrateur : sans restriction, il peut tout.
+        let admin = crate::auth::db::NewUser::new("root", "root@exemple.fr", None);
+        comptes.db(|conn| crate::auth::db::insert_user(conn, &admin)).unwrap();
+        comptes
+            .db(|conn| crate::auth::db::assign_role(conn, &admin.uuid, crate::auth::db::ADMIN_ROLE))
+            .unwrap();
+
+        let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
+        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
+            .with_auth(comptes);
+
+        let entier = Easy3dMcp::for_user(state.clone(), Some(admin.uuid.clone()), None);
+        assert!(entier.require_for("get_config").is_ok(), "sans restriction");
+
+        let restreint = Easy3dMcp::for_user(
+            state,
+            Some(admin.uuid.clone()),
+            Some(vec!["catalog.read".to_string()]),
+        );
+        assert!(
+            restreint.require_for("list_models").is_ok(),
+            "le droit coché reste ouvert"
+        );
+        assert!(
+            restreint.require_for("get_config").is_err(),
+            "hors portée, même pour un administrateur"
+        );
     }
 
     #[test]

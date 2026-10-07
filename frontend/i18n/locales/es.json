@@ -351,8 +351,10 @@
     "changed": "Contraseña cambiada. Se han cerrado las demás sesiones.",
     "passwordHint": "Mínimo 8 caracteres. El cambio cierra las demás sesiones: los dispositivos abiertos tendrán que volver a entrar.",
     "tokens": "Claves de API",
-    "tokensHint": "Para los agentes (Claude Code, un script, una CI): se identifican con una clave en lugar de una cookie, y nunca tienen más permisos que tú.",
     "tokenOnce": "Copia esta clave ahora: no volverá a mostrarse.",
+    "limitRights": "Limitar los permisos",
+    "limitRightsHint": "La clave solo tendrá los permisos marcados, y nunca más que los tuyos. Una clave restringida no se beneficia de la excepción reservada a los administradores: ese es justo el interés.",
+    "rightsCount": "{count} permiso | {count} permisos",
     "copy": "Copiar",
     "copied": "Copiado",
     "done": "Hecho",
@@ -383,6 +385,8 @@
       "unauthenticated": "Sesión caducada: vuelve a entrar.",
       "not_found": "Clave no encontrada.",
       "name_required": "El nombre es obligatorio.",      "name_too_long": "El nombre es demasiado largo (80 caracteres como máximo).",      "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
+      "unknown_permission": "Permiso desconocido, o que no tienes.",
+      "permission_required": "Elige al menos un permiso.",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
       "invalid_credentials": "La contraseña actual es incorrecta."
     }

@@ -101,16 +101,25 @@ impl AppState {
     pub fn mcp_service(
         &self,
         user: Option<String>,
+        scope: Option<Vec<String>>,
     ) -> StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager> {
-        // Clé vide = installation sans comptes : un seul service, comme avant.
-        let cle = user.clone().unwrap_or_default();
+        // Clé = compte **et portée du jeton** : deux jetons du même compte, l'un
+        // restreint et l'autre non, ne doivent pas se partager le service — le
+        // premier hériterait sinon des droits de l'autre.
+        let cle = mcp_cache_key(user.as_deref(), scope.as_deref());
         if let Some(service) = self.mcp.lock().unwrap().get(&cle) {
             return service.clone();
         }
 
         let state = self.clone();
         let service = StreamableHttpService::new(
-            move || Ok(crate::mcp::Easy3dMcp::for_user(state.clone(), user.clone())),
+            move || {
+                Ok(crate::mcp::Easy3dMcp::for_user(
+                    state.clone(),
+                    user.clone(),
+                    scope.clone(),
+                ))
+            },
             Arc::new(LocalSessionManager::default()),
             StreamableHttpServerConfig::default(),
         );
@@ -373,6 +382,25 @@ pub fn routes(state: AppState) -> Router {
     public.merge(protected).with_state(state)
 }
 
+/// Clé du service MCP en cache : le compte, puis la portée du jeton.
+///
+/// La portée est **triée** pour que deux requêtes qui demandent la même chose
+/// partagent le service, quel que soit l'ordre des droits dans la requête.
+/// Installation sans comptes : clé vide, donc un seul service comme avant.
+fn mcp_cache_key(user: Option<&str>, scope: Option<&[String]>) -> String {
+    let Some(user) = user else {
+        return String::new();
+    };
+    match scope {
+        None => user.to_string(),
+        Some(portee) => {
+            let mut ids: Vec<&str> = portee.iter().map(String::as_str).collect();
+            ids.sort_unstable();
+            format!("{user}\u{1}{}", ids.join(","))
+        }
+    }
+}
+
 /// Point d'entrée du serveur MCP (`/mcp`).
 ///
 /// L'identité est celle que `require_auth` a résolue — cookie de session ou
@@ -384,8 +412,13 @@ async fn mcp(
     auth: Option<auth::AuthUser>,
     request: Request,
 ) -> Response {
-    let user = auth.map(|auth::AuthUser(user)| user.uuid);
-    let service = state.mcp_service(user);
+    // La portée du jeton accompagne le compte : le service MCP en a besoin pour
+    // opposer les mêmes refus que le reste du serveur (voir `Easy3dMcp::scope`).
+    let (user, scope) = match auth {
+        Some(auth::AuthUser(compte)) => (Some(compte.uuid), compte.scope),
+        None => (None, None),
+    };
+    let service = state.mcp_service(user, scope);
 
     match service.oneshot(request).await {
         Ok(response) => response.map(axum::body::Body::new).into_response(),
@@ -3857,6 +3890,139 @@ mod tests {
             bearer(&app, "GET", "/models", None, "e3d_0000").await.status(),
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    /// Un jeton **restreint** n'a que les droits cochés — y compris quand le
+    /// compte est administrateur, qui perd alors son contournement : c'est là
+    /// tout l'intérêt du réglage (donner à une CI exactement ce qu'elle doit
+    /// pouvoir faire).
+    #[tokio::test]
+    async fn un_jeton_restreint_n_a_que_les_droits_coches() {
+        let (app, dir) = app_avec_comptes(|_| {});
+        std::fs::write(dir.path().join("models/a.txt"), "x").unwrap();
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        // Sans restriction, le jeton d'un administrateur peut tout lire.
+        let entier = cree_jeton(&app, &admin, "tot").await;
+        assert_eq!(
+            bearer(&app, "GET", "/config", None, &entier).await.status(),
+            StatusCode::OK
+        );
+
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "ci", "permissions": ["catalog.read"] }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let restreint = body_json(res).await["token"].as_str().unwrap().to_string();
+
+        // Le droit coché reste ouvert…
+        assert_eq!(
+            bearer(&app, "GET", "/models", None, &restreint).await.status(),
+            StatusCode::OK
+        );
+        // …et tout le reste est fermé, même à un administrateur.
+        assert_eq!(
+            bearer(&app, "GET", "/config", None, &restreint).await.status(),
+            StatusCode::FORBIDDEN,
+            "hors portée"
+        );
+        assert_eq!(
+            bearer(
+                &app,
+                "POST",
+                "/delete",
+                Some(serde_json::json!({ "path": "a.txt" })),
+                &restreint,
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(dir.path().join("models/a.txt").exists());
+
+        // La liste annonce la portée : l'interface peut la montrer.
+        let v = body_json(get_with(&app, "/tokens", Some(&admin)).await).await;
+        let jetons = v.as_array().unwrap();
+        let ci = jetons.iter().find(|t| t["name"] == "ci").unwrap();
+        assert_eq!(ci["permissions"], serde_json::json!(["catalog.read"]), "{ci}");
+        let tot = jetons.iter().find(|t| t["name"] == "tot").unwrap();
+        assert!(tot["permissions"].is_null(), "sans restriction : {tot}");
+    }
+
+    /// La portée demandée ne peut pas **dépasser** celle du compte : on ne donne
+    /// pas à un jeton un droit qu'on ne détient pas.
+    #[tokio::test]
+    async fn la_portee_d_un_jeton_ne_depasse_pas_celle_du_compte() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "agent", vec![lecteur]).await;
+        let cookie = connecte(&app, "agent", "motdepasse").await;
+
+        // Un droit que le compte ne détient pas.
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "trop", "permissions": ["config.read"] }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "unknown_permission");
+
+        // Un droit que le serveur ne connaît pas.
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "inconnu", "permissions": ["model.purge"] }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "unknown_permission");
+
+        // Une portée vide donnerait un agent qui échoue partout : on la refuse
+        // plutôt que de laisser un jeton inutile.
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "vide", "permissions": [] }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "permission_required");
+
+        // Ce que le compte détient, en revanche, passe.
+        let res = post_json(
+            &app,
+            "/tokens",
+            serde_json::json!({ "name": "ok", "permissions": ["catalog.read"] }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    /// La clé du service MCP distingue les **portées** : deux jetons du même
+    /// compte, l'un restreint et l'autre non, ne doivent pas se partager le
+    /// service mis en cache — le premier hériterait sinon des droits de l'autre.
+    #[test]
+    fn la_cle_du_service_mcp_distingue_les_portees() {
+        let liste = |ids: &[&str]| ids.iter().map(|id| (*id).to_string()).collect::<Vec<_>>();
+        let a = mcp_cache_key(Some("u"), Some(&liste(&["ai.use", "catalog.read"])));
+        let b = mcp_cache_key(Some("u"), Some(&liste(&["catalog.read", "ai.use"])));
+        assert_eq!(a, b, "l'ordre des droits ne doit pas créer deux services");
+        assert_ne!(a, mcp_cache_key(Some("u"), None), "restreint ≠ non restreint");
+        assert_ne!(
+            a,
+            mcp_cache_key(Some("v"), Some(&liste(&["ai.use", "catalog.read"])))
+        );
+        assert_eq!(mcp_cache_key(None, None), "", "installation sans comptes");
     }
 
     /// Les jetons sont **personnels** : personne ne voit ni ne révoque ceux des
