@@ -27,12 +27,18 @@ const { outcome, loading, error, asked, reset } = useAiSearch()
     <p v-else-if="error" class="ai__error">{{ error }}</p>
 
     <template v-else-if="outcome">
-      <!-- Aucune proposition : le modèle explique, ou on le dit simplement. -->
-      <p v-if="!outcome.hits.length" class="ai__state">
-        {{ outcome.text || $t('ai.noResult') }}
-      </p>
+      <!--
+        La réponse du modèle est du **Markdown** (titres, listes, gras, extraits
+        de code) : on la rend, plutôt que d'en montrer la source. Elle peut
+        accompagner des propositions — le modèle résume parfois ce qu'il a
+        trouvé — donc elle s'affiche dans les deux cas.
+      -->
+      <MarkdownText v-if="outcome.text" :text="outcome.text" />
 
-      <ul v-else class="ai__hits">
+      <!-- Ni réponse rédigée, ni proposition : on le dit nous-mêmes. -->
+      <p v-else-if="!outcome.hits.length" class="ai__state">{{ $t('ai.noResult') }}</p>
+
+      <ul v-if="outcome.hits.length" class="ai__hits">
         <li v-for="hit in outcome.hits" :key="hit.rel">
           <NuxtLink :to="hitHref(hit)" class="ai__hit">
             <span class="ai__icon" aria-hidden="true">{{ hit.kind === 'folder' ? '📁' : '📄' }}</span>

@@ -1832,6 +1832,56 @@ select.admin__input option {
   white-space: pre-wrap;
 }
 
+/*
+ * La réponse de l'assistant, rendue en Markdown (même bibliothèque que les
+ * notes). On annule la **boîte de l'éditeur** — 500 px de haut, une bordure et
+ * un fond noir, faits pour un éditeur plein écran, pas pour un texte posé dans
+ * un panneau.
+ */
+.ai .md-text {
+  flex: none;
+  height: auto;
+  border: none;
+  background: transparent;
+}
+
+.ai .md-text .md-editor-content,
+.ai .md-text .md-editor-preview-wrapper {
+  height: auto;
+}
+
+.ai .md-text .md-editor-preview {
+  padding: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+/* Le premier titre du Markdown n'a pas à pousser le panneau vers le bas. */
+.ai .md-text .md-editor-preview > :first-child {
+  margin-top: 0;
+}
+
+/*
+ * Sauts de ligne : la bibliothèque pose `word-break: break-all` sur
+ * `.md-editor-preview`, qui autorise une coupure **n'importe où** — un mot court
+ * comme « test » se retrouvait coupé en deux, et un identifiant au milieu d'un
+ * segment, dans une cellule de tableau Markdown comme dans un paragraphe.
+ *
+ * On revient à la coupure normale (aux espaces, aux tirets), et
+ * `overflow-wrap: anywhere` ne prend le relais que dans le seul cas qui l'exige :
+ * un jeton plus long que la ligne (un UUID, une URL).
+ *
+ * Le sélecteur est **plus spécifique** que celui de la bibliothèque, et pas par
+ * hasard : sa feuille est chargée après la nôtre, donc à spécificité égale c'est
+ * elle qui gagne (vérifié : `break-all` restait appliqué). `.md-editor` est le
+ * parent réel — la règle vaut pour les notes comme pour la réponse de
+ * l'assistant, qui passent par le même moteur.
+ */
+.md-editor .md-editor-preview {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
 .ai__hits {
   list-style: none;
   margin: 0;
