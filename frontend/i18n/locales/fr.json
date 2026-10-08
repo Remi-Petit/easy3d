@@ -498,6 +498,8 @@
     "cloneNone": "Partir d’un rôle vide",
     "cloneHint": "Créer un rôle vide, ou en cloner un : ses droits sont recopiés. C’est le motif habituel pour un rôle sur mesure.",
     "save": "Enregistrer",
+    "saved": "Modifications enregistrées",
+    "savedFor": "Le compte « {name} » est à jour.",
     "remove": "Supprimer",
     "confirm": "Confirmer ?",
     "setDefault": "Par défaut",
