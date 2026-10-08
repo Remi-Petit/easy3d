@@ -133,6 +133,53 @@ test('l’administration liste les comptes et le journal garde la connexion', as
   await expect(page.locator('.admin__empty')).toBeVisible()
 })
 
+/**
+ * Les comptes ont deux onglets — utilisateurs et rôles — sur le même système que
+ * « mon compte » : c'est l'**URL** qui porte la vue, et un rôle neuf se crée
+ * depuis l'onglet des rôles.
+ */
+test('les comptes ont deux onglets, et un rôle s’y crée', async ({ page }) => {
+  await seConnecter(page)
+
+  await page.goto('/admin/accounts')
+  await expect(page.locator('h1')).toHaveText('Comptes', { timeout: 30_000 })
+
+  const onglets = page.locator('.panel-tabs [role="tab"]')
+  await expect(onglets).toHaveCount(2)
+  await expect(onglets.first()).toHaveText('Utilisateurs')
+  await expect(onglets.first()).toHaveAttribute('aria-selected', 'true')
+  // L'administrateur créé au démarrage figure dans la liste des utilisateurs,
+  // et non dans celle des rôles.
+  await expect(page.locator('.admin__item', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
+
+  await onglets.nth(1).click()
+  await expect(page).toHaveURL(/\/admin\/accounts\/roles$/)
+  await expect(onglets.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.admin__item', { hasText: 'admin' }).first()).toBeVisible()
+
+  // Un rôle neuf se crée ici. Ses droits se cochent ensuite dans l'éditeur, que
+  // le clic sur la ligne ouvre.
+  const nom = 'role-e2e'
+  await page.getByLabel('Nom du rôle').last().fill(nom)
+  await page.getByRole('button', { name: 'Créer' }).click()
+  const ligne = page.locator('.admin__item', { hasText: nom }).first()
+  await expect(ligne).toBeVisible()
+
+  // Le test repart propre : ce qu'il a créé, il le supprime (deux clics, le
+  // second confirme).
+  await ligne.click()
+  await page.getByRole('button', { name: 'Supprimer', exact: true }).click()
+  await page.locator('.admin__action--danger').click()
+  await expect(page.locator('.admin__item', { hasText: nom })).toHaveCount(0)
+
+  // L'adresse suffit à ouvrir la vue : c'est elle qui fait foi.
+  await page.goto('/admin/accounts/roles')
+  await expect(page.locator('.panel-tabs [role="tab"]').nth(1)).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+})
+
 test('la barre du catalogue ne suit pas sur « mon compte »', async ({ page }) => {
   await seConnecter(page)
 
@@ -145,7 +192,7 @@ test('la barre du catalogue ne suit pas sur « mon compte »', async ({ page }) 
   // entière — branchée sur le catalogue, donc sans effet ici.
   for (const onglet of ['/account', '/account/api', '/account/mcp']) {
     await page.goto(onglet)
-    await expect(page.locator('.account__tabs')).toBeVisible()
+    await expect(page.locator('.panel-tabs')).toBeVisible()
     await expect(page.locator('.topbar')).toHaveCount(0)
     await expect(page.locator('.ai-btn')).toHaveCount(0)
   }
@@ -167,7 +214,7 @@ test('les onglets de « mon compte » occupent toute la largeur', async ({ page 
     await expect(page.locator('[role="tabpanel"]')).toBeVisible()
 
     const ecart = await page.evaluate(() => {
-      const conteneur = document.querySelector('.account')
+      const conteneur = document.querySelector('.tabbed-page')
       const panel = document.querySelector('[role="tabpanel"]')
       if (!conteneur || !panel) return -1
       return Math.abs(conteneur.getBoundingClientRect().width - panel.getBoundingClientRect().width)

@@ -476,7 +476,7 @@
   "accounts": {
     "roles": "Rollen",
     "rolesHint": "Die mitgelieferten Rollen sind fest: klone sie, um von etwas auszugehen.",
-    "users": "Konten",
+    "users": "Benutzer",
     "newRole": "Neue Rolle",
     "newUser": "Neues Konto",
     "roleName": "Name der Rolle",

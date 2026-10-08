@@ -476,7 +476,7 @@
   "accounts": {
     "roles": "Roles",
     "rolesHint": "Los roles incluidos son fijos: clónalos para partir de algo.",
-    "users": "Cuentas",
+    "users": "Usuarios",
     "newRole": "Nuevo rol",
     "newUser": "Nueva cuenta",
     "roleName": "Nombre del rol",

@@ -478,7 +478,7 @@
   "accounts": {
     "roles": "Roles",
     "rolesHint": "The built-in roles are frozen: clone one to start from something.",
-    "users": "Accounts",
+    "users": "Users",
     "newRole": "New role",
     "newUser": "New account",
     "roleName": "Role name",
