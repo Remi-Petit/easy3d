@@ -3697,6 +3697,12 @@ mod tests {
         let (app, _dir) = app_avec_comptes(|_| {});
         let admin = connecte(&app, "remi", "motdepasse").await;
 
+        // Un compte à mot de passe n'est **pas** rattaché au fournisseur : la
+        // page « Mon compte » lui laisse son formulaire (voir le test du compte
+        // SSO, qui vérifie l'inverse).
+        let me = body_json(get_with(&app, "/auth/me", Some(&admin)).await).await;
+        assert_eq!(me["user"]["oidc"], serde_json::json!(false));
+
         // Mauvais mot de passe actuel.
         let res = post_json(
             &app,
@@ -3751,6 +3757,68 @@ mod tests {
         )
         .await;
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// Un compte rattaché au fournisseur d'identité ne se donne **pas** de mot de
+    /// passe ici : c'est le SSO qui l'authentifie.
+    ///
+    /// La règle n'est pas cosmétique : le mot de passe local est vérifié par
+    /// easy3d, sans rien demander au fournisseur — il continuerait donc de
+    /// fonctionner après une désactivation chez lui, ce qui est exactement ce
+    /// qu'on veut éviter en confiant l'identité au SSO.
+    #[tokio::test]
+    async fn un_compte_sso_ne_peut_pas_se_donner_de_mot_de_passe() {
+        // Le compte est créé sans mot de passe (comme au provisionnement OIDC) et
+        // sa session est ouverte directement : c'est le seul moyen d'entrer dans
+        // un compte sans mot de passe.
+        let session = Mutex::new(String::new());
+        let (app, _dir) = app_avec_comptes(|auth| {
+            let user = auth::rbac::insert_account(
+                auth,
+                auth::db::NewUser::new("sso", "sso@exemple.fr", None),
+                &[],
+                &[],
+            )
+            .unwrap();
+            auth.db(|conn| auth::db::set_oidc_subject(conn, &user.uuid, "sub-sso"))
+                .unwrap();
+            let token = auth.start_session(&user.uuid, &HeaderMap::new()).unwrap();
+            *session.lock().unwrap() = auth
+                .session_cookie(&token)
+                .split(';')
+                .next()
+                .unwrap()
+                .to_string();
+        });
+        let cookie = session.lock().unwrap().clone();
+
+        // Le mot de passe « actuel » n'existe pas : sans le garde-fou, ce premier
+        // mot de passe s'installerait sans la moindre vérification.
+        let res = post_json(
+            &app,
+            "/auth/password",
+            serde_json::json!({ "current": "peu-importe", "new": "mot-de-passe-local" }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "password_sso");
+
+        // Et rien n'a été écrit : le mot de passe proposé n'ouvre aucune session.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "sso", "password": "mot-de-passe-local" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // Enfin, le compte **se dit** rattaché : c'est ce que la page « Mon
+        // compte » lit pour griser le formulaire (et non le seul fait qu'on soit
+        // entré par le SSO ce jour-là).
+        let me = body_json(get_with(&app, "/auth/me", Some(&cookie)).await).await;
+        assert_eq!(me["user"]["oidc"], serde_json::json!(true));
     }
 
     /// Sans authentification, le catalogue des droits et les comptes n'existent

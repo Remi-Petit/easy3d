@@ -351,6 +351,7 @@
     "mismatch": "Les deux saisies ne correspondent pas.",
     "changed": "Mot de passe changé. Les autres sessions ont été fermées.",
     "passwordHint": "8 caractères minimum. Le changement ferme les autres sessions : les appareils restés ouverts devront se reconnecter.",
+    "passwordSso": "Votre compte se connecte par le fournisseur d’identité (SSO) : son mot de passe se gère là-bas, pas ici. Un mot de passe posé ici continuerait de fonctionner même si votre compte est désactivé chez le fournisseur.",
     "tokens": "Jetons d’API",
     "tokenOnce": "Copiez ce jeton maintenant : il ne sera plus affiché.",
     "limitRights": "Limiter les droits",
@@ -399,7 +400,8 @@
       "permission_required": "Choisissez au moins un droit.",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
-      "invalid_credentials": "Mot de passe actuel incorrect."
+      "invalid_credentials": "Mot de passe actuel incorrect.",
+      "password_sso": "Ce compte se connecte par le fournisseur d’identité : son mot de passe se gère là-bas."
     }
   },
   "journal": {

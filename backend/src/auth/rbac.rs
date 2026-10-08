@@ -681,6 +681,15 @@ pub async fn change_password(
     caller: AuthUser,
     Json(request): Json<PasswordChange>,
 ) -> Response {
+    // Un compte rattaché au fournisseur d'identité n'a **pas** de mot de passe
+    // local, et c'est délibéré : un mot de passe posé ici continuerait de
+    // fonctionner après une désactivation chez le fournisseur — exactement ce
+    // qu'on veut éviter en confiant l'identité au SSO. Le refus est un **code**
+    // (`password_sso`), traduit par la page, qui grise déjà le formulaire.
+    if caller.0.oidc_subject.is_some() {
+        return auth::error(StatusCode::BAD_REQUEST, "password_sso");
+    }
+
     let stored = caller.0.password_hash.clone();
     let current = request.current.clone();
     let ok = match &stored {
