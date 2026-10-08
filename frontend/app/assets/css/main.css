@@ -2254,10 +2254,10 @@ select.admin__input option {
 
 /* ---------- Comptes : tableau des utilisateurs ---------- */
 /*
- * L'onglet « Utilisateurs » : une rangée de filtres, puis un tableau pleine
+ * L'onglet « Utilisateurs » : une rangée de filtres, puis une grille pleine
  * largeur. Le formulaire d'édition a quitté la page (il vit dans une fenêtre),
  * il n'y a donc plus de grille à deux colonnes ici — d'où le `flex` vertical,
- * qui laisse le tableau occuper toute la largeur de la carte.
+ * qui laisse la grille occuper toute la largeur de la carte.
  */
 .accounts {
   display: flex;
@@ -2293,64 +2293,6 @@ select.admin__input option {
   margin: 0;
 }
 
-/*
- * Racine du tableau : Nuxt UI y met `overflow-auto`, ce qui en ferait un
- * conteneur de défilement — l'en-tête collant ne collerait alors qu'à lui, qui
- * ne défile jamais. Ici il n'y a pas d'en-tête collant (la carte vit dans la
- * page), mais garder le défilement sur la page évite une barre de défilement
- * imbriquée sur une liste courte.
- */
-.accounts .accounts__table-root {
-  overflow: visible;
-}
-
-.accounts__table {
-  width: 100%;
-  font-size: 13px;
-}
-
-/* Fond opaque : les lignes passent dessous à la lecture (voir `sticky`). */
-.accounts .accounts__head {
-  background: var(--surface);
-}
-
-.accounts__th {
-  padding-right: 12px;
-  padding-left: 12px;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.accounts__td {
-  padding-right: 12px;
-  padding-left: 12px;
-  color: var(--muted);
-  /* Une adresse e-mail ne se coupe pas au milieu : la cellule revient à la
-     ligne plutôt que de déborder sur la colonne suivante. */
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/* La première colonne porte le nom du compte : c'est ce qu'on lit, il reste en
-   clair quand le reste est en retrait. */
-.accounts__td:first-child {
-  color: var(--text);
-}
-
-/* Pastilles d'état : la première ne se décale pas (le `margin-left` de
-   `.accounts__tag` sert à les séparer quand elles se suivent). */
-.accounts__td .accounts__tag:first-child {
-  margin-left: 0;
-}
-
-/* Deux colonnes à largeur fixe : l'état et l'unique bouton d'action ne
-   dépendent pas de la longueur du nom ou de l'adresse. */
-.accounts__table th:nth-child(4) { width: 150px; }
-.accounts__table th:nth-child(5) { width: 110px; }
-
 /* Champs des fenêtres de saisie : ils se partagent la rangée au lieu de
    s'arrêter à leur largeur intrinsèque — très différente d'un `input` à un
    `select`, ce qui rendait la colonne bancale. */
@@ -2363,6 +2305,204 @@ select.admin__input option {
 .accounts__form .admin__row > .admin__input {
   flex: 1 1 180px;
   min-width: 0;
+}
+
+/* ---------- Grille de données (façon `st.dataframe`) ---------- */
+/*
+ * La grille des comptes (voir `components/DataGrid.vue`) : dense, en-tête
+ * collant, filets de séparation, colonnes redimensionnables — la facture de
+ * Streamlit, qui s'appuie sur Glide Data Grid. C'est une `<table>` virtualisée,
+ * pas un canvas : les couleurs restent donc les jetons de l'application, et le
+ * texte est du vrai texte (sélection, zoom navigateur, lecteurs d'écran).
+ *
+ * La zone **défile** (`overflow: auto`) et c'est elle qui porte la hauteur :
+ * l'en-tête se colle en haut de cette boîte, pas de la fenêtre.
+ *
+ * ⚠️ Le bloc s'appelle `data-grid` et non `grid` : `.grid` est un **utilitaire
+ * Tailwind** (`display: grid`), et comme cette feuille ne déclarait pas de
+ * `display`, l'utilitaire gagnait — la grille devenait un conteneur CSS `grid`,
+ * la table s'étirait à la hauteur de la boîte, et les lignes se partageaient
+ * l'espace restant (des lignes de 157 px au lieu de 34). `display: block` est
+ * donc explicite ici, en plus du renommage.
+ */
+.data-grid {
+  display: block;
+  position: relative;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+/* Le cadre dit où est le clavier (la grille est focusable : c'est elle qui
+   reçoit les flèches). */
+.data-grid:focus-visible {
+  border-color: var(--accent);
+}
+
+.data-grid__table {
+  /* `fixed` : les largeurs viennent du `colgroup` (donc du redimensionnement),
+     et un texte long ne peut pas élargir sa colonne. */
+  table-layout: fixed;
+  width: 100%;
+  /* Somme des colonnes : c'est elle qui donne le défilement horizontal. En
+     dessous, les colonnes se partagent la place disponible. */
+  min-width: var(--grid-width);
+  /* `separate` + `border-spacing: 0` : avec `collapse`, Chrome perd les bordures
+     de l'en-tête collant. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.data-grid__th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  vertical-align: middle;
+  /* Pas de `overflow: hidden` ici : la poignée de redimensionnement dépasse de
+     quelques pixels à droite, et c'est le libellé qui porte l'ellipse. */
+  user-select: none;
+}
+
+.data-grid__th:last-child {
+  border-right: 0;
+}
+
+.data-grid__th--right,
+.data-grid__td--right {
+  text-align: right;
+}
+
+/* En-tête triable : c'est l'en-tête entier qui est cliquable (comme dans
+   Streamlit), pas une icône à viser. */
+.data-grid__th--tri {
+  cursor: pointer;
+}
+
+.data-grid__th--tri:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.data-grid__th--tri:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.data-grid__th-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Sans `min-width: 0`, un enfant flex refuse de rétrécir sous sa largeur
+     intrinsèque : l'ellipse ne s'appliquerait jamais. */
+  min-width: 0;
+}
+
+.data-grid__th-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Sens du tri : les mêmes flèches ↕ ↓ ↑ que le catalogue et le journal. */
+.data-grid__fleche {
+  flex: none;
+  color: var(--accent-2);
+}
+
+/*
+ * Poignée de redimensionnement, à cheval sur le filet de droite : elle dépasse
+ * de 4 px de chaque côté, donc on l'attrape sans viser au pixel.
+ */
+.data-grid__resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.data-grid__resize:hover {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+/* Dernière colonne : la poignée se rentre dans la cellule. Sinon elle dépasse
+   de 4 px, et ce dépassement suffit à faire apparaître un **ascenseur
+   horizontal** sous une grille qui tient pourtant dans sa carte. */
+.data-grid__th:last-child .data-grid__resize {
+  right: 0;
+}
+
+.data-grid__td {
+  height: var(--grid-row-h);
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  vertical-align: middle;
+  /* Une valeur tient sur une ligne : au-delà, elle est rognée (l'infobulle
+     éventuelle est posée par la page, qui seule connaît le sens du contenu). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-grid__td:last-child {
+  border-right: 0;
+}
+
+.data-grid__row {
+  cursor: pointer;
+}
+
+.data-grid__row:hover .data-grid__td {
+  background: var(--surface-2);
+}
+
+/* Ligne sélectionnée : elle se lit d'un coup d'œil, même au clavier. */
+.data-grid__row--on .data-grid__td {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Cellule du curseur : un cadre **dans** la cellule (`outline-offset` négatif),
+   pour ne pas décaler la grille au passage des flèches. */
+.data-grid__td--focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Une pastille d'état en tête de cellule ne se décale pas : le `margin-left` de
+   `.accounts__tag` sert à les séparer quand elles se suivent. */
+.data-grid__td .accounts__tag:first-child {
+  margin-left: 0;
+}
+
+/* Cales de virtualisation : de la hauteur, rien d'autre. */
+.data-grid__spacer td {
+  padding: 0;
+  border: 0;
+}
+
+.data-grid__empty {
+  height: 46px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* Cases à cocher des droits, groupées par domaine. */

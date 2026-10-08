@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
 import type { AccountPatch, AccountView, RolePatch, RoleView } from '~/composables/useAccounts'
+import type { GridColumn } from '~/utils/grid'
 import { PERM } from '~/utils/permissions'
 
 /**
@@ -207,6 +207,16 @@ function editerUser(user: AccountView) {
   editionOuverte.value = true
 }
 
+/**
+ * La grille rend la **ligne** qu'elle a reçue (un objet de données, pas un
+ * compte typé) : on retrouve le compte par son identifiant, puisque c'est lui
+ * qui fait foi — la grille peut avoir été rendue avant un rafraîchissement.
+ */
+function ouvrirCompte(row: Record<string, unknown>) {
+  const compte = comptes.users.value.find((user) => user.uuid === row.uuid)
+  if (compte) editerUser(compte)
+}
+
 const compteSelectionne = computed(() =>
   comptes.users.value.find((user) => user.uuid === selectedUser.value),
 )
@@ -289,19 +299,37 @@ const lignes = computed<LigneCompte[]>(() =>
 )
 
 /**
- * Colonnes, décrites pour TanStack (le moteur de `UTable`) : Nuxt UI les
- * habille, la page n'écrit plus de `<td>`.
+ * Colonnes de la grille (voir `DataGrid.vue` et `utils/grid.ts`).
  *
- * Les deux dernières n'ont pas de valeur à elles — un état, puis des boutons —
- * et sont donc désignées par leur seul `id` : c'est lui qui nomme les gabarits
- * de cellule (`#statut-cell`, `#actions-cell`).
+ * Les largeurs sont des **propositions** : la grille les laisse ajuster à la
+ * souris, et le redimensionnement vit chez elle — la page ne le sait pas.
+ *
+ * Leur somme (≈ 780 px) tient dans la carte aux largeurs de fenêtre usuelles :
+ * au-delà, la grille défile horizontalement (la colonne des actions, alignée à
+ * droite, sortirait sinon de la zone visible).
+ *
+ * Deux colonnes ne se trient pas sur ce qu'elles montrent : les rôles (mis en
+ * mots, donc triés sur le libellé) et l'état (`0`/`1` : un compte désactivé
+ * passe en tête, ce qui est exactement ce qu'on vient chercher).
  */
-const colonnes = computed<TableColumn<LigneCompte>[]>(() => [
-  { accessorKey: 'username', header: t('accounts.userName') },
-  { accessorKey: 'email', header: t('accounts.email') },
-  { accessorKey: 'rolesLabel', header: t('accounts.roles') },
-  { id: 'statut', header: t('accounts.status') },
-  { id: 'actions', header: t('accounts.actions') },
+const colonnes = computed<GridColumn<LigneCompte>[]>(() => [
+  { id: 'username', header: t('accounts.userName'), width: 180, sortable: true },
+  { id: 'email', header: t('accounts.email'), width: 230, sortable: true },
+  {
+    id: 'rolesLabel',
+    header: t('accounts.roles'),
+    width: 140,
+    sortable: true,
+    sortValue: (compte) => compte.rolesLabel,
+  },
+  {
+    id: 'statut',
+    header: t('accounts.status'),
+    width: 130,
+    sortable: true,
+    sortValue: (compte) => (compte.disabled ? '0' : '1'),
+  },
+  { id: 'actions', header: t('accounts.actions'), width: 100, align: 'right' },
 ])
 
 // ── Création d'un compte ─────────────────────────────────────────────────
@@ -427,26 +455,21 @@ function toggleIn(list: string[], id: string) {
         </p>
 
         <!--
-          Le tableau vient de Nuxt UI (`UTable`, TanStack Table sous le capot) :
-          en-tête, état vide, colonnes. Ce qui reste à cette page, c'est ce que
-          la liste des comptes a de particulier — les pastilles d'état, et le
-          bouton qui ouvre l'éditeur.
+          La grille maison (`DataGrid.vue`) : virtualisée, en-tête collant, tri
+          au clic sur l'en-tête, colonnes ajustables, flèches au clavier. C'est
+          la facture d'un `st.dataframe` de Streamlit, sans second framework.
         -->
-        <UTable
-          :data="lignes"
+        <DataGrid
+          v-model:selected="selectedUser"
           :columns="colonnes"
+          :rows="lignes"
+          :label="t('accounts.users')"
           :loading="comptes.loading.value"
-          :ui="{
-            root: 'accounts__table-root',
-            base: 'accounts__table',
-            thead: 'accounts__head',
-            th: 'accounts__th',
-            td: 'accounts__td',
-            empty: 'admin__empty',
-          }"
+          :empty="filtreActif ? t('accounts.noMatch') : t('accounts.noUser')"
+          @open="ouvrirCompte"
         >
-          <template #rolesLabel-cell="{ row }">
-            {{ row.original.rolesLabel || t('accounts.noRole') }}
+          <template #cell-rolesLabel="{ row }">
+            {{ row.rolesLabel || t('accounts.noRole') }}
           </template>
 
           <!--
@@ -455,40 +478,30 @@ function toggleIn(list: string[], id: string) {
             cas ordinaire — il se dit, lui aussi, plutôt que de laisser la
             cellule vide.
           -->
-          <template #statut-cell="{ row }">
-            <span v-if="row.original.disabled" class="accounts__tag accounts__tag--off">
+          <template #cell-statut="{ row }">
+            <span v-if="row.disabled" class="accounts__tag accounts__tag--off">
               {{ t('accounts.disabled') }}
             </span>
-            <span v-if="row.original.oidc" class="accounts__tag accounts__tag--on">
+            <span v-if="row.oidc" class="accounts__tag accounts__tag--on">
               {{ t('accounts.oidc') }}
             </span>
-            <span v-if="!row.original.disabled && !row.original.oidc" class="accounts__tag">
+            <span v-if="!row.disabled && !row.oidc" class="accounts__tag">
               {{ t('accounts.active') }}
             </span>
           </template>
 
-          <template #actions-cell="{ row }">
+          <template #cell-actions="{ row }">
             <button
               v-if="peutEcrireComptes"
               type="button"
               class="admin__action"
-              @click="editerUser(row.original)"
+              @click="ouvrirCompte(row)"
             >
               {{ t('accounts.edit') }}
             </button>
             <span v-else class="admin__hint">{{ t('common.none') }}</span>
           </template>
-
-          <template #empty>
-            {{
-              comptes.loading.value
-                ? t('common.loading')
-                : filtreActif
-                  ? t('accounts.noMatch')
-                  : t('accounts.noUser')
-            }}
-          </template>
-        </UTable>
+        </DataGrid>
       </section>
 
       <!-- Création d'un compte : une fenêtre, ouverte sur un formulaire vierge

@@ -547,6 +547,14 @@
       "invalid_credentials": "Mot de passe actuel incorrect."
     }
   },
+  "grid": {
+    "sortDefault": "Trier par {column}",
+    "sortBy": "Trier par {column} : {mode}",
+    "sortNone": "ordre reçu",
+    "sortAsc": "croissant",
+    "sortDesc": "décroissant",
+    "resize": "Ajuster la largeur de {column}"
+  },
   "time": {
     "now": "à l’instant",
     "seconds": "il y a {count}s",

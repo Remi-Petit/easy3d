@@ -113,8 +113,8 @@ test('l’administration liste les comptes et le journal garde la connexion', as
 
   await page.goto('/admin/accounts')
   await expect(page.locator('h1')).toHaveText('Comptes', { timeout: 30_000 })
-  // L'administrateur créé au démarrage figure dans le tableau.
-  await expect(page.locator('.accounts__table tbody tr', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
+  // L'administrateur créé au démarrage figure dans la grille.
+  await expect(page.locator('.data-grid__row', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
 
   await page.goto('/admin/audit')
   await expect(page.locator('h1')).toHaveText('Journal', { timeout: 30_000 })
@@ -148,9 +148,9 @@ test('les comptes ont deux onglets, et un rôle s’y crée', async ({ page }) =
   await expect(onglets).toHaveCount(2)
   await expect(onglets.first()).toHaveText('Utilisateurs')
   await expect(onglets.first()).toHaveAttribute('aria-selected', 'true')
-  // L'administrateur créé au démarrage figure dans le tableau des utilisateurs,
+  // L'administrateur créé au démarrage figure dans la grille des utilisateurs,
   // et non dans la liste des rôles.
-  await expect(page.locator('.accounts__table tbody tr', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
+  await expect(page.locator('.data-grid__row', { hasText: ADMIN_USERNAME }).first()).toBeVisible()
 
   await onglets.nth(1).click()
   await expect(page).toHaveURL(/\/admin\/accounts\/roles$/)

@@ -545,6 +545,14 @@
       "invalid_credentials": "Aktuelles Passwort ist falsch."
     }
   },
+  "grid": {
+    "sortDefault": "Nach {column} sortieren",
+    "sortBy": "Nach {column} sortieren: {mode}",
+    "sortNone": "ursprüngliche Reihenfolge",
+    "sortAsc": "aufsteigend",
+    "sortDesc": "absteigend",
+    "resize": "Breite der Spalte {column} ändern"
+  },
   "time": {
     "now": "gerade eben",
     "seconds": "vor {count}s",
