@@ -700,6 +700,33 @@ pub async fn login(
         .unwrap_or(false);
 
     let user = match found {
+        // Un compte rattaché au fournisseur d'identité **n'entre pas par mot de
+        // passe**, même quand le mot de passe est le bon : c'est le fournisseur
+        // qui décide qui entre, et un mot de passe local continuerait de
+        // fonctionner après une désactivation chez lui — précisément ce que
+        // confier l'identité au SSO doit empêcher.
+        //
+        // Rien n'est effacé pour autant : l'empreinte reste en base, **inerte**,
+        // et resservira si le compte est détaché (`rbac::detach_oidc`). C'est
+        // l'entrée qui est filtrée, pas la donnée.
+        //
+        // **Exception : un administrateur** — c'est la porte de secours de
+        // l'installation si le fournisseur est en panne (décision utilisateur
+        // du 2026-10-08).
+        Some(user)
+            if verified
+                && !user.disabled
+                && user.oidc_subject.is_some()
+                && !auth.is_admin(&user).unwrap_or(false) =>
+        {
+            // Le mot de passe est **bon** : ce n'est pas une tentative de
+            // devinette, mais on la compte comme un refus (même façon de traiter
+            // un compte désactivé), et le journal note pourquoi — c'est ce qui
+            // permet de répondre à « pourquoi n'entre-t-elle plus ? ».
+            auth.record_failure(&login);
+            auth.log(&headers, "login_failed", None, &login, "password_sso");
+            return error(StatusCode::UNAUTHORIZED, "password_sso");
+        }
         Some(user) if verified && !user.disabled => user,
         _ => {
             auth.record_failure(&login);

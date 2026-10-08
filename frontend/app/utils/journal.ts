@@ -19,6 +19,7 @@ export const EVENT_KINDS = [
   'password_changed',
   'sso_login',
   'sso_refused',
+  'sso_detached',
   'token_created',
   'token_revoked',
   'account_created',
@@ -38,6 +39,7 @@ export const EVENT_KINDS = [
  */
 export const DETAIL_CODES = [
   'password',
+  'password_sso',
   'invalid_credentials',
   'rate_limited',
   'auto',
@@ -51,7 +53,7 @@ export const DETAIL_CODES = [
 ] as const
 
 /** Champs d'un compte qu'une modification peut concerner. */
-export const CHANGE_FIELDS = ['identity', 'password', 'disabled', 'enabled', 'roles', 'permissions'] as const
+export const CHANGE_FIELDS = ['identity', 'password', 'password_revoked', 'disabled', 'enabled', 'roles', 'permissions'] as const
 
 /** Un événement, tel que `/api/journal` le renvoie. */
 export interface JournalEvent {
@@ -120,7 +122,13 @@ export const EVENT_FAMILIES = {
   sessions: ['login_ok', 'sso_login', 'logout'],
   refusals: ['login_failed', 'login_blocked', 'sso_refused'],
   tokens: ['token_created', 'token_revoked'],
-  accounts: ['account_created', 'account_updated', 'account_deleted', 'password_changed'],
+  accounts: [
+    'account_created',
+    'account_updated',
+    'account_deleted',
+    'password_changed',
+    'sso_detached',
+  ],
   roles: ['role_created', 'role_updated', 'role_deleted'],
 } as const satisfies Record<string, readonly string[]>
 

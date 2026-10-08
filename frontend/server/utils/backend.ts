@@ -19,17 +19,21 @@ import { useRuntimeConfig } from '#imports'
 export async function backendCall(event: H3Event, path: string) {
   const base: string = useRuntimeConfig(event).hpccatApiBase
   const method = getMethod(event)
-  const withBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+  const withBody = method !== 'GET'
+  // Le corps est lu **avant** les en-têtes : un `DELETE` sans corps (le
+  // détachement SSO, par exemple) ne doit pas annoncer un `application/json`
+  // que le backend essaierait ensuite de lire comme du JSON vide.
+  const corps = withBody ? await readRawBody(event) : undefined
 
   try {
     // `$fetch.raw` (et non `$fetch`) : il faut le **code d'état** du backend pour
     // le rendre tel quel — une création répond 201, et l'interface s'en sert.
     const response = await $fetch.raw(`${base}${path}`, {
       method: method as 'GET' | 'POST' | 'PUT' | 'DELETE',
-      body: withBody ? ((await readRawBody(event)) ?? undefined) : undefined,
+      body: corps || undefined,
       headers: {
         ...backendHeaders(event),
-        ...(withBody
+        ...(corps
           ? { 'content-type': getRequestHeader(event, 'content-type') || 'application/json' }
           : {}),
       },

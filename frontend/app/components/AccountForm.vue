@@ -42,6 +42,10 @@ const emit = defineEmits<{
   submit: [patch: AccountDraft]
   /** Suppression confirmée — jamais proposée en création. */
   remove: []
+  /** Le mot de passe local a été retiré (confirmation déjà obtenue). */
+  revoke: []
+  /** Détachement du fournisseur d'identité, avec le mot de passe qui le remplace. */
+  detach: [password: string | undefined]
 }>()
 
 const { t } = useI18n()
@@ -56,6 +60,41 @@ const edition = computed(() => props.account != null)
 const estSuperuser = computed(() =>
   (props.account?.roles ?? []).some((role) => role.name === 'admin'),
 )
+
+/**
+ * Compte rattaché au fournisseur d'identité : il **n'entre pas par mot de passe**
+ * (c'est le serveur qui le refuse, `password_sso`), même quand le mot de passe est
+ * le bon — c'est ce qui empêche une porte de survivre à une désactivation chez le
+ * fournisseur.
+ *
+ * Rien n'est effacé pour autant : le mot de passe reste en base, inerte, et
+ * resservira si le compte est détaché. Ses deux infobulles ne disent donc pas la
+ * même chose selon qu'on a affaire à un administrateur — pour lui, le mot de
+ * passe reste une entrée : c'est la porte de secours de l'installation.
+ */
+const rattache = computed(() => props.account?.oidc === true)
+
+/** Retrait du mot de passe : confirmation en deux temps, sur place. */
+const retrait = ref(false)
+
+/** Détachement du SSO : confirmation sur place, avec le mot de passe à poser. */
+const detachement = ref(false)
+const motDePasseDetachement = ref('')
+
+/**
+ * Le détachement n'est possible qu'avec un mot de passe : soit le compte en a
+ * déjà un (il resservira tel quel), soit on en pose un ici. Sans lui, le compte
+ * ne serait plus joignable du tout — le serveur le refuse aussi
+ * (`password_required`).
+ */
+const detachementPossible = computed(
+  () => props.account?.has_password === true || motDePasseDetachement.value.length >= 8,
+)
+
+function detacher() {
+  if (!detachementPossible.value) return
+  emit('detach', motDePasseDetachement.value || undefined)
+}
 
 const draft = reactive({
   username: '',
@@ -171,9 +210,19 @@ const confirmation = ref(false)
         :aria-label="edition ? t('accounts.newPassword') : t('accounts.password')"
       />
     </div>
-    <!-- Le mot de passe est facultatif : un compte sans mot de passe ne se
-         connecte que par le fournisseur d'identité (SSO). -->
-    <p v-if="!edition" class="admin__hint">{{ t('accounts.passwordHint') }}</p>
+    <!--
+      Deux cas, qui ne disent pas la même chose :
+      - un compte **ratitaché** n'entre pas par mot de passe (c'est le fournisseur
+        qui décide), mais le mot de passe posé ici est conservé et resservira au
+        détachement ; pour un administrateur, il reste même une entrée ;
+      - à la création, il est facultatif : sans lui, le compte n'entre que par le
+        SSO.
+    -->
+    <p v-if="rattache && estSuperuser" class="admin__hint">
+      {{ t('accounts.attachedAdminHint') }}
+    </p>
+    <p v-else-if="rattache" class="admin__hint">{{ t('accounts.attachedHint') }}</p>
+    <p v-else-if="!edition" class="admin__hint">{{ t('accounts.passwordHint') }}</p>
 
     <span class="admin__label">{{ t('accounts.rolesOf') }}</span>
     <div class="admin__choices">
@@ -246,6 +295,77 @@ const confirmation = ref(false)
       >
         {{ t('accounts.remove') }}
       </button>
+    </div>
+
+    <!--
+      Les gestes qui touchent à l'**entrée** du compte : retirer le mot de passe
+      (il n'entrera plus que par le fournisseur) et, à l'inverse, l'en détacher.
+      Tous deux se confirment sur place — et le détachement demande le mot de
+      passe qui remplacera le SSO.
+    -->
+    <div
+      v-if="edition && writable && (account?.has_password || account?.oidc)"
+      class="admin__field admin__field--actions"
+    >
+      <button
+        v-if="account?.has_password"
+        type="button"
+        class="admin__action"
+        :disabled="busy"
+        @click="retrait = !retrait"
+      >
+        {{ retrait ? t('accounts.confirm') : t('accounts.revokePassword') }}
+      </button>
+      <button
+        v-if="retrait"
+        type="button"
+        class="admin__action admin__action--danger"
+        :disabled="busy"
+        @click="emit('revoke')"
+      >
+        {{ t('accounts.revokePassword') }}
+      </button>
+      <button
+        v-if="account?.oidc"
+        type="button"
+        class="admin__action"
+        :disabled="busy"
+        @click="detachement = !detachement"
+      >
+        {{ detachement ? t('common.cancel') : t('accounts.detach') }}
+      </button>
+    </div>
+
+    <div v-if="detachement" class="admin__field">
+      <!--
+        On ne demande un mot de passe que si le compte n'en a pas : sinon il
+        resservira tel quel (règle non destructive), et le détachement n'a plus
+        qu'un clic à faire.
+      -->
+      <template v-if="!account?.has_password">
+        <span class="admin__label">{{ t('accounts.detachPassword') }}</span>
+        <div class="admin__row">
+          <input
+            v-model="motDePasseDetachement"
+            type="password"
+            class="admin__input"
+            autocomplete="new-password"
+            :placeholder="t('accounts.newPassword')"
+            :aria-label="t('accounts.detachPassword')"
+          />
+        </div>
+      </template>
+      <p class="admin__hint">{{ t('accounts.detachHint') }}</p>
+      <div class="admin__field--actions">
+        <button
+          type="button"
+          class="admin__action admin__action--danger"
+          :disabled="busy || !detachementPossible"
+          @click="detacher()"
+        >
+          {{ t('accounts.detachConfirm') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

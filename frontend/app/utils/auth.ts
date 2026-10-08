@@ -72,6 +72,9 @@ export const AUTH_ERROR_CODES = [
   'rate_limited',
   'password_too_short',
   'password_too_long',
+  // Le compte est rattaché au fournisseur d'identité : le mot de passe local ne
+  // le fait pas entrer, même quand il est bon (voir `auth::login`).
+  'password_sso',
   'internal_error',
   // Retours du fournisseur d'identité (`/auth/oidc/callback`), déposés dans
   // l'URL de la page de connexion : `?error=<code>`.

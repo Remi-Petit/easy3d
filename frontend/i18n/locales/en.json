@@ -46,6 +46,7 @@
       "unknown": "Sign-in failed.",
       "auth_disabled": "Authentication is not enabled on this server.",
       "invalid_credentials": "Wrong username or password.",
+      "password_sso": "This account signs in through the identity provider: use the SSO sign-in button.",
       "rate_limited": "Too many attempts: try again in a minute.",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
@@ -351,7 +352,7 @@
     "mismatch": "The two entries do not match.",
     "changed": "Password changed. The other sessions have been closed.",
     "passwordHint": "8 characters minimum. Changing it closes the other sessions: devices left open will have to sign in again.",
-    "passwordSso": "Your account signs in through the identity provider (SSO): its password is managed there, not here. A password set here would keep working even if your account is disabled at the provider.",
+    "passwordSso": "Your account signs in through the identity provider (SSO): it manages your password, and a local password would not let you in here.",
     "tokens": "API tokens",
     "tokenOnce": "Copy this token now: it will not be shown again.",
     "limitRights": "Limit permissions",
@@ -447,6 +448,7 @@
       "password_changed": "Password changed",
       "sso_login": "SSO sign-in",
       "sso_refused": "SSO refused",
+      "sso_detached": "Detached from SSO",
       "token_created": "Token created",
       "token_revoked": "Token revoked",
       "account_created": "Account created",
@@ -458,6 +460,7 @@
     },
     "detail": {
       "password": "with a password",
+      "password_sso": "account attached to the identity provider",
       "invalid_credentials": "wrong username or password",
       "rate_limited": "too many attempts",
       "auto": "created on the fly",
@@ -472,6 +475,7 @@
     "change": {
       "identity": "identity",
       "password": "password",
+      "password_revoked": "password removed",
       "disabled": "disabled",
       "enabled": "re-enabled",
       "roles": "roles",
@@ -489,6 +493,15 @@
     "userName": "Username",
     "email": "E-mail address",
     "password": "Password",    "passwordHint": "Optional: without a password, the account can only sign in through the identity provider (SSO).",
+    "attachedHint": "This account is attached to the identity provider: while it is, this password does not let it in — the provider decides. Nothing is erased: it will work again if you detach the account.",
+    "attachedAdminHint": "Attached account and administrator: this password still lets it in, even if the provider is down — it is the installation's way back in.",
+    "revokePassword": "Remove the password",
+    "passwordRevoked": "Password removed: this account now only signs in through the identity provider.",
+    "detach": "Detach from SSO",
+    "detachPassword": "Password to set",
+    "detachHint": "The account will no longer sign in through the provider: its password is what will let it in (8 characters minimum).",
+    "detachConfirm": "Detach and close the sessions",
+    "detached": "Account detached from the identity provider.",
     "oidc": "SSO",    "newPassword": "New password (blank = unchanged)",
     "rolesOf": "Roles",
     "direct": "Permissions granted to this account",
@@ -547,7 +560,9 @@
       "name_taken": "This name is already used.",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
-      "invalid_credentials": "Wrong current password."
+      "invalid_credentials": "Wrong current password.",
+      "password_required": "Set a password: without one, this account could no longer sign in at all.",
+      "not_attached": "This account is not attached to the identity provider."
     }
   },
   "grid": {

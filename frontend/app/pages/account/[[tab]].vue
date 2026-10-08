@@ -111,8 +111,14 @@ const passwordError = ref('')
  * l'explication au survol et en clair : le serveur refuse de toute façon
  * (`password_sso`), et c'est voulu — un mot de passe local continuerait de
  * fonctionner après une désactivation chez le fournisseur.
+ *
+ * **Sauf pour un administrateur** : son mot de passe est la porte de secours de
+ * l'installation si le fournisseur est en panne. Le serveur applique la même
+ * règle.
  */
-const compteSso = computed(() => user.value?.oidc === true)
+const compteSso = computed(
+  () => user.value?.oidc === true && !(user.value?.roles ?? []).includes('admin'),
+)
 
 /** Le formulaire est complet et les deux saisies concordent. */
 const passwordReady = computed(
