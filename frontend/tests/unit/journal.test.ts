@@ -84,6 +84,7 @@ describe('champs modifiables', () => {
     expect([...CHANGE_FIELDS]).toEqual([
       'identity',
       'password',
+      'password_revoked',
       'disabled',
       'enabled',
       'roles',

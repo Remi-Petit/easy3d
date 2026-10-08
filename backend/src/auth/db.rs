@@ -811,6 +811,27 @@ pub fn set_password_hash(conn: &Connection, uuid: &str, hash: &str) -> Result<()
     .map_err(err)
 }
 
+/// Retire l'empreinte du mot de passe : le compte n'entre plus que par le
+/// fournisseur d'identité (voir `rbac::MotDePasse::Retire`).
+pub fn clear_password_hash(conn: &Connection, uuid: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE users SET password_hash = NULL WHERE uuid = ?1",
+        params![uuid],
+    )
+    .map(|_| ())
+    .map_err(err)
+}
+
+/// Détache le compte du fournisseur d'identité (voir `rbac::detach_oidc`).
+pub fn clear_oidc_subject(conn: &Connection, uuid: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE users SET oidc_subject = NULL WHERE uuid = ?1",
+        params![uuid],
+    )
+    .map(|_| ())
+    .map_err(err)
+}
+
 /// Désactive ou réactive un compte.
 pub fn set_disabled(conn: &Connection, uuid: &str, disabled: bool) -> Result<(), String> {
     conn.execute(

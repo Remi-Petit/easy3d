@@ -45,11 +45,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<<<<<<< HEAD
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 466 clés, traduites à 100 %.<!-- langues:end -->
-=======
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 464 clés, traduites à 100 %.<!-- langues:end -->
->>>>>>> cbbb6a6e6f6b0777f0c3b684d7a747d2419420ef
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 481 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -282,10 +278,12 @@ droits du compte, y compris ceux qu'on lui ajouterait plus tard.
 
 ### Connexion par un fournisseur d'identité (SSO)
 
-Un compte peut se connecter **par mot de passe ou par le fournisseur d'identité**
-de l'organisation (Keycloak, Entra ID, Auth0, Google…) : les deux cohabitent, et
-l'identité obtenue par le fournisseur ouvre exactement la même session et les
-mêmes droits. Tout se règle dans **Administration → Fournisseur d'identité** — ou
+Un compte se connecte **par mot de passe ou par le fournisseur d'identité** de
+l'organisation (Keycloak, Entra ID, Auth0, Google…) : les deux modes cohabitent
+dans l'application, et l'identité obtenue par le fournisseur ouvre exactement la
+même session et les mêmes droits. Ils ne se **cumulent** pas sur un même compte :
+un compte rattaché au fournisseur n'a pas de mot de passe local (voir plus bas).
+Tout se règle dans **Administration → Fournisseur d'identité** — ou
 par l'environnement, qui gagne alors sur `config.yml` et dont les champs
 apparaissent grisés dans l'interface :
 
@@ -319,12 +317,16 @@ première connexion : l'adresse e-mail peut ensuite changer chez le fournisseur
 sans casser le compte, et une autre identité ne peut pas prendre sa place. Le
 secret client n'est jamais renvoyé à l'interface (il y apparaît sous la forme
 `***`), et l'échange de code se fait **côté serveur** — le navigateur ne voit
-jamais ce secret. Un compte rattaché au fournisseur garde ses deux entrées
-possibles (SSO, et son mot de passe local s'il en avait déjà un), mais **son mot
-de passe ne se change plus dans easy3d** : *Mon compte* en grise le formulaire et
-le serveur refuse (`password_sso`). C'est délibéré — un mot de passe local
-continuerait de fonctionner après une désactivation chez le fournisseur, alors
-que le SSO est justement là pour décider qui entre.
+jamais ce secret. **Un compte rattaché n'entre pas par mot de passe** : le serveur
+le refuse (`password_sso`), même quand le mot de passe est le bon. C'est délibéré
+— un mot de passe local continuerait de fonctionner après une désactivation chez
+le fournisseur, alors que le SSO est justement là pour décider qui entre. Rien
+n'est effacé pour autant : l'empreinte reste en base, **inerte**, et resservira
+telle quelle si le compte est **détaché** depuis *Comptes* (« Détacher du SSO »,
+qui n'a alors plus rien à redemander). « Retirer le mot de passe » reste là pour
+l'effacer vraiment. **Seule exception : un administrateur rattaché**, dont le mot
+de passe continue d'ouvrir une session — c'est la porte de secours de
+l'installation si le fournisseur est en panne.
 
 #### Éprouver le SSO sans annuaire : le fournisseur fictif
 

@@ -46,6 +46,7 @@
       "unknown": "No se pudo iniciar sesión.",
       "auth_disabled": "La autenticación no está activada en este servidor.",
       "invalid_credentials": "Usuario o contraseña incorrectos.",
+      "password_sso": "Esta cuenta entra por el proveedor de identidad: usa el botón de SSO.",
       "rate_limited": "Demasiados intentos: vuelve a probar en un minuto.",
       "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
@@ -351,7 +352,7 @@
     "mismatch": "Las dos entradas no coinciden.",
     "changed": "Contraseña cambiada. Se han cerrado las demás sesiones.",
     "passwordHint": "Mínimo 8 caracteres. El cambio cierra las demás sesiones: los dispositivos abiertos tendrán que volver a entrar.",
-    "passwordSso": "Tu cuenta inicia sesión con el proveedor de identidad (SSO): la contraseña se gestiona allí, no aquí. Una contraseña puesta aquí seguiría funcionando aunque tu cuenta esté desactivada en el proveedor.",
+    "passwordSso": "Tu cuenta entra por el proveedor de identidad (SSO): es él quien gestiona tu contraseña, y una contraseña local no te dejaría entrar aquí.",
     "tokens": "Claves de API",
     "tokenOnce": "Copia esta clave ahora: no volverá a mostrarse.",
     "limitRights": "Limitar los permisos",
@@ -445,6 +446,7 @@
       "password_changed": "Contraseña cambiada",
       "sso_login": "Conexión SSO",
       "sso_refused": "SSO rechazado",
+      "sso_detached": "Desvinculado del SSO",
       "token_created": "Clave creada",
       "token_revoked": "Clave revocada",
       "account_created": "Cuenta creada",
@@ -456,6 +458,7 @@
     },
     "detail": {
       "password": "con contraseña",
+      "password_sso": "cuenta vinculada al proveedor de identidad",
       "invalid_credentials": "usuario o contraseña incorrectos",
       "rate_limited": "demasiados intentos",
       "auto": "creada al vuelo",
@@ -470,6 +473,7 @@
     "change": {
       "identity": "identidad",
       "password": "contraseña",
+      "password_revoked": "contraseña quitada",
       "disabled": "desactivada",
       "enabled": "reactivada",
       "roles": "roles",
@@ -488,6 +492,15 @@
     "email": "Correo electrónico",
     "password": "Contraseña",
     "passwordHint": "Opcional: sin contraseña, la cuenta solo entra por el proveedor de identidad (SSO).",
+    "attachedHint": "Cuenta vinculada al proveedor de identidad: mientras lo esté, esta contraseña no la deja entrar — decide el proveedor. No se borra nada: volverá a funcionar si desvinculas la cuenta.",
+    "attachedAdminHint": "Cuenta vinculada y administrador: esta contraseña sí la deja entrar, incluso si el proveedor está caído — es la vía de acceso de emergencia de la instalación.",
+    "revokePassword": "Quitar la contraseña",
+    "passwordRevoked": "Contraseña quitada: esta cuenta solo entra por el proveedor de identidad.",
+    "detach": "Desvincular del SSO",
+    "detachPassword": "Contraseña que asignar",
+    "detachHint": "La cuenta dejará de entrar por el proveedor: será su contraseña la que la deje entrar (mínimo 8 caracteres).",
+    "detachConfirm": "Desvincular y cerrar las sesiones",
+    "detached": "Cuenta desvinculada del proveedor de identidad.",
     "oidc": "SSO",
     "newPassword": "Nueva contraseña (vacío = sin cambios)",
     "rolesOf": "Roles",
@@ -547,7 +560,9 @@
       "name_taken": "Ese nombre ya está en uso.",
       "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
-      "invalid_credentials": "La contraseña actual es incorrecta."
+      "invalid_credentials": "La contraseña actual es incorrecta.",
+      "password_required": "Asigna una contraseña: sin ella, esta cuenta ya no podría entrar.",
+      "not_attached": "Esta cuenta no está vinculada al proveedor de identidad."
     }
   },
   "grid": {

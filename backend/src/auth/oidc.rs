@@ -536,7 +536,22 @@ pub fn provision(auth: &Auth, settings: &Settings, identity: &Identity) -> Resul
         if user.oidc_subject.is_some() {
             return Err("oidc_conflict".to_string());
         }
-        auth.db(|conn| db::set_oidc_subject(conn, &user.uuid, &identity.subject))?;
+        // **Le rattachement ne touche pas au mot de passe** : l'empreinte reste
+        // en base, inerte, et resservira si le compte est détaché
+        // (`rbac::detach_oidc`) — c'est l'**entrée** qui est filtrée, pas la
+        // donnée (voir `auth::login`).
+        //
+        // Les sessions ouvertes par ce mot de passe tombent en revanche — sauf
+        // celle qu'on ouvre juste après (l'ordre compte : la nouvelle session
+        // naît après ce bloc) — et celles d'un administrateur sont épargnées,
+        // comme son mot de passe : c'est la porte de secours de l'installation.
+        auth.db(|conn| {
+            db::set_oidc_subject(conn, &user.uuid, &identity.subject)?;
+            if !db::has_role(conn, &user.uuid, db::ADMIN_ROLE)? {
+                db::delete_sessions_of(conn, &user.uuid)?;
+            }
+            Ok(())
+        })?;
         return match user.disabled {
             true => Err("account_disabled".to_string()),
             // Relu après l'écriture : le compte qu'on rend doit porter le
@@ -1449,7 +1464,10 @@ mod tests {
             .unwrap();
         assert_eq!(user.uuid, prepare.uuid);
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-remi@exemple.fr"));
-        // Le mot de passe local reste utilisable : OIDC ne remplace rien.
+        // **Le rattachement ne détruit rien** : l'empreinte reste en base. Ce qui
+        // change, c'est l'**entrée** — `auth::login` refuse désormais le mot de
+        // passe d'un compte rattaché (règle non destructive du 2026-10-08), et le
+        // mot de passe resservira si le compte est détaché.
         assert!(user.password_hash.is_some());
 
         // Inconnu : refusé, avec un code que la page de connexion sait expliquer.
@@ -1474,6 +1492,52 @@ mod tests {
             provision(&auth, &reglages(Provisioning::Manual), &autre).unwrap_err(),
             "oidc_conflict"
         );
+    }
+
+    /// Le rattachement **ferme les sessions ouvertes** (l'entrée change de
+    /// nature) mais épargne celles d'un administrateur — comme son mot de passe :
+    /// c'est la porte de secours de l'installation, si le fournisseur est en
+    /// panne.
+    #[test]
+    fn le_rattachement_ferme_les_sessions_sauf_celles_d_un_administrateur() {
+        let (_dir, auth) = base();
+        for (nom, admin) in [("ouvrier", false), ("chef", true)] {
+            let prepare = db::NewUser::new(
+                nom,
+                &format!("{nom}@exemple.fr"),
+                Some(password::hash("motdepasse").unwrap()),
+            );
+            auth.db(|conn| db::insert_user(conn, &prepare)).unwrap();
+            if admin {
+                auth.db(|conn| {
+                    db::set_user_roles(conn, &prepare.uuid, &[db::ADMIN_ROLE.to_string()])
+                })
+                .unwrap();
+            }
+            let jeton = auth
+                .start_session(&prepare.uuid, &axum::http::HeaderMap::new())
+                .unwrap();
+
+            provision(
+                &auth,
+                &reglages(Provisioning::Manual),
+                &identite(&format!("{nom}@exemple.fr")),
+            )
+            .unwrap();
+
+            let vivante = auth
+                .db(|conn| db::session_user(conn, &jeton, db::now()))
+                .unwrap()
+                .is_some();
+            assert_eq!(vivante, admin, "session de {nom} après rattachement");
+
+            // Et le mot de passe est conservé, dans les deux cas.
+            let relu = auth
+                .db(|conn| db::find_by_uuid(conn, &prepare.uuid))
+                .unwrap()
+                .unwrap();
+            assert!(relu.password_hash.is_some(), "mot de passe de {nom}");
+        }
     }
 
     #[test]

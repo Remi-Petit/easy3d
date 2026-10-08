@@ -72,6 +72,11 @@ pub struct AccountView {
     /// distingue un compte qui peut entrer par le SSO d'un compte qui ne le peut
     /// pas encore.
     pub oidc: bool,
+    /// `true` si le compte a un mot de passe local.
+    ///
+    /// Dit **sans jamais sortir l'empreinte** (même règle que `config.yml` et sa
+    /// clé d'API) : l'interface sait ainsi s'il y a un mot de passe à retirer.
+    pub has_password: bool,
     pub created_at: i64,
 }
 
@@ -159,6 +164,7 @@ fn account_view(conn: &rusqlite::Connection, user: &db::User) -> Result<AccountV
         },
         disabled: user.disabled,
         oidc: user.oidc_subject.is_some(),
+        has_password: user.password_hash.is_some(),
         created_at: user.created_at,
     })
 }
@@ -283,6 +289,17 @@ pub struct UpdateAccount {
     pub disabled: Option<bool>,
 }
 
+/// Ce qu'une écriture de compte fait du **mot de passe**.
+///
+/// Trois cas, comme la clé d'API de `config.yml` (`Ai::merge_key`) : **absent**
+/// = ne pas toucher, **chaîne vide** = *retirer* (le compte n'entre plus que par
+/// le fournisseur d'identité), valeur = remplacer.
+enum MotDePasse {
+    Inchange,
+    Retire,
+    Remplace(String),
+}
+
 /// `PUT /users/{uuid}` — modification d'un compte.
 pub async fn update_user(
     State(state): State<AppState>,
@@ -298,17 +315,18 @@ pub async fn update_user(
         return auth::error(StatusCode::NOT_FOUND, "not_found");
     };
 
-    let hash = match request.password.as_deref().filter(|p| !p.is_empty()) {
+    let mot_de_passe = match request.password.as_deref() {
+        None => MotDePasse::Inchange,
+        Some("") => MotDePasse::Retire,
         Some(password) => {
             if let Err(code) = password::check_length(password) {
                 return auth::error(StatusCode::BAD_REQUEST, code);
             }
             match password::hash(password) {
-                Ok(hash) => Some(hash),
+                Ok(hash) => MotDePasse::Remplace(hash),
                 Err(e) => return auth::internal(&e),
             }
         }
-        None => None,
     };
 
     let roles = match request.roles.as_ref() {
@@ -349,9 +367,25 @@ pub async fn update_user(
             db::update_identity(conn, &uuid, username, email)?;
             changes.push("identity");
         }
-        if let Some(hash) = &hash {
-            db::set_password_hash(conn, &uuid, hash)?;
-            changes.push("password");
+        // Un compte rattaché au fournisseur d'identité **peut** recevoir un mot
+        // de passe : c'est l'**entrée** qui est filtrée, pas la donnée (voir
+        // `auth::login`, qui refuse le mot de passe d'un compte rattaché). Le mot
+        // de passe posé ici reste donc inerte tant que le compte est rattaché,
+        // et resservira s'il est détaché — c'est ce qui permet à un
+        // administrateur de préparer la sortie du SSO.
+        match &mot_de_passe {
+            MotDePasse::Inchange => {}
+            // Retirer le mot de passe : le compte n'entre plus que par le
+            // fournisseur. Les sessions ne sont **pas** fermées : une session
+            // SSO en cours est légitime, c'est l'entrée locale qu'on ferme.
+            MotDePasse::Retire => {
+                db::clear_password_hash(conn, &uuid)?;
+                changes.push("password_revoked");
+            }
+            MotDePasse::Remplace(hash) => {
+                db::set_password_hash(conn, &uuid, hash.as_str())?;
+                changes.push("password");
+            }
         }
         if let Some(disabled) = request.disabled {
             db::set_disabled(conn, &uuid, disabled)?;
@@ -431,6 +465,98 @@ pub async fn delete_user(
         }
         Ok(None) => auth::error(StatusCode::NOT_FOUND, "not_found"),
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
+        Err(e) => auth::internal(&e),
+    }
+}
+
+/// Demande de détachement : le mot de passe à poser si le compte n'en a pas.
+#[derive(Debug, Deserialize, Default)]
+pub struct DetachAccount {
+    pub password: Option<String>,
+}
+
+/// `DELETE /users/{uuid}/oidc` — détache le compte du fournisseur d'identité.
+///
+/// C'est le geste **inverse** du rattachement (qui se fait au premier login SSO),
+/// et il n'existe que par symétrie : sans lui, un compte rattaché par erreur — ou
+/// dont on veut rendre la main à un annuaire qu'on abandonne — resterait attaché
+/// pour toujours, récupérable seulement en base.
+///
+/// Après lui, le compte est un compte local ordinaire : il lui faut donc un mot
+/// de passe. Si le compte n'en a pas, le mot de passe se pose **dans le même
+/// geste** (`{"password": "…"}`) — sinon le détachement le rendrait
+/// inaccessible : plus de SSO, aucune entrée locale.
+pub async fn detach_oidc(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(target) = (match state.auth.db(|conn| db::find_by_uuid(conn, &uuid)) {
+        Ok(user) => user,
+        Err(e) => return auth::internal(&e),
+    }) else {
+        return auth::error(StatusCode::NOT_FOUND, "not_found");
+    };
+    if target.oidc_subject.is_none() {
+        // Le dire plutôt que de laisser croire à une action : détacher un compte
+        // qui ne l'est pas ne change rien, et l'interface a mieux à afficher.
+        return auth::error(StatusCode::BAD_REQUEST, "not_attached");
+    }
+
+    // Le corps est **facultatif** : `{"password": "…"}` ou rien du tout. On le lit
+    // donc brut plutôt qu'en `Json<…>`, qui refuserait une requête sans corps —
+    // un `DELETE` lancé d'une ligne de commande, par exemple.
+    let demande: DetachAccount = if body.is_empty() {
+        DetachAccount::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(demande) => demande,
+            Err(e) => {
+                return auth::error(StatusCode::BAD_REQUEST, &format!("corps illisible : {e}"));
+            }
+        }
+    };
+    let hash = match demande.password.as_deref().filter(|p| !p.is_empty()) {
+        Some(password) => {
+            if let Err(code) = password::check_length(password) {
+                return auth::error(StatusCode::BAD_REQUEST, code);
+            }
+            match password::hash(password) {
+                Ok(hash) => Some(hash),
+                Err(e) => return auth::internal(&e),
+            }
+        }
+        None => None,
+    };
+    if hash.is_none() && target.password_hash.is_none() {
+        return auth::error(StatusCode::BAD_REQUEST, "password_required");
+    }
+
+    let result = state.auth.db(|conn| {
+        if let Some(hash) = &hash {
+            db::set_password_hash(conn, &uuid, hash)?;
+        }
+        db::clear_oidc_subject(conn, &uuid)?;
+        // L'identité change de nature : les sessions ouvertes par le SSO ne
+        // doivent pas survivre. Le prochain login passe par le mot de passe, et
+        // c'est ce qu'on veut rendre visible.
+        db::delete_sessions_of(conn, &uuid)?;
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => {
+            state.auth.log(
+                &headers,
+                "sso_detached",
+                Some(&caller.0.uuid),
+                &target.username,
+                "",
+            );
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) => auth::internal(&e),
     }
 }
@@ -686,8 +812,17 @@ pub async fn change_password(
     // fonctionner après une désactivation chez le fournisseur — exactement ce
     // qu'on veut éviter en confiant l'identité au SSO. Le refus est un **code**
     // (`password_sso`), traduit par la page, qui grise déjà le formulaire.
+    //
+    // **Exception : un administrateur.** C'est la porte de secours de
+    // l'installation — sans elle, un fournisseur en panne mettrait tout le monde
+    // dehors, y compris celui qui doit réparer. Le trou est borné à un compte
+    // qui peut déjà tout faire, et il se referme en retirant le mot de passe.
     if caller.0.oidc_subject.is_some() {
-        return auth::error(StatusCode::BAD_REQUEST, "password_sso");
+        match state.auth.is_admin(&caller.0) {
+            Ok(true) => {}
+            Ok(false) => return auth::error(StatusCode::BAD_REQUEST, "password_sso"),
+            Err(e) => return auth::internal(&e),
+        }
     }
 
     let stored = caller.0.password_hash.clone();

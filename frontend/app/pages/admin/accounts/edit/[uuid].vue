@@ -72,6 +72,35 @@ async function enregistrer(patch: AccountDraft) {
   })
 }
 
+/**
+ * Retire le mot de passe local : le compte n'entrera plus que par le
+ * fournisseur d'identité. C'est le geste qui **referme la porte locale** — celle
+ * qui resterait ouverte même après une désactivation chez le fournisseur.
+ */
+async function retirerMotDePasse() {
+  if (!(await comptes.revokePassword(uuid.value))) return
+  toast.add({
+    title: t('accounts.passwordRevoked'),
+    color: 'success',
+    icon: 'i-lucide-check',
+    duration: SAVED_MS,
+  })
+}
+
+/**
+ * Détache le compte du fournisseur : il redevient un compte local ordinaire, et
+ * c'est le mot de passe posé dans le même geste qui le fait entrer.
+ */
+async function detacher(password?: string) {
+  if (!(await comptes.detachOidc(uuid.value, password))) return
+  toast.add({
+    title: t('accounts.detached'),
+    color: 'success',
+    icon: 'i-lucide-check',
+    duration: SAVED_MS,
+  })
+}
+
 /** Supprime le compte, puis revient à la liste — il n'y a plus rien à montrer. */
 async function supprimer() {
   if (await comptes.deleteAccount(uuid.value)) void navigateTo('/admin/accounts')
@@ -110,6 +139,8 @@ function retour() {
         :writable="peutEcrire"
         @submit="enregistrer"
         @remove="supprimer"
+        @revoke="retirerMotDePasse"
+        @detach="detacher"
       />
 
       <div v-if="compte" class="admin__field admin__field--actions">

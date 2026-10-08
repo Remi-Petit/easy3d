@@ -46,6 +46,7 @@
       "unknown": "Connexion impossible.",
       "auth_disabled": "L’authentification n’est pas activée sur ce serveur.",
       "invalid_credentials": "Identifiant ou mot de passe incorrect.",
+      "password_sso": "Ce compte entre par le fournisseur d’identité : utilisez le bouton de connexion SSO.",
       "rate_limited": "Trop de tentatives : réessayez dans une minute.",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
@@ -351,7 +352,7 @@
     "mismatch": "Les deux saisies ne correspondent pas.",
     "changed": "Mot de passe changé. Les autres sessions ont été fermées.",
     "passwordHint": "8 caractères minimum. Le changement ferme les autres sessions : les appareils restés ouverts devront se reconnecter.",
-    "passwordSso": "Votre compte se connecte par le fournisseur d’identité (SSO) : son mot de passe se gère là-bas, pas ici. Un mot de passe posé ici continuerait de fonctionner même si votre compte est désactivé chez le fournisseur.",
+    "passwordSso": "Votre compte entre par le fournisseur d’identité (SSO) : c’est lui qui gère votre mot de passe, et un mot de passe local ne vous ferait pas entrer ici.",
     "tokens": "Jetons d’API",
     "tokenOnce": "Copiez ce jeton maintenant : il ne sera plus affiché.",
     "limitRights": "Limiter les droits",
@@ -447,6 +448,7 @@
       "password_changed": "Mot de passe changé",
       "sso_login": "Connexion SSO",
       "sso_refused": "SSO refusé",
+      "sso_detached": "Détaché du SSO",
       "token_created": "Jeton créé",
       "token_revoked": "Jeton révoqué",
       "account_created": "Compte créé",
@@ -458,6 +460,7 @@
     },
     "detail": {
       "password": "par mot de passe",
+      "password_sso": "compte rattaché au fournisseur d’identité",
       "invalid_credentials": "identifiant ou mot de passe incorrect",
       "rate_limited": "trop de tentatives",
       "auto": "création automatique",
@@ -472,6 +475,7 @@
     "change": {
       "identity": "identité",
       "password": "mot de passe",
+      "password_revoked": "mot de passe retiré",
       "disabled": "désactivé",
       "enabled": "réactivé",
       "roles": "rôles",
@@ -490,6 +494,15 @@
     "email": "Adresse e-mail",
     "password": "Mot de passe",
     "passwordHint": "Facultatif : sans mot de passe, le compte ne se connecte que par le fournisseur d’identité (SSO).",
+    "attachedHint": "Compte rattaché au fournisseur d’identité : tant qu’il l’est, ce mot de passe ne permet pas d’entrer — c’est le fournisseur qui décide. Rien n’est effacé pour autant : il resservira si vous détachez le compte.",
+    "attachedAdminHint": "Compte rattaché et administrateur : ce mot de passe reste une entrée, même si le fournisseur est en panne — c’est la porte de secours de l’installation.",
+    "revokePassword": "Retirer le mot de passe",
+    "passwordRevoked": "Mot de passe retiré : ce compte n’entre plus que par le fournisseur d’identité.",
+    "detach": "Détacher du SSO",
+    "detachPassword": "Mot de passe à poser",
+    "detachHint": "Le compte n’entrera plus par le fournisseur : c’est son mot de passe qui le fera entrer (8 caractères minimum).",
+    "detachConfirm": "Détacher et fermer les sessions",
+    "detached": "Compte détaché du fournisseur d’identité.",
     "oidc": "SSO",
     "newPassword": "Nouveau mot de passe (vide = inchangé)",
     "rolesOf": "Rôles",
@@ -549,7 +562,9 @@
       "name_taken": "Ce nom est déjà utilisé.",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
-      "invalid_credentials": "Mot de passe actuel incorrect."
+      "invalid_credentials": "Mot de passe actuel incorrect.",
+      "password_required": "Posez un mot de passe : sans lui, ce compte ne pourrait plus entrer du tout.",
+      "not_attached": "Ce compte n’est pas rattaché au fournisseur d’identité."
     }
   },
   "grid": {

@@ -37,6 +37,8 @@ export interface AccountView {
   disabled: boolean
   /** Rattaché au fournisseur d'identité (voir `oidc_subject` en base). */
   oidc: boolean
+  /** `true` si le compte a un mot de passe local — sans jamais sortir l'empreinte. */
+  has_password: boolean
   created_at: number
 }
 
@@ -177,6 +179,30 @@ export function useAccounts() {
       write(() => $fetch('/api/users', { method: 'POST', body: account })),
     updateAccount: (uuid: string, patch: AccountPatch) =>
       write(() => $fetch(`/api/users/${encodeURIComponent(uuid)}`, { method: 'PUT', body: patch })),
+    /**
+     * Retire le mot de passe local : le compte n'entre plus que par le
+     * fournisseur d'identité (chaîne **vide**, distincte de « absent »).
+     */
+    revokePassword: (uuid: string) =>
+      write(() =>
+        $fetch(`/api/users/${encodeURIComponent(uuid)}`, {
+          method: 'PUT',
+          body: { password: '' },
+        }),
+      ),
+    /**
+     * Détache le compte du fournisseur d'identité.
+     *
+     * Un compte rattaché n'a pas de mot de passe local : le détachement en pose
+     * un **dans le même geste**, sinon le compte ne serait plus joignable du tout.
+     */
+    detachOidc: (uuid: string, password?: string) =>
+      write(() =>
+        $fetch(`/api/users/${encodeURIComponent(uuid)}/oidc`, {
+          method: 'DELETE',
+          body: password ? { password } : {},
+        }),
+      ),
     deleteAccount: (uuid: string) =>
       write(() => $fetch(`/api/users/${encodeURIComponent(uuid)}`, { method: 'DELETE' })),
     createRole: (role: RolePatch & { name: string; from?: string }) =>

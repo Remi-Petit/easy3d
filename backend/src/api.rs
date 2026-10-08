@@ -340,6 +340,11 @@ pub fn routes(state: AppState) -> Router {
             .route(
                 "/users/{uuid}",
                 put(auth::rbac::update_user).delete(auth::rbac::delete_user),
+            )
+            // Geste inverse du rattachement SSO : voir `rbac::detach_oidc`.
+            .route(
+                "/users/{uuid}/oidc",
+                axum::routing::delete(auth::rbac::detach_oidc),
             ),
         &state,
         auth::permissions::USERS_WRITE,
@@ -3821,6 +3826,182 @@ mod tests {
         assert_eq!(me["user"]["oidc"], serde_json::json!(true));
     }
 
+    /// Un compte rattaché **n'entre pas par mot de passe**, même quand le mot de
+    /// passe est le bon : c'est le fournisseur qui décide qui entre.
+    ///
+    /// Règle **non destructive** (choix de l'utilisateur, 2026-10-08) : le mot de
+    /// passe posé ici reste en base, inerte, et resservira au détachement. Seul un
+    /// administrateur y échappe — porte de secours de l'installation.
+    #[tokio::test]
+    async fn un_compte_rattache_entre_par_le_fournisseur_pas_par_mot_de_passe() {
+        let (app, _dir) = app_avec_comptes(|auth| {
+            compte_rattache(auth, "ouvrier", false);
+            compte_rattache(auth, "patron", true);
+        });
+        let admin = connecte(&app, "remi", "motdepasse").await;
+
+        // On **peut** poser un mot de passe à un compte rattaché : c'est l'entrée
+        // qui est filtrée, pas la donnée.
+        let uuid = compte_uuid(&app, &admin, "ouvrier").await;
+        let res = put_json(
+            &app,
+            &format!("/users/{uuid}"),
+            serde_json::json!({ "password": "motdepasse" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            compte_json(&app, &admin, "ouvrier").await["has_password"],
+            serde_json::json!(true)
+        );
+
+        // Mais il ne permet pas d'entrer, et le refus **dit pourquoi** (le mot de
+        // passe est bon : ce n'est pas une devinette, c'est une entrée fermée).
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "ouvrier", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(body_text(res).await, "password_sso");
+        // Rien n'a été détruit au passage.
+        assert_eq!(
+            compte_json(&app, &admin, "ouvrier").await["has_password"],
+            serde_json::json!(true)
+        );
+
+        // Un administrateur rattaché, lui, entre par mot de passe : c'est la porte
+        // de secours de l'installation si le fournisseur est en panne.
+        let uuid = compte_uuid(&app, &admin, "patron").await;
+        let res = put_json(
+            &app,
+            &format!("/users/{uuid}"),
+            serde_json::json!({ "password": "motdepasse" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let _ = connecte(&app, "patron", "motdepasse").await;
+    }
+
+    /// Retirer le mot de passe (`""`) : le compte n'entre plus que par le
+    /// fournisseur, et l'ancien mot de passe ne vaut plus rien.
+    #[tokio::test]
+    async fn retirer_le_mot_de_passe_ferme_l_entree_locale() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "temporaire", vec![lecteur]).await;
+
+        assert_eq!(
+            compte_json(&app, &admin, "temporaire").await["has_password"],
+            serde_json::json!(true)
+        );
+
+        let uuid = compte_uuid(&app, &admin, "temporaire").await;
+        let res = put_json(
+            &app,
+            &format!("/users/{uuid}"),
+            serde_json::json!({ "password": "" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // L'entrée locale est fermée : ni le mot de passe, ni `has_password`.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "temporaire", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            compte_json(&app, &admin, "temporaire").await["has_password"],
+            serde_json::json!(false)
+        );
+    }
+
+    /// Détacher un compte du fournisseur : le geste inverse du rattachement.
+    ///
+    /// Un compte détaché **doit** avoir un mot de passe, sans quoi il ne serait
+    /// plus joignable du tout : il se pose dans le même geste.
+    #[tokio::test]
+    async fn detacher_un_compte_rattache_exige_un_mot_de_passe() {
+        let (app, _dir) = app_avec_comptes(|auth| {
+            compte_rattache(auth, "detache", false);
+        });
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let uuid = compte_uuid(&app, &admin, "detache").await;
+        let route = format!("/users/{uuid}/oidc");
+
+        // Sans mot de passe, le compte deviendrait inaccessible : refusé.
+        let res = delete_json(&app, &route, None, Some(&admin)).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "password_required");
+
+        // Avec : le compte devient un compte local ordinaire, qui entre par mot
+        // de passe, et le rattachement a disparu.
+        let res = delete_json(
+            &app,
+            &route,
+            Some(serde_json::json!({ "password": "motdepasse" })),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let _ = connecte(&app, "detache", "motdepasse").await;
+        let vu = compte_json(&app, &admin, "detache").await;
+        assert_eq!(vu["oidc"], serde_json::json!(false));
+        assert_eq!(vu["has_password"], serde_json::json!(true));
+
+        // Le geste ne se rejoue pas dans le vide.
+        let res = delete_json(&app, &route, None, Some(&admin)).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_text(res).await, "not_attached");
+    }
+
+    /// Le détachement **rend son mot de passe à l'entrée** : l'empreinte n'a
+    /// jamais été effacée, donc il n'y a rien à retaper (règle non destructive).
+    #[tokio::test]
+    async fn detacher_un_compte_rend_son_mot_de_passe_a_l_entree() {
+        let (app, _dir) = app_avec_comptes(|auth| {
+            compte_rattache(auth, "detache", false);
+        });
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let uuid = compte_uuid(&app, &admin, "detache").await;
+
+        // Un mot de passe posé **pendant** que le compte est rattaché…
+        let res = put_json(
+            &app,
+            &format!("/users/{uuid}"),
+            serde_json::json!({ "password": "motdepasse" }),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        // …ne permet pas d'entrer : c'est le fournisseur qui décide.
+        let res = post_json(
+            &app,
+            "/auth/login",
+            serde_json::json!({ "login": "detache", "password": "motdepasse" }),
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // Détaché **sans** donner de mot de passe : il n'y a rien à retaper.
+        let res = delete_json(&app, &format!("/users/{uuid}/oidc"), None, Some(&admin)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Et le mot de passe retrouve son effet, tel quel.
+        let _ = connecte(&app, "detache", "motdepasse").await;
+    }
+
     /// Sans authentification, le catalogue des droits et les comptes n'existent
     /// pas : le reste du serveur se comporte comme avant.
     #[tokio::test]
@@ -4346,16 +4527,64 @@ mod tests {
 
     /// L'identifiant d'un compte, par son nom (`/users`).
     async fn compte_uuid(app: &Router, cookie: &str, username: &str) -> String {
+        compte_json(app, cookie, username).await["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Un compte tel que `/users` le montre.
+    async fn compte_json(app: &Router, cookie: &str, username: &str) -> serde_json::Value {
         let v = body_json(get_with(app, "/users", Some(cookie)).await).await;
         v["users"]
             .as_array()
             .unwrap()
             .iter()
             .find(|user| user["username"] == username)
-            .unwrap_or_else(|| panic!("compte « {username} » absent"))["uuid"]
-            .as_str()
-            .unwrap()
-            .to_string()
+            .unwrap_or_else(|| panic!("compte « {username} » absent"))
+            .clone()
+    }
+
+    /// `DELETE` avec un corps JSON optionnel (le détachement SSO en prend un).
+    async fn delete_json(
+        app: &Router,
+        uri: &str,
+        body: Option<serde_json::Value>,
+        cookie: Option<&str>,
+    ) -> Response {
+        let mut request = Request::builder().method("DELETE").uri(uri);
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        let corps = match body {
+            Some(valeur) => {
+                request = request.header("content-type", "application/json");
+                Body::from(valeur.to_string())
+            }
+            None => Body::empty(),
+        };
+        app.clone().oneshot(request.body(corps).unwrap()).await.unwrap()
+    }
+
+    /// Un compte **rattaché** au fournisseur d'identité, comme après un premier
+    /// login SSO : sans mot de passe, et admin si on le demande.
+    fn compte_rattache(auth: &auth::Auth, username: &str, admin: bool) -> String {
+        let user = auth::rbac::insert_account(
+            auth,
+            auth::db::NewUser::new(username, &format!("{username}@exemple.fr"), None),
+            &[],
+            &[],
+        )
+        .unwrap();
+        auth.db(|conn| {
+            auth::db::set_oidc_subject(conn, &user.uuid, &format!("sub-{username}"))?;
+            if admin {
+                auth::db::set_user_roles(conn, &user.uuid, &[auth::db::ADMIN_ROLE.to_string()])?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        user.uuid
     }
 
     #[tokio::test]
