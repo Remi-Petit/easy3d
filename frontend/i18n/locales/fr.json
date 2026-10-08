@@ -513,6 +513,7 @@
     "noUser": "Aucun compte.",
     "hint": "Un droit coché ici s’ajoute à ceux des rôles. Le dernier administrateur ne peut être ni désactivé ni supprimé.",
     "defaultHint": "Sans rôle coché, le rôle par défaut de l’installation s’applique.",
+    "inherited": "Les droits grisés viennent des rôles cochés : pour les retirer, décochez le rôle.",
     "search": "Rechercher un compte",
     "addUser": "Ajouter un utilisateur",
     "editUser": "Modifier le compte",

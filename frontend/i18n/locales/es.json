@@ -511,6 +511,7 @@
     "noUser": "Ninguna cuenta.",
     "hint": "Un permiso marcado aquí se suma a los de los roles. El último administrador no puede desactivarse ni eliminarse.",
     "defaultHint": "Sin ningún rol marcado, se aplica el rol predeterminado de la instalación.",
+    "inherited": "Los permisos atenuados vienen de los roles marcados: para quitarlos, desmarca el rol.",
     "search": "Buscar una cuenta",
     "addUser": "Añadir un usuario",
     "editUser": "Editar la cuenta",

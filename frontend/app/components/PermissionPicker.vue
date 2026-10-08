@@ -14,6 +14,12 @@ const props = defineProps<{
   permissions: PermissionInfo[]
   /** Identifiants cochés. */
   modelValue: string[]
+  /**
+   * Droits venus des **rôles** du compte : ils sont cochés, mais pas décochables
+   * ici — un droit de rôle ne s'enlève qu'en enlevant le rôle, et le modèle du
+   * serveur ne sait qu'**ajouter** (`rôles ∪ droits directs`).
+   */
+  inherited?: string[]
   /** Superutilisateur : tout est coché, rien n'est décochable. */
   locked?: boolean
   /** Lecture seule (pas le droit de modifier). */
@@ -29,8 +35,13 @@ const groups = computed(() => byGroup(props.permissions))
 /** Libellé d'un droit, ou son identifiant si l'interface ne le connaît pas. */
 const label = (id: string) => permissionLabel(id, t, te)
 
+/** `true` si ce droit est apporté par un des rôles cochés (voir `inherited`). */
+function herite(id: string): boolean {
+  return (props.inherited ?? []).includes(id)
+}
+
 function toggle(id: string) {
-  if (props.locked || props.disabled) return
+  if (props.locked || props.disabled || herite(id)) return
   const next = props.modelValue.includes(id)
     ? props.modelValue.filter((known) => known !== id)
     : [...props.modelValue, id]
@@ -42,11 +53,16 @@ function toggle(id: string) {
   <div class="perm" :class="{ 'perm--locked': locked }">
     <fieldset v-for="group in groups" :key="group.group" class="perm__group">
       <legend class="perm__legend">{{ t(groupKey(group.group)) }}</legend>
-      <label v-for="permission in group.permissions" :key="permission.id" class="perm__item">
+      <label
+        v-for="permission in group.permissions"
+        :key="permission.id"
+        class="perm__item"
+        :class="{ 'perm__item--herite': herite(permission.id) }"
+      >
         <input
           type="checkbox"
-          :checked="locked || modelValue.includes(permission.id)"
-          :disabled="locked || disabled"
+          :checked="locked || herite(permission.id) || modelValue.includes(permission.id)"
+          :disabled="locked || disabled || herite(permission.id)"
           @change="toggle(permission.id)"
         />
         <span>{{ label(permission.id) }}</span>
@@ -58,5 +74,7 @@ function toggle(id: string) {
       ressemble à un rôle ordinaire qu'on ne comprend pas ne pas pouvoir modifier.
     -->
     <p v-if="locked" class="perm__note">{{ t('accounts.superuser') }}</p>
+    <!-- Droits des rôles cochés : cochés, mais venus d'ailleurs. -->
+    <p v-else-if="inherited?.length" class="perm__note">{{ t('accounts.inherited') }}</p>
   </div>
 </template>

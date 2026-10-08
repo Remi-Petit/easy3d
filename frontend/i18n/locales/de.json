@@ -511,6 +511,7 @@
     "noUser": "Keine Konten.",
     "hint": "Ein hier gesetztes Recht kommt zu denen der Rollen hinzu. Der letzte Administrator kann weder deaktiviert noch gelöscht werden.",
     "defaultHint": "Ohne angekreuzte Rolle gilt die Standardrolle der Installation.",
+    "inherited": "Ausgegraute Rechte stammen aus den angekreuzten Rollen: zum Entfernen die Rolle abwählen.",
     "search": "Konto suchen",
     "addUser": "Benutzer hinzufügen",
     "editUser": "Konto bearbeiten",
