@@ -25,7 +25,8 @@
     "loading": "Loading…",
     "unknownError": "Unknown error",
     "close": "Close (Esc)",
-    "none": "—"
+    "none": "—",
+    "cancel": "Cancel"
   },
   "language": {
     "label": "Language",
@@ -510,6 +511,21 @@
     "noUser": "No account.",
     "hint": "A permission ticked here adds to the ones from the roles. The last administrator cannot be disabled or deleted.",
     "defaultHint": "With no role ticked, the installation's default role applies.",
+    "search": "Search for an account",
+    "addUser": "Add a user",
+    "editUser": "Edit account",
+    "edit": "Edit",
+    "active": "Active",
+    "noMatch": "No account matches the filters.",
+    "status": "Status",
+    "actions": "Actions",
+    "filter": {
+      "allRoles": "All roles",
+      "allStatus": "All statuses",
+      "active": "Active",
+      "disabled": "Disabled",
+      "count": "{shown} of {total}"
+    },
     "errors": {
       "unknown": "Could not do that.",
       "forbidden": "Your account is not allowed to do that.",

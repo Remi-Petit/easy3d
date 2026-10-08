@@ -25,7 +25,8 @@
     "loading": "Chargement…",
     "unknownError": "Erreur inconnue",
     "close": "Fermer (Échap)",
-    "none": "—"
+    "none": "—",
+    "cancel": "Annuler"
   },
   "language": {
     "label": "Langue",
@@ -512,6 +513,21 @@
     "noUser": "Aucun compte.",
     "hint": "Un droit coché ici s’ajoute à ceux des rôles. Le dernier administrateur ne peut être ni désactivé ni supprimé.",
     "defaultHint": "Sans rôle coché, le rôle par défaut de l’installation s’applique.",
+    "search": "Rechercher un compte",
+    "addUser": "Ajouter un utilisateur",
+    "editUser": "Modifier le compte",
+    "edit": "Modifier",
+    "active": "Actif",
+    "noMatch": "Aucun compte ne correspond aux filtres.",
+    "status": "Statut",
+    "actions": "Actions",
+    "filter": {
+      "allRoles": "Tous les rôles",
+      "allStatus": "Tous les statuts",
+      "active": "Actifs",
+      "disabled": "Désactivés",
+      "count": "{shown} sur {total}"
+    },
     "errors": {
       "unknown": "Opération impossible.",
       "forbidden": "Votre compte n’a pas le droit de faire cela.",

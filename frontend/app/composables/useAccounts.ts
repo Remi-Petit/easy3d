@@ -35,6 +35,8 @@ export interface AccountView {
   /** Droits effectifs (rôles ∪ directs). */
   effective: string[]
   disabled: boolean
+  /** Rattaché au fournisseur d'identité (voir `oidc_subject` en base). */
+  oidc: boolean
   created_at: number
 }
 

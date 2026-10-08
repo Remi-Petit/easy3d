@@ -2246,6 +2246,125 @@ select.admin__input option {
   background: var(--accent-soft);
 }
 
+/* Compte désactivé : c'est l'état qui empêche d'entrer, donc en rouge. */
+.accounts__tag--off {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+/* ---------- Comptes : tableau des utilisateurs ---------- */
+/*
+ * L'onglet « Utilisateurs » : une rangée de filtres, puis un tableau pleine
+ * largeur. Le formulaire d'édition a quitté la page (il vit dans une fenêtre),
+ * il n'y a donc plus de grille à deux colonnes ici — d'où le `flex` vertical,
+ * qui laisse le tableau occuper toute la largeur de la carte.
+ */
+.accounts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* La rangée reprend `.toolbar` (celle du catalogue) : même facture, mais
+   `align-items: center` — les listes déroulantes, plus courtes que le champ de
+   recherche, ne s'étirent pas à sa hauteur. */
+.accounts__toolbar {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+/* Le geste d'ajout ferme la rangée : il ne dépend pas de ce qu'on filtre. */
+.accounts__add {
+  margin-left: auto;
+}
+
+/* Compte des lignes affichées, puis l'explication du droit en retrait. */
+.accounts__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+
+/* `.section-label` porte une marge de titre : dans la carte, l'espace vient du
+   `gap`, et ce compteur suit la première ligne. */
+.accounts__meta .section-label {
+  margin: 0;
+}
+
+/*
+ * Racine du tableau : Nuxt UI y met `overflow-auto`, ce qui en ferait un
+ * conteneur de défilement — l'en-tête collant ne collerait alors qu'à lui, qui
+ * ne défile jamais. Ici il n'y a pas d'en-tête collant (la carte vit dans la
+ * page), mais garder le défilement sur la page évite une barre de défilement
+ * imbriquée sur une liste courte.
+ */
+.accounts .accounts__table-root {
+  overflow: visible;
+}
+
+.accounts__table {
+  width: 100%;
+  font-size: 13px;
+}
+
+/* Fond opaque : les lignes passent dessous à la lecture (voir `sticky`). */
+.accounts .accounts__head {
+  background: var(--surface);
+}
+
+.accounts__th {
+  padding-right: 12px;
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.accounts__td {
+  padding-right: 12px;
+  padding-left: 12px;
+  color: var(--muted);
+  /* Une adresse e-mail ne se coupe pas au milieu : la cellule revient à la
+     ligne plutôt que de déborder sur la colonne suivante. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* La première colonne porte le nom du compte : c'est ce qu'on lit, il reste en
+   clair quand le reste est en retrait. */
+.accounts__td:first-child {
+  color: var(--text);
+}
+
+/* Pastilles d'état : la première ne se décale pas (le `margin-left` de
+   `.accounts__tag` sert à les séparer quand elles se suivent). */
+.accounts__td .accounts__tag:first-child {
+  margin-left: 0;
+}
+
+/* Deux colonnes à largeur fixe : l'état et l'unique bouton d'action ne
+   dépendent pas de la longueur du nom ou de l'adresse. */
+.accounts__table th:nth-child(4) { width: 150px; }
+.accounts__table th:nth-child(5) { width: 110px; }
+
+/* Champs des fenêtres de saisie : ils se partagent la rangée au lieu de
+   s'arrêter à leur largeur intrinsèque — très différente d'un `input` à un
+   `select`, ce qui rendait la colonne bancale. */
+.accounts__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accounts__form .admin__row > .admin__input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
 /* Cases à cocher des droits, groupées par domaine. */
 .perm {
   display: flex;

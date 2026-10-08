@@ -25,7 +25,8 @@
     "loading": "Wird geladen…",
     "unknownError": "Unbekannter Fehler",
     "close": "Schließen (Esc)",
-    "none": "—"
+    "none": "—",
+    "cancel": "Abbrechen"
   },
   "language": {
     "label": "Sprache",
@@ -510,6 +511,21 @@
     "noUser": "Keine Konten.",
     "hint": "Ein hier gesetztes Recht kommt zu denen der Rollen hinzu. Der letzte Administrator kann weder deaktiviert noch gelöscht werden.",
     "defaultHint": "Ohne angekreuzte Rolle gilt die Standardrolle der Installation.",
+    "search": "Konto suchen",
+    "addUser": "Benutzer hinzufügen",
+    "editUser": "Konto bearbeiten",
+    "edit": "Bearbeiten",
+    "active": "Aktiv",
+    "noMatch": "Kein Konto entspricht den Filtern.",
+    "status": "Status",
+    "actions": "Aktionen",
+    "filter": {
+      "allRoles": "Alle Rollen",
+      "allStatus": "Alle Status",
+      "active": "Aktive",
+      "disabled": "Deaktivierte",
+      "count": "{shown} von {total}"
+    },
     "errors": {
       "unknown": "Aktion nicht möglich.",
       "forbidden": "Dein Konto darf das nicht.",
