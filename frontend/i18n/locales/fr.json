@@ -478,7 +478,7 @@
   "accounts": {
     "roles": "Rôles",
     "rolesHint": "Les rôles livrés sont figés : clonez-les pour partir de quelque chose.",
-    "users": "Comptes",
+    "users": "Utilisateurs",
     "newRole": "Nouveau rôle",
     "newUser": "Nouveau compte",
     "roleName": "Nom du rôle",

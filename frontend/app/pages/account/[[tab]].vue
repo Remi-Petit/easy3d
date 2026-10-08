@@ -72,15 +72,20 @@ const onglet = computed<Onglet>(
   () => ONGLETS.find((nom) => nom === route.params.tab) ?? 'compte',
 )
 
-const refOngletCompte = ref<HTMLButtonElement | null>(null)
-const refOngletApi = ref<HTMLButtonElement | null>(null)
-const refOngletMcp = ref<HTMLButtonElement | null>(null)
-
-const refsOnglets = { compte: refOngletCompte, api: refOngletApi, mcp: refOngletMcp }
+/**
+ * Onglets, dans l'ordre d'affichage. La barre elle-même est `PanelTabs` : elle
+ * porte le clavier et la sémantique `tablist`, la même que sur les comptes.
+ */
+const onglets = computed(() => [
+  { id: 'compte', label: t('account.tabAccount') },
+  { id: 'api', label: t('account.tabApi') },
+  { id: 'mcp', label: t('account.mcp') },
+])
 
 /** Changer d'onglet, c'est changer d'URL : c'est elle qui fait foi. */
-function ouvreOnglet(cible: Onglet) {
-  if (cible !== onglet.value) void navigateTo(chemins[cible])
+function ouvreOnglet(id: string) {
+  const cible = ONGLETS.find((nom) => nom === id)
+  if (cible && cible !== onglet.value) void navigateTo(chemins[cible])
 }
 
 /**
@@ -93,17 +98,6 @@ watchEffect(() => {
     void navigateTo(chemins.compte, { replace: true })
   }
 })
-
-/** Flèches gauche/droite : on fait le tour des onglets, focus compris. */
-function ongletTouches(e: KeyboardEvent) {
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
-  e.preventDefault()
-  const pas = e.key === 'ArrowRight' ? 1 : -1
-  const index = ONGLETS.indexOf(onglet.value)
-  const suivant = ONGLETS[(index + pas + ONGLETS.length) % ONGLETS.length]!
-  ouvreOnglet(suivant)
-  refsOnglets[suivant].value?.focus()
-}
 
 // ── Mot de passe ─────────────────────────────────────────────────────────
 const password = reactive({ current: '', next: '', again: '' })
@@ -279,59 +273,14 @@ const quand = (valeur: number | null) =>
 </script>
 
 <template>
-  <div class="account">
+  <div class="tabbed-page">
     <!--
-      Deux onglets, deux URL : `/account` (identité, mot de passe) et
-      `/account/api` (jetons). C'est un vrai `tablist` : les flèches
+      Trois onglets, trois URL : `/account` (identité, mot de passe),
+      `/account/api` (jetons) et `/account/mcp` (brancher un agent). La barre est
+      partagée avec la page des comptes (voir `PanelTabs`) : les flèches
       gauche/droite passent d'un onglet à l'autre, et l'URL suit.
     -->
-    <div class="account__tabs" role="tablist" :aria-label="t('nav.account')">
-      <button
-        id="onglet-compte"
-        ref="refOngletCompte"
-        type="button"
-        role="tab"
-        class="account__tab"
-        :class="{ 'account__tab--on': onglet === 'compte' }"
-        :aria-selected="onglet === 'compte'"
-        :tabindex="onglet === 'compte' ? 0 : -1"
-        aria-controls="panneau-compte"
-        @click="ouvreOnglet('compte')"
-        @keydown="ongletTouches"
-      >
-        {{ t('account.tabAccount') }}
-      </button>
-      <button
-        id="onglet-api"
-        ref="refOngletApi"
-        type="button"
-        role="tab"
-        class="account__tab"
-        :class="{ 'account__tab--on': onglet === 'api' }"
-        :aria-selected="onglet === 'api'"
-        :tabindex="onglet === 'api' ? 0 : -1"
-        aria-controls="panneau-api"
-        @click="ouvreOnglet('api')"
-        @keydown="ongletTouches"
-      >
-        {{ t('account.tabApi') }}
-      </button>
-      <button
-        id="onglet-mcp"
-        ref="refOngletMcp"
-        type="button"
-        role="tab"
-        class="account__tab"
-        :class="{ 'account__tab--on': onglet === 'mcp' }"
-        :aria-selected="onglet === 'mcp'"
-        :tabindex="onglet === 'mcp' ? 0 : -1"
-        aria-controls="panneau-mcp"
-        @click="ouvreOnglet('mcp')"
-        @keydown="ongletTouches"
-      >
-        {{ t('account.mcp') }}
-      </button>
-    </div>
+    <PanelTabs :tabs="onglets" :active="onglet" :label="t('nav.account')" @select="ouvreOnglet" />
 
     <!-- Compte : identité puis mot de passe. -->
     <div
