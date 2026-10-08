@@ -545,6 +545,14 @@
       "invalid_credentials": "Wrong current password."
     }
   },
+  "grid": {
+    "sortDefault": "Sort by {column}",
+    "sortBy": "Sort by {column}: {mode}",
+    "sortNone": "original order",
+    "sortAsc": "ascending",
+    "sortDesc": "descending",
+    "resize": "Resize the {column} column"
+  },
   "time": {
     "now": "just now",
     "seconds": "{count}s ago",

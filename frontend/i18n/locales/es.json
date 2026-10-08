@@ -545,6 +545,14 @@
       "invalid_credentials": "La contraseña actual es incorrecta."
     }
   },
+  "grid": {
+    "sortDefault": "Ordenar por {column}",
+    "sortBy": "Ordenar por {column}: {mode}",
+    "sortNone": "orden recibido",
+    "sortAsc": "ascendente",
+    "sortDesc": "descendente",
+    "resize": "Ajustar el ancho de {column}"
+  },
   "time": {
     "now": "ahora mismo",
     "seconds": "hace {count}s",
