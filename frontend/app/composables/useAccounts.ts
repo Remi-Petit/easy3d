@@ -68,6 +68,15 @@ export interface RolePatch {
   permissions?: string[]
 }
 
+/**
+ * Un compte **complet**, tel que le formulaire le rend : tous les champs sont
+ * renseignés, sauf le mot de passe — absent veut dire « ne le change pas », et
+ * un mot de passe vide est accepté à la création (le compte ne se connectera
+ * alors que par le SSO).
+ */
+export type AccountDraft = Required<Omit<AccountPatch, 'password'>> &
+  Pick<AccountPatch, 'password'>
+
 /** Nouveau compte, tel que le formulaire le compose. */
 export interface NewAccount {
   username: string
