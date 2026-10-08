@@ -496,6 +496,8 @@
     "cloneNone": "Mit leerer Rolle beginnen",
     "cloneHint": "Eine leere Rolle anlegen oder eine klonen: deren Rechte werden übernommen. So entsteht üblicherweise eine passende Rolle.",
     "save": "Speichern",
+    "saved": "Änderungen gespeichert",
+    "savedFor": "Das Konto „{name}“ ist aktuell.",
     "remove": "Löschen",
     "confirm": "Bestätigen?",
     "setDefault": "Als Standard",

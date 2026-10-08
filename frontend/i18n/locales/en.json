@@ -496,6 +496,8 @@
     "cloneNone": "Start from an empty role",
     "cloneHint": "Create an empty role, or clone one: its permissions are copied over. That is the usual way to build a role to measure.",
     "save": "Save",
+    "saved": "Changes saved",
+    "savedFor": "Account “{name}” is up to date.",
     "remove": "Delete",
     "confirm": "Confirm?",
     "setDefault": "Make default",

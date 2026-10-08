@@ -11,11 +11,15 @@ import { PERM } from '~/utils/permissions'
  * ici.
  *
  * Les champs sont ceux de `AccountForm` (partagés avec la création) ; la page
- * ne s'occupe que du reste : retrouver le compte, appeler le serveur, revenir.
+ * ne s'occupe que du reste : retrouver le compte, appeler le serveur, confirmer.
  */
 definePageMeta({ middleware: 'admin' })
 
+/** Durée d'affichage de la confirmation (le temps de la lire). */
+const SAVED_MS = 4000
+
 const { t, te } = useI18n()
+const toast = useToast()
 const { can } = useAuth()
 const route = useRoute()
 const comptes = useAccounts()
@@ -47,12 +51,25 @@ const error = computed(() => {
 })
 
 /**
- * Enregistre, puis revient à la liste. Un refus du serveur (nom déjà pris,
- * dernier administrateur…) laisse la page en place : on corrige et on réessaie,
- * et l'erreur s'affiche juste en dessous.
+ * Enregistre **sans quitter la page** : la réussite part en notification.
+ *
+ * On modifie souvent un seul réglage à la fois ; revenir à la liste ferait
+ * perdre le compte qu'on venait de régler. La notification dit ce qui a été
+ * enregistré et pour qui — c'est la seule chose qui l'annonce, l'écran ne
+ * changeant plus.
+ *
+ * Un refus du serveur (nom déjà pris, dernier administrateur…) laisse la page
+ * en place : on corrige et on réessaie, et l'erreur s'affiche juste en dessous.
  */
 async function enregistrer(patch: AccountDraft) {
-  if (await comptes.updateAccount(uuid.value, patch)) void navigateTo('/admin/accounts')
+  if (!(await comptes.updateAccount(uuid.value, patch))) return
+  toast.add({
+    title: t('accounts.saved'),
+    description: t('accounts.savedFor', { name: patch.username }),
+    color: 'success',
+    icon: 'i-lucide-check',
+    duration: SAVED_MS,
+  })
 }
 
 /** Supprime le compte, puis revient à la liste — il n'y a plus rien à montrer. */

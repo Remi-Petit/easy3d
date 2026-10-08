@@ -496,6 +496,8 @@
     "cloneNone": "Partir de un rol vacío",
     "cloneHint": "Crear un rol vacío o clonar uno: se copian sus permisos. Es la forma habitual de hacer un rol a medida.",
     "save": "Guardar",
+    "saved": "Cambios guardados",
+    "savedFor": "La cuenta «{name}» está al día.",
     "remove": "Eliminar",
     "confirm": "¿Confirmar?",
     "setDefault": "Predeterminado",
