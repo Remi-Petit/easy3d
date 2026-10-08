@@ -2384,6 +2384,13 @@ select.admin__input option {
   text-align: right;
 }
 
+/* Une colonne d'actions se centre : le bouton garde la même place d'une ligne à
+   l'autre, quelle que soit la longueur des valeurs voisines. */
+.data-grid__th--center,
+.data-grid__td--center {
+  text-align: center;
+}
+
 /* En-tête triable : c'est l'en-tête entier qui est cliquable (comme dans
    Streamlit), pas une icône à viser. */
 .data-grid__th--tri {

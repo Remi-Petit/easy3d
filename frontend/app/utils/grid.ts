@@ -34,8 +34,8 @@ export interface GridColumn<T = Record<string, unknown>> {
   width: number
   /** `true` si un clic sur l'en-tête trie la colonne. */
   sortable?: boolean
-  /** Alignement du contenu : les nombres se lisent à droite. */
-  align?: 'left' | 'right'
+  /** Alignement du contenu : les nombres se lisent à droite, un bouton se centre. */
+  align?: 'left' | 'right' | 'center'
   /** Valeur de tri ; par défaut, la propriété `id` de la ligne. */
   sortValue?: (row: T) => string | number
 }

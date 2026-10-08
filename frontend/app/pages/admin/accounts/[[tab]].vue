@@ -305,8 +305,8 @@ const lignes = computed<LigneCompte[]>(() =>
  * souris, et le redimensionnement vit chez elle — la page ne le sait pas.
  *
  * Leur somme (≈ 780 px) tient dans la carte aux largeurs de fenêtre usuelles :
- * au-delà, la grille défile horizontalement (la colonne des actions, alignée à
- * droite, sortirait sinon de la zone visible).
+ * au-delà, la grille défile horizontalement (la colonne des actions sortirait
+ * sinon de la zone visible).
  *
  * Deux colonnes ne se trient pas sur ce qu'elles montrent : les rôles (mis en
  * mots, donc triés sur le libellé) et l'état (`0`/`1` : un compte désactivé
@@ -329,7 +329,7 @@ const colonnes = computed<GridColumn<LigneCompte>[]>(() => [
     sortable: true,
     sortValue: (compte) => (compte.disabled ? '0' : '1'),
   },
-  { id: 'actions', header: t('accounts.actions'), width: 100, align: 'right' },
+  { id: 'actions', header: t('accounts.actions'), width: 100, align: 'center' },
 ])
 
 // ── Création d'un compte ─────────────────────────────────────────────────
