@@ -25,7 +25,8 @@
     "loading": "Cargando…",
     "unknownError": "Error desconocido",
     "close": "Cerrar (Esc)",
-    "none": "—"
+    "none": "—",
+    "cancel": "Cancelar"
   },
   "language": {
     "label": "Idioma",
@@ -510,6 +511,21 @@
     "noUser": "Ninguna cuenta.",
     "hint": "Un permiso marcado aquí se suma a los de los roles. El último administrador no puede desactivarse ni eliminarse.",
     "defaultHint": "Sin ningún rol marcado, se aplica el rol predeterminado de la instalación.",
+    "search": "Buscar una cuenta",
+    "addUser": "Añadir un usuario",
+    "editUser": "Editar la cuenta",
+    "edit": "Editar",
+    "active": "Activa",
+    "noMatch": "Ninguna cuenta coincide con los filtros.",
+    "status": "Estado",
+    "actions": "Acciones",
+    "filter": {
+      "allRoles": "Todos los roles",
+      "allStatus": "Todos los estados",
+      "active": "Activas",
+      "disabled": "Desactivadas",
+      "count": "{shown} de {total}"
+    },
     "errors": {
       "unknown": "No se pudo hacer.",
       "forbidden": "Tu cuenta no tiene permiso para eso.",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import type { AccountPatch, AccountView, RolePatch, RoleView } from '~/composables/useAccounts'
 import { PERM } from '~/utils/permissions'
 
@@ -11,8 +12,12 @@ import { PERM } from '~/utils/permissions'
  *
  * Deux vues, deux URL — le système d'onglets de « Mon compte » (voir
  * `PanelTabs`) : `/admin/accounts` liste les utilisateurs,
- * `/admin/accounts/roles` les rôles. Chacune garde la grille de
- * l'administration : la liste et l'éditeur à gauche, la création à droite.
+ * `/admin/accounts/roles` les rôles. Les **utilisateurs** sont un tableau à
+ * cinq colonnes, avec ses filtres et son bouton d'ajout au-dessus ; les rôles
+ * gardent la grille de l'administration — la liste et l'éditeur à gauche, la
+ * création à droite. La saisie d'un compte (création, édition) vit dans une
+ * **fenêtre** : elle demande de la place (rôles, cases à cocher) et n'a pas à
+ * pousser le tableau.
  *
  * Tout ce qui n'est pas permis est **masqué**, à partir des droits du compte
  * (`can()`) : proposer un bouton que le serveur refusera est la pire façon
@@ -158,6 +163,8 @@ async function deleteAccount() {
   if (await comptes.deleteAccount(selectedUser.value)) {
     selectedUser.value = null
     compteASupprimer.value = null
+    // La fenêtre d'édition ne décrit plus rien : elle se referme avec le compte.
+    editionOuverte.value = false
   }
 }
 
@@ -172,6 +179,17 @@ const draftUser = reactive<Required<AccountPatch>>({
   disabled: false,
 })
 
+/**
+ * Fenêtres de saisie : une pour la création, une pour le compte choisi.
+ *
+ * Le formulaire vivait **sous** la liste, dans la colonne de gauche : il fallait
+ * le faire défiler pour voir la fin d'un compte, et la deuxième colonne restait
+ * vide dès qu'on n'avait pas le droit d'écrire. Dans une fenêtre, le tableau
+ * occupe toute la largeur.
+ */
+const creationOuverte = ref(false)
+const editionOuverte = ref(false)
+
 function selectUser(user: AccountView) {
   selectedUser.value = user.uuid
   draftUser.username = user.username
@@ -180,6 +198,13 @@ function selectUser(user: AccountView) {
   draftUser.roles = user.roles.map((role) => role.uuid)
   draftUser.permissions = [...user.direct]
   draftUser.disabled = user.disabled
+}
+
+/** Ouvre l'éditeur sur ce compte : le brouillon part de ses valeurs actuelles. */
+function editerUser(user: AccountView) {
+  selectUser(user)
+  compteASupprimer.value = null
+  editionOuverte.value = true
 }
 
 const compteSelectionne = computed(() =>
@@ -191,8 +216,9 @@ const estSuperuser = computed(() =>
   (compteSelectionne.value?.roles ?? []).some((role) => role.name === 'admin'),
 )
 
-async function saveUser() {
-  if (!selectedUser.value) return
+/** Enregistre le compte sélectionné ; `true` si le serveur a accepté. */
+async function saveUser(): Promise<boolean> {
+  if (!selectedUser.value) return false
   const patch: AccountPatch = {
     username: draftUser.username,
     email: draftUser.email,
@@ -204,8 +230,79 @@ async function saveUser() {
   // « ne le change pas », jamais « efface-le » (c'est l'interface qui parle, pas
   // un formulaire qu'on peut vider par accident).
   if (draftUser.password) patch.password = draftUser.password
-  if (await comptes.updateAccount(selectedUser.value, patch)) draftUser.password = ''
+  const ok = await comptes.updateAccount(selectedUser.value, patch)
+  if (ok) draftUser.password = ''
+  return ok
 }
+
+/**
+ * Le bouton « Enregistrer » de la fenêtre : un refus du serveur (nom déjà pris,
+ * dernier administrateur…) laisse la fenêtre ouverte — on corrige et on
+ * réessaie, sans avoir à rouvrir le compte.
+ */
+async function enregistrerCompte() {
+  if (await saveUser()) editionOuverte.value = false
+}
+
+// ── Filtres du tableau ───────────────────────────────────────────────────
+/** Recherche libre, sur le nom **et** l'adresse. */
+const recherche = ref('')
+
+/** Rôle retenu (son `uuid`), ou `''` pour tous. */
+const filtreRole = ref('')
+
+/** État retenu : tous, actifs, désactivés, ou comptes provisionnés par le SSO. */
+type FiltreStatut = '' | 'active' | 'disabled' | 'oidc'
+const filtreStatut = ref<FiltreStatut>('')
+
+/** Les filtres se **cumulent** : chacun resserre la liste du précédent. */
+const utilisateurs = computed(() =>
+  comptes.users.value.filter((user) => {
+    const texte = recherche.value.trim().toLowerCase()
+    if (texte && !`${user.username} ${user.email}`.toLowerCase().includes(texte)) return false
+    if (filtreRole.value && !user.roles.some((role) => role.uuid === filtreRole.value)) return false
+    if (filtreStatut.value === 'active' && user.disabled) return false
+    if (filtreStatut.value === 'disabled' && !user.disabled) return false
+    if (filtreStatut.value === 'oidc' && !user.oidc) return false
+    return true
+  }),
+)
+
+const filtreActif = computed(
+  () => !!recherche.value.trim() || !!filtreRole.value || !!filtreStatut.value,
+)
+
+function effacerFiltres() {
+  recherche.value = ''
+  filtreRole.value = ''
+  filtreStatut.value = ''
+}
+
+/** Une ligne du tableau : le compte, et ses rôles déjà mis en mots. */
+type LigneCompte = AccountView & { rolesLabel: string }
+
+const lignes = computed<LigneCompte[]>(() =>
+  utilisateurs.value.map((user) => ({
+    ...user,
+    rolesLabel: user.roles.map((role) => role.name).join(', '),
+  })),
+)
+
+/**
+ * Colonnes, décrites pour TanStack (le moteur de `UTable`) : Nuxt UI les
+ * habille, la page n'écrit plus de `<td>`.
+ *
+ * Les deux dernières n'ont pas de valeur à elles — un état, puis des boutons —
+ * et sont donc désignées par leur seul `id` : c'est lui qui nomme les gabarits
+ * de cellule (`#statut-cell`, `#actions-cell`).
+ */
+const colonnes = computed<TableColumn<LigneCompte>[]>(() => [
+  { accessorKey: 'username', header: t('accounts.userName') },
+  { accessorKey: 'email', header: t('accounts.email') },
+  { accessorKey: 'rolesLabel', header: t('accounts.roles') },
+  { id: 'statut', header: t('accounts.status') },
+  { id: 'actions', header: t('accounts.actions') },
+])
 
 // ── Création d'un compte ─────────────────────────────────────────────────
 const nouveauCompte = reactive({
@@ -214,6 +311,15 @@ const nouveauCompte = reactive({
   password: '',
   roles: [] as string[],
 })
+
+/** Ouvre la fenêtre de création sur un formulaire **vierge** (ouverte deux fois). */
+function ouvrirCreation() {
+  nouveauCompte.username = ''
+  nouveauCompte.email = ''
+  nouveauCompte.password = ''
+  nouveauCompte.roles = []
+  creationOuverte.value = true
+}
 
 async function createAccount() {
   if (!nouveauCompte.username.trim() || !nouveauCompte.email.trim()) return
@@ -229,6 +335,7 @@ async function createAccount() {
     nouveauCompte.email = ''
     nouveauCompte.password = ''
     nouveauCompte.roles = []
+    creationOuverte.value = false
   }
 }
 
@@ -258,44 +365,219 @@ function toggleIn(list: string[], id: string) {
       id="panneau-utilisateurs"
       role="tabpanel"
       aria-labelledby="onglet-utilisateurs"
-      class="admin"
+      class="accounts"
     >
-      <div class="admin__col">
-        <section class="admin__card">
-          <h2 class="admin__title">
-            {{ t('accounts.users') }}
-            <span class="admin__count">{{ comptes.users.value.length }}</span>
-          </h2>
+      <section class="admin__card">
+        <h2 class="admin__title">
+          {{ t('accounts.users') }}
+          <span class="admin__count">{{ comptes.users.value.length }}</span>
+        </h2>
 
-          <ul class="admin__list">
-            <li
-              v-for="user in comptes.users.value"
-              :key="user.uuid"
-              class="admin__item"
-              :class="{ 'admin__item--on': user.uuid === selectedUser }"
+        <!--
+          Filtres, puis l'action d'ajout : la rangée reprend celle du catalogue
+          (`.toolbar`) pour la facture — le champ large avec sa loupe, puis les
+          deux listes. Le bouton d'ajout ferme la rangée, à droite : c'est le
+          geste qui ne dépend pas de ce qu'on filtre.
+        -->
+        <div class="toolbar accounts__toolbar">
+          <div class="search">
+            <span class="icon">🔍</span>
+            <input
+              v-model="recherche"
+              type="search"
+              :placeholder="t('accounts.search')"
+              :aria-label="t('accounts.search')"
+            />
+          </div>
+
+          <select v-model="filtreRole" class="admin__input" :aria-label="t('accounts.roles')">
+            <option value="">{{ t('accounts.filter.allRoles') }}</option>
+            <option v-for="role in comptes.roles.value" :key="role.uuid" :value="role.uuid">
+              {{ role.name }}
+            </option>
+          </select>
+
+          <select v-model="filtreStatut" class="admin__input" :aria-label="t('accounts.status')">
+            <option value="">{{ t('accounts.filter.allStatus') }}</option>
+            <option value="active">{{ t('accounts.filter.active') }}</option>
+            <option value="disabled">{{ t('accounts.filter.disabled') }}</option>
+            <option value="oidc">{{ t('accounts.oidc') }}</option>
+          </select>
+
+          <button v-if="filtreActif" type="button" class="types__clear" @click="effacerFiltres()">
+            {{ t('filter.clear') }}
+          </button>
+
+          <button
+            v-if="peutEcrireComptes"
+            type="button"
+            class="admin__action admin__action--primary accounts__add"
+            @click="ouvrirCreation()"
+          >
+            {{ t('accounts.addUser') }}
+          </button>
+        </div>
+
+        <!-- Compte des lignes affichées, puis l'explication du droit en retrait. -->
+        <p class="accounts__meta">
+          <span class="section-label">
+            {{ t('accounts.filter.count', { shown: lignes.length, total: comptes.users.value.length }) }}
+          </span>
+          <span class="admin__hint">{{ t('accounts.hint') }}</span>
+        </p>
+
+        <!--
+          Le tableau vient de Nuxt UI (`UTable`, TanStack Table sous le capot) :
+          en-tête, état vide, colonnes. Ce qui reste à cette page, c'est ce que
+          la liste des comptes a de particulier — les pastilles d'état, et le
+          bouton qui ouvre l'éditeur.
+        -->
+        <UTable
+          :data="lignes"
+          :columns="colonnes"
+          :loading="comptes.loading.value"
+          :ui="{
+            root: 'accounts__table-root',
+            base: 'accounts__table',
+            thead: 'accounts__head',
+            th: 'accounts__th',
+            td: 'accounts__td',
+            empty: 'admin__empty',
+          }"
+        >
+          <template #rolesLabel-cell="{ row }">
+            {{ row.original.rolesLabel || t('accounts.noRole') }}
+          </template>
+
+          <!--
+            L'état du compte tient dans une pastille : « désactivé » l'emporte
+            (c'est ce qui empêche d'entrer), puis le SSO, et « actif » est le
+            cas ordinaire — il se dit, lui aussi, plutôt que de laisser la
+            cellule vide.
+          -->
+          <template #statut-cell="{ row }">
+            <span v-if="row.original.disabled" class="accounts__tag accounts__tag--off">
+              {{ t('accounts.disabled') }}
+            </span>
+            <span v-if="row.original.oidc" class="accounts__tag accounts__tag--on">
+              {{ t('accounts.oidc') }}
+            </span>
+            <span v-if="!row.original.disabled && !row.original.oidc" class="accounts__tag">
+              {{ t('accounts.active') }}
+            </span>
+          </template>
+
+          <template #actions-cell="{ row }">
+            <button
+              v-if="peutEcrireComptes"
+              type="button"
+              class="admin__action"
+              @click="editerUser(row.original)"
             >
-              <button type="button" class="accounts__pick" @click="selectUser(user)">
-                <span class="admin__item-label">
-                  {{ user.username }}
-                  <span v-if="user.disabled" class="accounts__tag">{{ t('accounts.disabled') }}</span>
-                  <!-- Rattaché au fournisseur d'identité : en provisionnement
-                       « manuel », c'est ce qui distingue un compte qui peut
-                       entrer par le SSO d'un compte qui ne le peut pas encore. -->
-                  <span v-if="user.oidc" class="accounts__tag accounts__tag--on">
-                    {{ t('accounts.oidc') }}
-                  </span>
-                </span>
-                <span class="admin__item-where">
-                  {{ user.email }} · {{ user.roles.map((role) => role.name).join(', ') || t('accounts.noRole') }}
-                </span>
-              </button>
-            </li>
-          </ul>
+              {{ t('accounts.edit') }}
+            </button>
+            <span v-else class="admin__hint">{{ t('common.none') }}</span>
+          </template>
 
-          <p v-if="!comptes.users.value.length" class="admin__empty">{{ t('accounts.noUser') }}</p>
+          <template #empty>
+            {{
+              comptes.loading.value
+                ? t('common.loading')
+                : filtreActif
+                  ? t('accounts.noMatch')
+                  : t('accounts.noUser')
+            }}
+          </template>
+        </UTable>
+      </section>
 
-          <!-- Éditeur du compte sélectionné -->
-          <div v-if="selectedUser && compteSelectionne" class="admin__field">
+      <!-- Création d'un compte : une fenêtre, ouverte sur un formulaire vierge
+           (le mot de passe est facultatif — voir l'explication dans le corps). -->
+      <UModal
+        v-model:open="creationOuverte"
+        :title="t('accounts.newUser')"
+        :description="t('accounts.defaultHint')"
+      >
+        <template #body>
+          <div class="accounts__form">
+            <div class="admin__row">
+              <input
+                v-model="nouveauCompte.username"
+                class="admin__input"
+                :placeholder="t('accounts.userName')"
+                :aria-label="t('accounts.userName')"
+              />
+              <input
+                v-model="nouveauCompte.email"
+                class="admin__input"
+                :placeholder="t('accounts.email')"
+                :aria-label="t('accounts.email')"
+              />
+            </div>
+            <div class="admin__row">
+              <input
+                v-model="nouveauCompte.password"
+                type="password"
+                class="admin__input"
+                autocomplete="new-password"
+                :placeholder="t('accounts.password')"
+                :aria-label="t('accounts.password')"
+              />
+            </div>
+            <!-- Le mot de passe est facultatif : un compte sans mot de passe ne se
+                 connecte que par le fournisseur d'identité (SSO). -->
+            <p class="admin__hint">{{ t('accounts.passwordHint') }}</p>
+
+            <span class="admin__label">{{ t('accounts.rolesOf') }}</span>
+            <div class="admin__choices">
+              <label
+                v-for="role in comptes.roleRefs.value"
+                :key="role.uuid"
+                class="admin__choice"
+                :class="{ 'admin__choice--on': has(nouveauCompte.roles, role.uuid) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="has(nouveauCompte.roles, role.uuid)"
+                  @change="nouveauCompte.roles = toggleIn(nouveauCompte.roles, role.uuid)"
+                />
+                {{ role.name }}
+              </label>
+            </div>
+          </div>
+        </template>
+
+        <template #footer>
+          <div class="admin__field admin__field--actions">
+            <button type="button" class="admin__action" @click="creationOuverte = false">
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="button"
+              class="admin__action admin__action--primary"
+              :disabled="
+                comptes.busy.value || !nouveauCompte.username.trim() || !nouveauCompte.email.trim()
+              "
+              @click="createAccount()"
+            >
+              {{ t('accounts.create') }}
+            </button>
+          </div>
+        </template>
+      </UModal>
+
+      <!--
+        Édition du compte choisi. Le compte peut disparaître sous la fenêtre (le
+        serveur fait foi après chaque écriture) : le corps est donc gardé par
+        `v-if`, sans quoi les champs liraient un compte qui n'existe plus.
+      -->
+      <UModal
+        v-model:open="editionOuverte"
+        :title="t('accounts.editUser')"
+        :description="compteSelectionne?.username ?? ''"
+      >
+        <template #body>
+          <div v-if="compteSelectionne" class="accounts__form">
             <div class="admin__row">
               <input
                 v-model="draftUser.username"
@@ -348,18 +630,11 @@ function toggleIn(list: string[], id: string) {
               :locked="estSuperuser"
             />
 
-            <div class="admin__field admin__field--actions">
+            <!-- Désactivation et suppression : le corps de la fenêtre, pas le
+                 pied — on n'y vient pas pour confirmer, mais pour agir sur ce
+                 compte-là. La suppression se confirme en deux temps. -->
+            <div v-if="peutEcrireComptes" class="admin__field admin__field--actions">
               <button
-                v-if="peutEcrireComptes"
-                type="button"
-                class="admin__action admin__action--primary"
-                :disabled="comptes.busy.value"
-                @click="saveUser()"
-              >
-                {{ t('accounts.save') }}
-              </button>
-              <button
-                v-if="peutEcrireComptes"
                 type="button"
                 class="admin__action"
                 :disabled="comptes.busy.value || estSuperuser"
@@ -368,7 +643,6 @@ function toggleIn(list: string[], id: string) {
                 {{ draftUser.disabled ? t('accounts.enable') : t('accounts.disable') }}
               </button>
               <button
-                v-if="peutEcrireComptes"
                 type="button"
                 class="admin__action"
                 :disabled="comptes.busy.value"
@@ -377,7 +651,7 @@ function toggleIn(list: string[], id: string) {
                 {{ compteASupprimer === selectedUser ? t('accounts.confirm') : t('accounts.remove') }}
               </button>
               <button
-                v-if="peutEcrireComptes && compteASupprimer === selectedUser"
+                v-if="compteASupprimer === selectedUser"
                 type="button"
                 class="admin__action admin__action--danger"
                 :disabled="comptes.busy.value"
@@ -389,68 +663,25 @@ function toggleIn(list: string[], id: string) {
 
             <p class="admin__hint">{{ t('accounts.hint') }}</p>
           </div>
-        </section>
-      </div>
+        </template>
 
-      <!-- Nouveau compte -->
-      <div class="admin__col">
-        <section v-if="peutEcrireComptes" class="admin__card">
-          <h2 class="admin__title">{{ t('accounts.newUser') }}</h2>
-          <div class="admin__row">
-            <input
-              v-model="nouveauCompte.username"
-              class="admin__input"
-              :placeholder="t('accounts.userName')"
-              :aria-label="t('accounts.userName')"
-            />
-            <input
-              v-model="nouveauCompte.email"
-              class="admin__input"
-              :placeholder="t('accounts.email')"
-              :aria-label="t('accounts.email')"
-            />
-          </div>
-          <div class="admin__row">
-            <input
-              v-model="nouveauCompte.password"
-              type="password"
-              class="admin__input"
-              autocomplete="new-password"
-              :placeholder="t('accounts.password')"
-              :aria-label="t('accounts.password')"
-            />
-          </div>
-          <!-- Le mot de passe est facultatif : un compte sans mot de passe ne se
-               connecte que par le fournisseur d'identité (SSO). -->
-          <p class="admin__hint">{{ t('accounts.passwordHint') }}</p>
-          <div class="admin__choices">
-            <label
-              v-for="role in comptes.roleRefs.value"
-              :key="role.uuid"
-              class="admin__choice"
-              :class="{ 'admin__choice--on': has(nouveauCompte.roles, role.uuid) }"
-            >
-              <input
-                type="checkbox"
-                :checked="has(nouveauCompte.roles, role.uuid)"
-                @change="nouveauCompte.roles = toggleIn(nouveauCompte.roles, role.uuid)"
-              />
-              {{ role.name }}
-            </label>
-          </div>
+        <template #footer>
           <div class="admin__field admin__field--actions">
+            <button type="button" class="admin__action" @click="editionOuverte = false">
+              {{ t('common.cancel') }}
+            </button>
             <button
+              v-if="peutEcrireComptes"
               type="button"
               class="admin__action admin__action--primary"
-              :disabled="comptes.busy.value || !nouveauCompte.username.trim() || !nouveauCompte.email.trim()"
-              @click="createAccount()"
+              :disabled="comptes.busy.value"
+              @click="enregistrerCompte()"
             >
-              {{ t('accounts.create') }}
+              {{ t('accounts.save') }}
             </button>
           </div>
-          <p class="admin__hint">{{ t('accounts.defaultHint') }}</p>
-        </section>
-      </div>
+        </template>
+      </UModal>
     </div>
 
     <!-- ── Rôles ─────────────────────────────────────────────────────── -->
