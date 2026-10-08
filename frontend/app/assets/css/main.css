@@ -57,6 +57,14 @@
   --radius-sm: 9px;
   /* Largeur de la sidebar (colonne fixe à gauche). */
   --sidebar-w: 264px;
+  /* Marge intérieure de la zone de contenu. La barre du catalogue (`.topbar`),
+     le contenu de la page (`.page`) et le panneau de la recherche assistée
+     (`.ai`) la partagent : c'est ce qui les aligne sur une même verticale.
+
+     Une variable, et non la valeur écrite trois fois : les trois avaient fini
+     par diverger — 24 px de côté ici, 16 px là, plus un `padding-top` de
+     compensation dans le journal pour rattraper l'aplomb perdu. */
+  --gutter: 16px;
 }
 
 * {
@@ -150,23 +158,15 @@ body {
   position: sticky;
   top: 0;
   z-index: 10;
-  padding: 16px 24px 12px;
+  /* Marge basse à zéro : l'écart entre la barre et le contenu est celui du haut
+     de `.page`, qui suit juste — sinon les deux s'additionnaient. */
+  padding: var(--gutter) var(--gutter) 0;
   background: var(--bg);
 }
 
-/* Contenu de la page. */
+/* Contenu de la page : la marge est sur les quatre côtés, y compris en haut. */
 .page {
-  padding: 4px 24px 48px;
-}
-
-@media (max-width: 640px) {
-  .topbar {
-    padding: 12px 16px 10px;
-  }
-
-  .page {
-    padding: 4px 16px 40px;
-  }
+  padding: var(--gutter);
 }
 
 .brand {
@@ -1766,15 +1766,10 @@ select.admin__input option {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
-  margin: 4px 24px 48px;
-}
-
-/* Même règle étroite que `.page` — et après la règle de base, sinon la marge
-   desktop l'emporterait à spécificité égale. */
-@media (max-width: 640px) {
-  .ai {
-    margin: 4px 16px 40px;
-  }
+  /* Le panneau est un **frère** de `.page`, pas son enfant : il porte donc la
+     même marge que le padding de celle-ci, avec la même variable — c'est ce qui
+     aligne son cadre sur la barre du catalogue et sur la page. */
+  margin: var(--gutter);
 }
 
 .ai__head {
@@ -1955,9 +1950,8 @@ select.admin__input option {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  /* La barre du catalogue est posée 16 px sous l'en-tête (`.topbar`, collée) ;
-     ici, `.page` n'en laisse que 4 : on rend l'aplomb identique. */
-  padding-top: 12px;
+  /* Aucun rattrapage : `.page` pose 16 px en haut, comme la barre collée du
+     catalogue — les deux barres sont donc à la même hauteur, par construction. */
 }
 
 .audit .toolbar {
