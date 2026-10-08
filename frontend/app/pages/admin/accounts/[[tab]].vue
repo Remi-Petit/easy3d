@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountPatch, AccountView, RolePatch, RoleView } from '~/composables/useAccounts'
+import type { AccountView, RolePatch, RoleView } from '~/composables/useAccounts'
 import type { GridColumn } from '~/utils/grid'
 import { PERM } from '~/utils/permissions'
 
@@ -12,12 +12,15 @@ import { PERM } from '~/utils/permissions'
  *
  * Deux vues, deux URL — le système d'onglets de « Mon compte » (voir
  * `PanelTabs`) : `/admin/accounts` liste les utilisateurs,
- * `/admin/accounts/roles` les rôles. Les **utilisateurs** sont un tableau à
+ * `/admin/accounts/roles` les rôles. Les **utilisateurs** sont une grille à
  * cinq colonnes, avec ses filtres et son bouton d'ajout au-dessus ; les rôles
- * gardent la grille de l'administration — la liste et l'éditeur à gauche, la
- * création à droite. La saisie d'un compte (création, édition) vit dans une
- * **fenêtre** : elle demande de la place (rôles, cases à cocher) et n'a pas à
- * pousser le tableau.
+ * gardent la mise en page de l'administration — la liste et l'éditeur à
+ * gauche, la création à droite.
+ *
+ * La liste n'édite **rien** : « Modifier » mène à `/admin/accounts/edit/<uuid>`
+ * et « Ajouter un utilisateur » à `/admin/accounts/new` — deux pages, qui
+ * partagent le même formulaire (`AccountForm.vue`). Une adresse se met en
+ * signet et ramène à la liste, ce qu'une fenêtre ne fait pas.
  *
  * Tout ce qui n'est pas permis est **masqué**, à partir des droits du compte
  * (`can()`) : proposer un bouton que le serveur refusera est la pire façon
@@ -143,7 +146,6 @@ async function createRole(roleFrom: string | null = null) {
 
 /** Suppression en deux temps : le second clic confirme. */
 const roleASupprimer = ref<string | null>(null)
-const compteASupprimer = ref<string | null>(null)
 
 /**
  * Supprime le rôle sélectionné, puis referme son éditeur : il ne décrit plus
@@ -157,101 +159,35 @@ async function deleteRole() {
   }
 }
 
-/** Même chose pour un compte. */
-async function deleteAccount() {
-  if (!selectedUser.value) return
-  if (await comptes.deleteAccount(selectedUser.value)) {
-    selectedUser.value = null
-    compteASupprimer.value = null
-    // La fenêtre d'édition ne décrit plus rien : elle se referme avec le compte.
-    editionOuverte.value = false
-  }
-}
-
 // ── Comptes ──────────────────────────────────────────────────────────────
-const selectedUser = ref<string | null>(null)
-const draftUser = reactive<Required<AccountPatch>>({
-  username: '',
-  email: '',
-  password: '',
-  roles: [],
-  permissions: [],
-  disabled: false,
-})
-
 /**
- * Fenêtres de saisie : une pour la création, une pour le compte choisi.
+ * La liste des comptes est une **vue** : on n'y saisit rien.
  *
- * Le formulaire vivait **sous** la liste, dans la colonne de gauche : il fallait
- * le faire défiler pour voir la fin d'un compte, et la deuxième colonne restait
- * vide dès qu'on n'avait pas le droit d'écrire. Dans une fenêtre, le tableau
- * occupe toute la largeur.
+ * « Modifier » (et le double-clic sur une ligne) mène à la page du compte,
+ * `/admin/accounts/edit/<uuid>` ; « Ajouter un utilisateur » à
+ * `/admin/accounts/new`. Le formulaire est le même des deux côtés
+ * (`AccountForm.vue`) : c'est l'adresse qui décide, pas une fenêtre.
  */
-const creationOuverte = ref(false)
-const editionOuverte = ref(false)
+const selectedUser = ref<string | null>(null)
 
-function selectUser(user: AccountView) {
-  selectedUser.value = user.uuid
-  draftUser.username = user.username
-  draftUser.email = user.email
-  draftUser.password = ''
-  draftUser.roles = user.roles.map((role) => role.uuid)
-  draftUser.permissions = [...user.direct]
-  draftUser.disabled = user.disabled
-}
-
-/** Ouvre l'éditeur sur ce compte : le brouillon part de ses valeurs actuelles. */
-function editerUser(user: AccountView) {
-  selectUser(user)
-  compteASupprimer.value = null
-  editionOuverte.value = true
+/** Adresse de la page d'édition d'un compte. */
+function cheminCompte(uuid: string): string {
+  return `/admin/accounts/edit/${encodeURIComponent(uuid)}`
 }
 
 /**
+ * Ouvre la page du compte désigné par cette ligne.
+ *
  * La grille rend la **ligne** qu'elle a reçue (un objet de données, pas un
- * compte typé) : on retrouve le compte par son identifiant, puisque c'est lui
- * qui fait foi — la grille peut avoir été rendue avant un rafraîchissement.
+ * compte typé) : l'identifiant suffit à composer l'adresse.
  */
-function ouvrirCompte(row: Record<string, unknown>) {
-  const compte = comptes.users.value.find((user) => user.uuid === row.uuid)
-  if (compte) editerUser(compte)
+function editerCompte(row: Record<string, unknown>) {
+  void navigateTo(cheminCompte(String(row.uuid ?? '')))
 }
 
-const compteSelectionne = computed(() =>
-  comptes.users.value.find((user) => user.uuid === selectedUser.value),
-)
-
-/** `true` si le compte sélectionné est superutilisateur (rôle livré `admin`). */
-const estSuperuser = computed(() =>
-  (compteSelectionne.value?.roles ?? []).some((role) => role.name === 'admin'),
-)
-
-/** Enregistre le compte sélectionné ; `true` si le serveur a accepté. */
-async function saveUser(): Promise<boolean> {
-  if (!selectedUser.value) return false
-  const patch: AccountPatch = {
-    username: draftUser.username,
-    email: draftUser.email,
-    roles: [...draftUser.roles],
-    permissions: [...draftUser.permissions],
-    disabled: draftUser.disabled,
-  }
-  // Le mot de passe n'est envoyé que s'il a été saisi : un champ vide veut dire
-  // « ne le change pas », jamais « efface-le » (c'est l'interface qui parle, pas
-  // un formulaire qu'on peut vider par accident).
-  if (draftUser.password) patch.password = draftUser.password
-  const ok = await comptes.updateAccount(selectedUser.value, patch)
-  if (ok) draftUser.password = ''
-  return ok
-}
-
-/**
- * Le bouton « Enregistrer » de la fenêtre : un refus du serveur (nom déjà pris,
- * dernier administrateur…) laisse la fenêtre ouverte — on corrige et on
- * réessaie, sans avoir à rouvrir le compte.
- */
-async function enregistrerCompte() {
-  if (await saveUser()) editionOuverte.value = false
+/** Ouvre la page de création d'un compte. */
+function ajouterCompte() {
+  void navigateTo('/admin/accounts/new')
 }
 
 // ── Filtres du tableau ───────────────────────────────────────────────────
@@ -331,51 +267,6 @@ const colonnes = computed<GridColumn<LigneCompte>[]>(() => [
   },
   { id: 'actions', header: t('accounts.actions'), width: 100, align: 'center' },
 ])
-
-// ── Création d'un compte ─────────────────────────────────────────────────
-const nouveauCompte = reactive({
-  username: '',
-  email: '',
-  password: '',
-  roles: [] as string[],
-})
-
-/** Ouvre la fenêtre de création sur un formulaire **vierge** (ouverte deux fois). */
-function ouvrirCreation() {
-  nouveauCompte.username = ''
-  nouveauCompte.email = ''
-  nouveauCompte.password = ''
-  nouveauCompte.roles = []
-  creationOuverte.value = true
-}
-
-async function createAccount() {
-  if (!nouveauCompte.username.trim() || !nouveauCompte.email.trim()) return
-  const created = await comptes.createAccount({
-    username: nouveauCompte.username,
-    email: nouveauCompte.email,
-    password: nouveauCompte.password,
-    roles: [...nouveauCompte.roles],
-    permissions: [],
-  })
-  if (created) {
-    nouveauCompte.username = ''
-    nouveauCompte.email = ''
-    nouveauCompte.password = ''
-    nouveauCompte.roles = []
-    creationOuverte.value = false
-  }
-}
-
-/** `true` si un rôle donné fait partie de la sélection en cours. */
-function has(items: string[], id: string) {
-  return items.includes(id)
-}
-
-/** Coche ou décoche un rôle dans une liste (utile aux deux formulaires). */
-function toggleIn(list: string[], id: string) {
-  return has(list, id) ? list.filter((known) => known !== id) : [...list, id]
-}
 </script>
 
 <template>
@@ -440,7 +331,7 @@ function toggleIn(list: string[], id: string) {
             v-if="peutEcrireComptes"
             type="button"
             class="admin__action admin__action--primary accounts__add"
-            @click="ouvrirCreation()"
+            @click="ajouterCompte()"
           >
             {{ t('accounts.addUser') }}
           </button>
@@ -466,7 +357,7 @@ function toggleIn(list: string[], id: string) {
           :label="t('accounts.users')"
           :loading="comptes.loading.value"
           :empty="filtreActif ? t('accounts.noMatch') : t('accounts.noUser')"
-          @open="ouvrirCompte"
+          @open="editerCompte"
         >
           <template #cell-rolesLabel="{ row }">
             {{ row.rolesLabel || t('accounts.noRole') }}
@@ -495,7 +386,7 @@ function toggleIn(list: string[], id: string) {
               v-if="peutEcrireComptes"
               type="button"
               class="admin__action"
-              @click="ouvrirCompte(row)"
+              @click="editerCompte(row)"
             >
               {{ t('accounts.edit') }}
             </button>
@@ -504,197 +395,6 @@ function toggleIn(list: string[], id: string) {
         </DataGrid>
       </section>
 
-      <!-- Création d'un compte : une fenêtre, ouverte sur un formulaire vierge
-           (le mot de passe est facultatif — voir l'explication dans le corps). -->
-      <UModal
-        v-model:open="creationOuverte"
-        :title="t('accounts.newUser')"
-        :description="t('accounts.defaultHint')"
-      >
-        <template #body>
-          <div class="accounts__form">
-            <div class="admin__row">
-              <input
-                v-model="nouveauCompte.username"
-                class="admin__input"
-                :placeholder="t('accounts.userName')"
-                :aria-label="t('accounts.userName')"
-              />
-              <input
-                v-model="nouveauCompte.email"
-                class="admin__input"
-                :placeholder="t('accounts.email')"
-                :aria-label="t('accounts.email')"
-              />
-            </div>
-            <div class="admin__row">
-              <input
-                v-model="nouveauCompte.password"
-                type="password"
-                class="admin__input"
-                autocomplete="new-password"
-                :placeholder="t('accounts.password')"
-                :aria-label="t('accounts.password')"
-              />
-            </div>
-            <!-- Le mot de passe est facultatif : un compte sans mot de passe ne se
-                 connecte que par le fournisseur d'identité (SSO). -->
-            <p class="admin__hint">{{ t('accounts.passwordHint') }}</p>
-
-            <span class="admin__label">{{ t('accounts.rolesOf') }}</span>
-            <div class="admin__choices">
-              <label
-                v-for="role in comptes.roleRefs.value"
-                :key="role.uuid"
-                class="admin__choice"
-                :class="{ 'admin__choice--on': has(nouveauCompte.roles, role.uuid) }"
-              >
-                <input
-                  type="checkbox"
-                  :checked="has(nouveauCompte.roles, role.uuid)"
-                  @change="nouveauCompte.roles = toggleIn(nouveauCompte.roles, role.uuid)"
-                />
-                {{ role.name }}
-              </label>
-            </div>
-          </div>
-        </template>
-
-        <template #footer>
-          <div class="admin__field admin__field--actions">
-            <button type="button" class="admin__action" @click="creationOuverte = false">
-              {{ t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              class="admin__action admin__action--primary"
-              :disabled="
-                comptes.busy.value || !nouveauCompte.username.trim() || !nouveauCompte.email.trim()
-              "
-              @click="createAccount()"
-            >
-              {{ t('accounts.create') }}
-            </button>
-          </div>
-        </template>
-      </UModal>
-
-      <!--
-        Édition du compte choisi. Le compte peut disparaître sous la fenêtre (le
-        serveur fait foi après chaque écriture) : le corps est donc gardé par
-        `v-if`, sans quoi les champs liraient un compte qui n'existe plus.
-      -->
-      <UModal
-        v-model:open="editionOuverte"
-        :title="t('accounts.editUser')"
-        :description="compteSelectionne?.username ?? ''"
-      >
-        <template #body>
-          <div v-if="compteSelectionne" class="accounts__form">
-            <div class="admin__row">
-              <input
-                v-model="draftUser.username"
-                class="admin__input"
-                :disabled="!peutEcrireComptes"
-                :aria-label="t('accounts.userName')"
-              />
-              <input
-                v-model="draftUser.email"
-                class="admin__input"
-                :disabled="!peutEcrireComptes"
-                :aria-label="t('accounts.email')"
-              />
-            </div>
-            <div class="admin__row">
-              <input
-                v-model="draftUser.password"
-                type="password"
-                class="admin__input"
-                autocomplete="new-password"
-                :disabled="!peutEcrireComptes"
-                :placeholder="t('accounts.newPassword')"
-                :aria-label="t('accounts.newPassword')"
-              />
-            </div>
-
-            <span class="admin__label">{{ t('accounts.rolesOf') }}</span>
-            <div class="admin__choices">
-              <label
-                v-for="role in comptes.roleRefs.value"
-                :key="role.uuid"
-                class="admin__choice"
-                :class="{ 'admin__choice--on': has(draftUser.roles, role.uuid) }"
-              >
-                <input
-                  type="checkbox"
-                  :checked="has(draftUser.roles, role.uuid)"
-                  :disabled="!peutEcrireComptes"
-                  @change="draftUser.roles = toggleIn(draftUser.roles, role.uuid)"
-                />
-                {{ role.name }}
-              </label>
-            </div>
-
-            <span class="admin__label">{{ t('accounts.direct') }}</span>
-            <PermissionPicker
-              v-model="draftUser.permissions"
-              :permissions="comptes.permissions.value"
-              :disabled="!peutEcrireComptes"
-              :locked="estSuperuser"
-            />
-
-            <!-- Désactivation et suppression : le corps de la fenêtre, pas le
-                 pied — on n'y vient pas pour confirmer, mais pour agir sur ce
-                 compte-là. La suppression se confirme en deux temps. -->
-            <div v-if="peutEcrireComptes" class="admin__field admin__field--actions">
-              <button
-                type="button"
-                class="admin__action"
-                :disabled="comptes.busy.value || estSuperuser"
-                @click="draftUser.disabled = !draftUser.disabled; saveUser()"
-              >
-                {{ draftUser.disabled ? t('accounts.enable') : t('accounts.disable') }}
-              </button>
-              <button
-                type="button"
-                class="admin__action"
-                :disabled="comptes.busy.value"
-                @click="compteASupprimer = compteASupprimer === selectedUser ? null : selectedUser"
-              >
-                {{ compteASupprimer === selectedUser ? t('accounts.confirm') : t('accounts.remove') }}
-              </button>
-              <button
-                v-if="compteASupprimer === selectedUser"
-                type="button"
-                class="admin__action admin__action--danger"
-                :disabled="comptes.busy.value"
-                @click="deleteAccount()"
-              >
-                {{ t('accounts.remove') }}
-              </button>
-            </div>
-
-            <p class="admin__hint">{{ t('accounts.hint') }}</p>
-          </div>
-        </template>
-
-        <template #footer>
-          <div class="admin__field admin__field--actions">
-            <button type="button" class="admin__action" @click="editionOuverte = false">
-              {{ t('common.cancel') }}
-            </button>
-            <button
-              v-if="peutEcrireComptes"
-              type="button"
-              class="admin__action admin__action--primary"
-              :disabled="comptes.busy.value"
-              @click="enregistrerCompte()"
-            >
-              {{ t('accounts.save') }}
-            </button>
-          </div>
-        </template>
-      </UModal>
     </div>
 
     <!-- ── Rôles ─────────────────────────────────────────────────────── -->

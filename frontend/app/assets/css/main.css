@@ -2293,6 +2293,30 @@ select.admin__input option {
   margin: 0;
 }
 
+/*
+ * Pages de saisie d'un compte (`/admin/accounts/new`, `/admin/accounts/edit/<uuid>`) :
+ * une seule carte, de largeur **bornée** — un formulaire étalé sur toute la
+ * largeur se lit mal, et les cases de droits se rangeraient sur une ligne
+ * interminable.
+ */
+.accounts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+}
+
+/* Le lien de retour est un `<a>` (l'adresse de la liste est explicite, on ne
+   remonte pas l'historique) : il garde la couleur du bouton de retour, que
+   `.page a` emporterait sinon — spécificité oblige. */
+.page a.back {
+  color: var(--muted);
+}
+
+.page a.back:hover {
+  color: var(--accent-2);
+}
+
 /* Champs des fenêtres de saisie : ils se partagent la rangée au lieu de
    s'arrêter à leur largeur intrinsèque — très différente d'un `input` à un
    `select`, ce qui rendait la colonne bancale. */
