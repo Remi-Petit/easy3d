@@ -511,6 +511,7 @@
     "noUser": "No account.",
     "hint": "A permission ticked here adds to the ones from the roles. The last administrator cannot be disabled or deleted.",
     "defaultHint": "With no role ticked, the installation's default role applies.",
+    "inherited": "Greyed-out permissions come from the ticked roles: to remove them, untick the role.",
     "search": "Search for an account",
     "addUser": "Add a user",
     "editUser": "Edit account",

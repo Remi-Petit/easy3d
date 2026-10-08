@@ -2581,6 +2581,13 @@ select.admin__input option {
   color: var(--muted);
 }
 
+/* Droit venu d'un **rôle** coché : coché, mais pas décochable ici. Il se
+   distingue des droits propres au compte, et la note sous la liste dit
+   pourquoi (voir `PermissionPicker`). */
+.perm__item--herite {
+  color: var(--muted);
+}
+
 .perm__note {
   margin: 0;
   font-size: 12.5px;

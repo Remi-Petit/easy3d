@@ -87,6 +87,7 @@ function retour() {
         v-else
         :account="compte"
         :role-refs="comptes.roleRefs.value"
+        :roles="comptes.roles.value"
         :permissions="comptes.permissions.value"
         :busy="comptes.busy.value"
         :writable="peutEcrire"

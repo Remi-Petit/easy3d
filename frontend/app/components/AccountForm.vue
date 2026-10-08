@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountDraft, AccountView, RoleRef } from '~/composables/useAccounts'
+import type { AccountDraft, AccountView, RoleRef, RoleView } from '~/composables/useAccounts'
 import type { PermissionInfo } from '~/utils/permissions'
 
 /**
@@ -18,8 +18,15 @@ const props = withDefaults(
   defineProps<{
     /** Compte à modifier ; `null` (défaut) pour une création. */
     account?: AccountView | null
-    /** Rôles proposés à la coche. */
+    /** Rôles proposés à la coche (uuid + nom, servis par `/api/users`). */
     roleRefs: RoleRef[]
+    /**
+     * Les mêmes rôles, **avec leurs droits** (`/api/roles`). C'est ce qui permet
+     * de montrer, en grisé, ce qu'un rôle apporte déjà — et donc de distinguer
+     * « accordé par un rôle » de « accordé à ce compte ». Vide quand le compte
+     * n'a pas le droit de lire les rôles : les puces restent utilisables.
+     */
+    roles?: RoleView[]
     /** Catalogue des droits directs, servi par le backend. */
     permissions: PermissionInfo[]
     /** Écriture en cours : les boutons se bloquent. */
@@ -83,6 +90,22 @@ function has(items: string[], id: string) {
 function toggleIn(list: string[], id: string) {
   return has(list, id) ? list.filter((connu) => connu !== id) : [...list, id]
 }
+
+/**
+ * Droits apportés par les rôles **cochés** : ils s'affichent cochés dans la
+ * liste, sans être décochables (le serveur ajoute, il ne retire pas).
+ *
+ * C'est ce qui rend le clic sur un rôle lisible : on voit ce qu'il donne, et on
+ * peut ensuite ajouter — à ce compte seul — ce qu'il ne donne pas.
+ */
+const herites = computed(() => {
+  const connus = new Set<string>()
+  for (const uuid of draft.roles) {
+    const role = props.roles?.find((candidat) => candidat.uuid === uuid)
+    for (const permission of role?.permissions ?? []) connus.add(permission)
+  }
+  return [...connus]
+})
 
 /** Ce que le formulaire envoie : le mot de passe seulement s'il a été saisi. */
 function patch(): AccountDraft {
@@ -174,6 +197,7 @@ const confirmation = ref(false)
     <PermissionPicker
       v-model="draft.permissions"
       :permissions="permissions"
+      :inherited="herites"
       :disabled="!writable"
       :locked="estSuperuser"
     />
