@@ -104,6 +104,16 @@ const password = reactive({ current: '', next: '', again: '' })
 const passwordState = ref<'idle' | 'saving' | 'ok' | 'error'>('idle')
 const passwordError = ref('')
 
+/**
+ * Compte rattaché au fournisseur d'identité : le mot de passe se gère **là-bas**.
+ *
+ * Le formulaire reste affiché (on voit de quoi il s'agit) mais grisé, avec
+ * l'explication au survol et en clair : le serveur refuse de toute façon
+ * (`password_sso`), et c'est voulu — un mot de passe local continuerait de
+ * fonctionner après une désactivation chez le fournisseur.
+ */
+const compteSso = computed(() => user.value?.oidc === true)
+
 /** Le formulaire est complet et les deux saisies concordent. */
 const passwordReady = computed(
   () =>
@@ -113,6 +123,9 @@ const passwordReady = computed(
 )
 
 async function changePassword() {
+  // Rien à envoyer : ce compte n'a pas de mot de passe ici, le serveur le
+  // refuserait (`password_sso`).
+  if (compteSso.value) return
   passwordState.value = 'saving'
   passwordError.value = ''
   try {
@@ -316,6 +329,7 @@ const quand = (valeur: number | null) =>
             type="password"
             class="admin__input"
             autocomplete="current-password"
+            :disabled="compteSso"
             :placeholder="t('account.currentPassword')"
             :aria-label="t('account.currentPassword')"
           />
@@ -324,6 +338,7 @@ const quand = (valeur: number | null) =>
             type="password"
             class="admin__input"
             autocomplete="new-password"
+            :disabled="compteSso"
             :placeholder="t('account.newPassword')"
             :aria-label="t('account.newPassword')"
           />
@@ -332,21 +347,33 @@ const quand = (valeur: number | null) =>
             type="password"
             class="admin__input"
             autocomplete="new-password"
+            :disabled="compteSso"
             :placeholder="t('account.repeatPassword')"
             :aria-label="t('account.repeatPassword')"
           />
           <div class="admin__field--actions">
-            <button
-              type="button"
-              class="admin__action admin__action--primary"
-              :disabled="!passwordReady || passwordState === 'saving'"
-              @click="changePassword()"
-            >
-              {{ t('account.change') }}
-            </button>
+            <!--
+              Un bouton désactivé n'annonce pas toujours le survol : c'est le
+              porteur de l'infobulle qui le reçoit (même procédé que le bouton
+              ✦ de la recherche IA).
+            -->
+            <span class="tip">
+              <button
+                type="button"
+                class="admin__action admin__action--primary"
+                :disabled="compteSso || !passwordReady || passwordState === 'saving'"
+                :aria-describedby="compteSso ? 'mot-de-passe-sso' : undefined"
+                @click="changePassword()"
+              >
+                {{ t('account.change') }}
+              </button>
+              <span v-if="compteSso" id="mot-de-passe-sso" role="tooltip" class="tip__bubble">
+                {{ t('account.passwordSso') }}
+              </span>
+            </span>
           </div>
 
-          <p v-if="password.next && password.next !== password.again" class="admin__hint">
+          <p v-if="!compteSso && password.next && password.next !== password.again" class="admin__hint">
             {{ t('account.mismatch') }}
           </p>
           <p v-if="passwordState === 'ok'" class="admin__status admin__status--ok">
@@ -355,7 +382,9 @@ const quand = (valeur: number | null) =>
           <p v-if="passwordState === 'error'" class="admin__status admin__status--err">
             {{ passwordError }}
           </p>
-          <p class="admin__hint">{{ t('account.passwordHint') }}</p>
+          <p class="admin__hint">
+            {{ compteSso ? t('account.passwordSso') : t('account.passwordHint') }}
+          </p>
         </div>
       </section>
     </div>

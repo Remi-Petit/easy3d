@@ -351,6 +351,7 @@
     "mismatch": "Las dos entradas no coinciden.",
     "changed": "Contraseña cambiada. Se han cerrado las demás sesiones.",
     "passwordHint": "Mínimo 8 caracteres. El cambio cierra las demás sesiones: los dispositivos abiertos tendrán que volver a entrar.",
+    "passwordSso": "Tu cuenta inicia sesión con el proveedor de identidad (SSO): la contraseña se gestiona allí, no aquí. Una contraseña puesta aquí seguiría funcionando aunque tu cuenta esté desactivada en el proveedor.",
     "tokens": "Claves de API",
     "tokenOnce": "Copia esta clave ahora: no volverá a mostrarse.",
     "limitRights": "Limitar los permisos",
@@ -397,7 +398,8 @@
       "unknown_permission": "Permiso desconocido, o que no tienes.",
       "permission_required": "Elige al menos un permiso.",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
-      "invalid_credentials": "La contraseña actual es incorrecta."
+      "invalid_credentials": "La contraseña actual es incorrecta.",
+      "password_sso": "Esta cuenta inicia sesión con el proveedor de identidad: la contraseña se gestiona allí."
     }
   },
   "journal": {

@@ -18,6 +18,14 @@ export interface AuthUser {
   roles?: string[]
   /** Droits effectifs du compte, superutilisateur compris. */
   permissions?: string[]
+  /**
+   * `true` quand le compte est rattaché au fournisseur d'identité.
+   *
+   * La page « Mon compte » grise alors le changement de mot de passe : ce
+   * compte n'en a pas ici, il se gère chez le fournisseur (le serveur refuse
+   * de son côté, code `password_sso`).
+   */
+  oidc?: boolean
 }
 
 /** Réponse de `GET /auth/me` : toujours 200, même sans session. */

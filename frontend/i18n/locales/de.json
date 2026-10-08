@@ -351,6 +351,7 @@
     "mismatch": "Die beiden Eingaben stimmen nicht überein.",
     "changed": "Passwort geändert. Die anderen Sitzungen wurden geschlossen.",
     "passwordHint": "Mindestens 8 Zeichen. Die Änderung schließt die anderen Sitzungen: offen gelassene Geräte müssen sich neu anmelden.",
+    "passwordSso": "Dein Konto meldet sich über den Identitätsanbieter (SSO) an: Das Passwort wird dort verwaltet, nicht hier. Ein hier gesetztes Passwort würde weiter funktionieren, auch wenn dein Konto beim Anbieter deaktiviert wird.",
     "tokens": "API-Token",
     "tokenOnce": "Kopiere dieses Token jetzt: es wird nicht wieder angezeigt.",
     "limitRights": "Rechte einschränken",
@@ -397,7 +398,8 @@
       "unknown_permission": "Unbekanntes Recht, oder eines, das du nicht hast.",
       "permission_required": "Wähle mindestens ein Recht.",
       "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
-      "invalid_credentials": "Aktuelles Passwort ist falsch."
+      "invalid_credentials": "Aktuelles Passwort ist falsch.",
+      "password_sso": "Dieses Konto meldet sich über den Identitätsanbieter an: Das Passwort wird dort verwaltet."
     }
   },
   "journal": {

@@ -351,6 +351,7 @@
     "mismatch": "The two entries do not match.",
     "changed": "Password changed. The other sessions have been closed.",
     "passwordHint": "8 characters minimum. Changing it closes the other sessions: devices left open will have to sign in again.",
+    "passwordSso": "Your account signs in through the identity provider (SSO): its password is managed there, not here. A password set here would keep working even if your account is disabled at the provider.",
     "tokens": "API tokens",
     "tokenOnce": "Copy this token now: it will not be shown again.",
     "limitRights": "Limit permissions",
@@ -399,7 +400,8 @@
       "permission_required": "Pick at least one permission.",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
-      "invalid_credentials": "Wrong current password."
+      "invalid_credentials": "Wrong current password.",
+      "password_sso": "This account signs in through the identity provider: its password is managed there."
     }
   },
   "journal": {

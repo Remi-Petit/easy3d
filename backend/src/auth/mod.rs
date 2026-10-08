@@ -396,6 +396,7 @@ impl Auth {
             email: user.email.clone(),
             roles: self.db(|conn| db::roles_of(conn, &user.uuid))?,
             permissions: self.permissions_for(user)?,
+            oidc: user.oidc_subject.is_some(),
         })
     }
 
@@ -595,6 +596,12 @@ pub struct UserView {
     /// (`can('model.delete')`) — sans quoi elle proposerait des boutons que le
     /// serveur refusera, ce qui est la pire façon d'annoncer un droit manquant.
     pub permissions: Vec<String>,
+    /// `true` quand le compte est rattaché au fournisseur d'identité.
+    ///
+    /// La page « Mon compte » grise alors le changement de mot de passe : pour
+    /// ce compte, le mot de passe se gère **chez le fournisseur** (voir
+    /// `rbac::change_password`, qui le refuse de son côté).
+    pub oidc: bool,
 }
 
 /// Réponse de `GET /auth/me`.

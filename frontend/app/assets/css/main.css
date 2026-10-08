@@ -1687,6 +1687,44 @@ select.admin__input option {
   transform: translateY(0);
 }
 
+/*
+ * Infobulle d'une action **désactivée** — mêmes raisons que ci-dessus (le `title`
+ * natif arrive en retard, sans style, et un bouton désactivé ne déclenche pas
+ * toujours d'événement de survol : c'est le porteur qui les reçoit). Elle se
+ * place **au-dessus** de son porteur, pour ne pas recouvrir la note qui suit.
+ */
+.tip {
+  position: relative;
+  display: inline-flex;
+}
+
+.tip__bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 280px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.tip:hover .tip__bubble,
+.tip:focus-within .tip__bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .ai-btn {
   display: flex;
   align-items: center;

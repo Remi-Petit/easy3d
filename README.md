@@ -45,7 +45,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 462 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 466 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -315,9 +315,12 @@ première connexion : l'adresse e-mail peut ensuite changer chez le fournisseur
 sans casser le compte, et une autre identité ne peut pas prendre sa place. Le
 secret client n'est jamais renvoyé à l'interface (il y apparaît sous la forme
 `***`), et l'échange de code se fait **côté serveur** — le navigateur ne voit
-jamais ce secret. Le SSO ne remplace pas le mot de passe local : un compte peut
-avoir les deux, ou aucun mot de passe du tout (créé par le SSO, ou préparé pour
-lui).
+jamais ce secret. Un compte rattaché au fournisseur garde ses deux entrées
+possibles (SSO, et son mot de passe local s'il en avait déjà un), mais **son mot
+de passe ne se change plus dans easy3d** : *Mon compte* en grise le formulaire et
+le serveur refuse (`password_sso`). C'est délibéré — un mot de passe local
+continuerait de fonctionner après une désactivation chez le fournisseur, alors
+que le SSO est justement là pour décider qui entre.
 
 #### Éprouver le SSO sans annuaire : le fournisseur fictif
 
