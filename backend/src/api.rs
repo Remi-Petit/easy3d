@@ -1,6 +1,7 @@
 use crate::ai;
 use crate::auth;
-use crate::collab;use crate::config::{self, Config};
+use crate::collab;
+use crate::config::{self, Config};
 use crate::formats;
 use crate::notes;
 use crate::scanner::{self, FileInfo, FolderInfo};
@@ -66,7 +67,9 @@ pub struct AppState {
     /// testable.
     pub oidc: Arc<auth::oidc::Env>,
     /// Un service MCP **par compte** (voir [`AppState::mcp_service`]).
-    pub mcp: Arc<Mutex<HashMap<String, StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager>>>>,
+    pub mcp: Arc<
+        Mutex<HashMap<String, StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager>>>,
+    >,
 }
 
 impl AppState {
@@ -318,7 +321,10 @@ pub fn routes(state: AppState) -> Router {
             "/tokens",
             get(auth::tokens::list).post(auth::tokens::create),
         )
-        .route("/tokens/{uuid}", axum::routing::delete(auth::tokens::revoke));
+        .route(
+            "/tokens/{uuid}",
+            axum::routing::delete(auth::tokens::revoke),
+        );
 
     let accounts_read = gated(
         Router::new()
@@ -3055,13 +3061,7 @@ mod tests {
 
         // Déconnexion : la session est fermée **côté serveur** (le cookie volé
         // ne vaut plus rien) et effacée côté navigateur.
-        let res = post_json(
-            &app,
-            "/auth/logout",
-            serde_json::json!({}),
-            Some(&cookie),
-        )
-        .await;
+        let res = post_json(&app, "/auth/logout", serde_json::json!({}), Some(&cookie)).await;
         assert_eq!(res.status(), StatusCode::OK);
         // Le cookie de fermeture garde les mêmes attributs et expire tout de
         // suite : le navigateur l'oublie.
@@ -3315,7 +3315,12 @@ mod tests {
         // Le catalogue des droits est servi par le backend : l'interface n'en a
         // aucune liste en dur.
         let v = body_json(get_with(&app, "/permissions", Some(&cookie)).await).await;
-        assert!(v.as_array().unwrap().iter().any(|p| p["id"] == "model.delete"));
+        assert!(
+            v.as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["id"] == "model.delete")
+        );
     }
 
     /// Le rôle livré `lecteur` : voir le catalogue, rien de plus.
@@ -3327,7 +3332,9 @@ mod tests {
         let admin = connecte(&app, "remi", "motdepasse").await;
         let lecteur = role_uuid(&app, &admin, "lecteur").await;
         assert_eq!(
-            cree_compte(&app, &admin, "lecteur", vec![lecteur]).await.status(),
+            cree_compte(&app, &admin, "lecteur", vec![lecteur])
+                .await
+                .status(),
             StatusCode::CREATED
         );
 
@@ -3339,16 +3346,26 @@ mod tests {
             StatusCode::OK
         );
         assert_eq!(
-            get_with(&app, "/note?path=a.txt", Some(&cookie)).await.status(),
+            get_with(&app, "/note?path=a.txt", Some(&cookie))
+                .await
+                .status(),
             StatusCode::OK
         );
 
         // …mais ne peut ni écrire, ni lire les réglages, ni toucher aux comptes.
         for (method, uri, body) in [
             ("POST", "/delete", serde_json::json!({ "path": "a.txt" })),
-            ("POST", "/rename", serde_json::json!({ "path": "a.txt", "name": "b.txt" })),
+            (
+                "POST",
+                "/rename",
+                serde_json::json!({ "path": "a.txt", "name": "b.txt" }),
+            ),
             ("POST", "/upload?path=b.txt", serde_json::json!({})),
-            ("PUT", "/config", serde_json::json!({ "display": { "mode": "3d" } })),
+            (
+                "PUT",
+                "/config",
+                serde_json::json!({ "display": { "mode": "3d" } }),
+            ),
             ("POST", "/ai/search", serde_json::json!({ "query": "x" })),
         ] {
             let res = if method == "PUT" {
@@ -3381,7 +3398,9 @@ mod tests {
         let admin = connecte(&app, "remi", "motdepasse").await;
         let lecteur = role_uuid(&app, &admin, "lecteur").await;
         assert_eq!(
-            cree_compte(&app, &admin, "supprimant", vec![lecteur]).await.status(),
+            cree_compte(&app, &admin, "supprimant", vec![lecteur])
+                .await
+                .status(),
             StatusCode::CREATED
         );
 
@@ -3398,9 +3417,14 @@ mod tests {
 
         let cookie = connecte(&app, "supprimant", "motdepasse").await;
         assert_eq!(
-            post_json(&app, "/delete", serde_json::json!({ "path": "a.txt" }), Some(&cookie))
-                .await
-                .status(),
+            post_json(
+                &app,
+                "/delete",
+                serde_json::json!({ "path": "a.txt" }),
+                Some(&cookie)
+            )
+            .await
+            .status(),
             StatusCode::FORBIDDEN
         );
 
@@ -3418,9 +3442,14 @@ mod tests {
         );
 
         assert_eq!(
-            post_json(&app, "/delete", serde_json::json!({ "path": "a.txt" }), Some(&cookie))
-                .await
-                .status(),
+            post_json(
+                &app,
+                "/delete",
+                serde_json::json!({ "path": "a.txt" }),
+                Some(&cookie)
+            )
+            .await
+            .status(),
             StatusCode::OK
         );
         assert!(!dir.path().join("models/a.txt").exists());
@@ -3459,7 +3488,10 @@ mod tests {
                 )
                 .await,
             ),
-            ("suppression", delete_with(&app, &format!("/users/{uuid}"), Some(&admin)).await),
+            (
+                "suppression",
+                delete_with(&app, &format!("/users/{uuid}"), Some(&admin)).await,
+            ),
         ] {
             assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{nom}");
         }
@@ -3545,7 +3577,10 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(imprimeur["builtin"], false);
-        assert_eq!(imprimeur["permissions"], serde_json::json!(["catalog.read", "model.upload"]));
+        assert_eq!(
+            imprimeur["permissions"],
+            serde_json::json!(["catalog.read", "model.upload"])
+        );
 
         assert_eq!(
             put_json(
@@ -3559,7 +3594,9 @@ mod tests {
             StatusCode::OK
         );
         assert_eq!(
-            delete_with(&app, &format!("/roles/{clone}"), Some(&admin)).await.status(),
+            delete_with(&app, &format!("/roles/{clone}"), Some(&admin))
+                .await
+                .status(),
             StatusCode::OK
         );
     }
@@ -3637,11 +3674,17 @@ mod tests {
             StatusCode::OK
         );
 
-        assert_eq!(cree_compte(&app, &admin, "nouveau", vec![]).await.status(), StatusCode::CREATED);
+        assert_eq!(
+            cree_compte(&app, &admin, "nouveau", vec![]).await.status(),
+            StatusCode::CREATED
+        );
         let cookie = connecte(&app, "nouveau", "motdepasse").await;
         let v = body_json(get_with(&app, "/auth/me", Some(&cookie)).await).await;
         assert_eq!(v["user"]["roles"][0], "lecteur");
-        assert_eq!(get_with(&app, "/models", Some(&cookie)).await.status(), StatusCode::OK);
+        assert_eq!(
+            get_with(&app, "/models", Some(&cookie)).await.status(),
+            StatusCode::OK
+        );
     }
 
     /// Un compte désactivé perd l'accès **immédiatement**, sans attendre que sa
@@ -4160,7 +4203,9 @@ mod tests {
 
         // Un jeton inventé non plus.
         assert_eq!(
-            bearer(&app, "GET", "/models", None, "e3d_0000").await.status(),
+            bearer(&app, "GET", "/models", None, "e3d_0000")
+                .await
+                .status(),
             StatusCode::UNAUTHORIZED
         );
     }
@@ -4194,12 +4239,16 @@ mod tests {
 
         // Le droit coché reste ouvert…
         assert_eq!(
-            bearer(&app, "GET", "/models", None, &restreint).await.status(),
+            bearer(&app, "GET", "/models", None, &restreint)
+                .await
+                .status(),
             StatusCode::OK
         );
         // …et tout le reste est fermé, même à un administrateur.
         assert_eq!(
-            bearer(&app, "GET", "/config", None, &restreint).await.status(),
+            bearer(&app, "GET", "/config", None, &restreint)
+                .await
+                .status(),
             StatusCode::FORBIDDEN,
             "hors portée"
         );
@@ -4221,7 +4270,11 @@ mod tests {
         let v = body_json(get_with(&app, "/tokens", Some(&admin)).await).await;
         let jetons = v.as_array().unwrap();
         let ci = jetons.iter().find(|t| t["name"] == "ci").unwrap();
-        assert_eq!(ci["permissions"], serde_json::json!(["catalog.read"]), "{ci}");
+        assert_eq!(
+            ci["permissions"],
+            serde_json::json!(["catalog.read"]),
+            "{ci}"
+        );
         let tot = jetons.iter().find(|t| t["name"] == "tot").unwrap();
         assert!(tot["permissions"].is_null(), "sans restriction : {tot}");
     }
@@ -4290,7 +4343,11 @@ mod tests {
         let a = mcp_cache_key(Some("u"), Some(&liste(&["ai.use", "catalog.read"])));
         let b = mcp_cache_key(Some("u"), Some(&liste(&["catalog.read", "ai.use"])));
         assert_eq!(a, b, "l'ordre des droits ne doit pas créer deux services");
-        assert_ne!(a, mcp_cache_key(Some("u"), None), "restreint ≠ non restreint");
+        assert_ne!(
+            a,
+            mcp_cache_key(Some("u"), None),
+            "restreint ≠ non restreint"
+        );
         assert_ne!(
             a,
             mcp_cache_key(Some("v"), Some(&liste(&["ai.use", "catalog.read"])))
@@ -4443,7 +4500,10 @@ mod tests {
         // La configuration exposée masque le secret, comme la clé d'API.
         let cookie = connecte(&app, "remi", "motdepasse").await;
         let v = body_json(get_with(&app, "/config", Some(&cookie)).await).await;
-        assert_eq!(v["config"]["oidc"]["client_secret"], config::KEY_PLACEHOLDER);
+        assert_eq!(
+            v["config"]["oidc"]["client_secret"],
+            config::KEY_PLACEHOLDER
+        );
         assert_eq!(v["oidc"]["active"], true);
         assert_eq!(v["oidc"]["locked"].as_array().unwrap().len(), 0);
         assert!(v["oidc"]["problem"].is_null(), "{v}");
@@ -4563,7 +4623,10 @@ mod tests {
             }
             None => Body::empty(),
         };
-        app.clone().oneshot(request.body(corps).unwrap()).await.unwrap()
+        app.clone()
+            .oneshot(request.body(corps).unwrap())
+            .await
+            .unwrap()
     }
 
     /// Un compte **rattaché** au fournisseur d'identité, comme après un premier
@@ -4633,7 +4696,9 @@ mod tests {
         let admin = connecte(&app, "remi", "motdepasse").await;
         let lecteur = role_uuid(&app, &admin, "lecteur").await;
         assert_eq!(
-            cree_compte(&app, &admin, "lecteur", vec![lecteur]).await.status(),
+            cree_compte(&app, &admin, "lecteur", vec![lecteur])
+                .await
+                .status(),
             StatusCode::CREATED
         );
 
@@ -4668,7 +4733,9 @@ mod tests {
         );
         let role = role_uuid(&app, &admin, "imprimeur").await;
         assert_eq!(
-            cree_compte(&app, &admin, "imprimeur", vec![role.clone()]).await.status(),
+            cree_compte(&app, &admin, "imprimeur", vec![role.clone()])
+                .await
+                .status(),
             StatusCode::CREATED
         );
         let compte = compte_uuid(&app, &admin, "imprimeur").await;
@@ -4698,7 +4765,10 @@ mod tests {
 
         let events = journal(&app, &admin).await;
         assert_eq!(evenement(&events, "role_created")["subject"], "imprimeur");
-        assert_eq!(evenement(&events, "account_created")["subject"], "imprimeur");
+        assert_eq!(
+            evenement(&events, "account_created")["subject"],
+            "imprimeur"
+        );
 
         // Ce qui a changé est écrit : « compte modifié » tout court
         // n'apprendrait rien.

@@ -26,7 +26,7 @@
 //! `name_taken`…) que l'interface traduit (`admin.accounts.errors.*`, i18n ×4).
 
 use crate::api::AppState;
-use crate::auth::{self, Auth, AuthUser, db, permissions, password};
+use crate::auth::{self, Auth, AuthUser, db, password, permissions};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -158,7 +158,10 @@ fn account_view(conn: &rusqlite::Connection, user: &db::User) -> Result<AccountV
             .collect(),
         direct: db::user_permissions(conn, &user.uuid)?,
         effective: if db::has_role(conn, &user.uuid, db::ADMIN_ROLE)? {
-            permissions::all_ids().iter().map(|id| id.to_string()).collect()
+            permissions::all_ids()
+                .iter()
+                .map(|id| id.to_string())
+                .collect()
         } else {
             db::effective_permissions(conn, &user.uuid)?
         },
@@ -445,7 +448,9 @@ pub async fn delete_user(
         let Some(target) = db::find_by_uuid(conn, &uuid)? else {
             return Ok(None);
         };
-        if db::has_role(conn, &uuid, db::ADMIN_ROLE)? && !target.disabled && db::count_admins(conn)? <= 1
+        if db::has_role(conn, &uuid, db::ADMIN_ROLE)?
+            && !target.disabled
+            && db::count_admins(conn)? <= 1
         {
             return Err("last_admin".to_string());
         }
@@ -458,9 +463,13 @@ pub async fn delete_user(
 
     match result {
         Ok(Some(nom)) => {
-            state
-                .auth
-                .log(&headers, "account_deleted", Some(&caller.0.uuid), &nom, &uuid);
+            state.auth.log(
+                &headers,
+                "account_deleted",
+                Some(&caller.0.uuid),
+                &nom,
+                &uuid,
+            );
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Ok(None) => auth::error(StatusCode::NOT_FOUND, "not_found"),
@@ -578,7 +587,10 @@ pub async fn list_roles(State(state): State<AppState>) -> Response {
                 // Le superutilisateur a tout par construction : on l'affiche
                 // coché partout, sinon l'écran donnerait l'impression qu'il n'a
                 // aucun droit.
-                permissions::all_ids().iter().map(|id| id.to_string()).collect()
+                permissions::all_ids()
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect()
             } else {
                 db::role_permissions(conn, &role.uuid)?
             };
@@ -633,7 +645,10 @@ pub async fn create_role(
                     return Err("unknown_role".to_string());
                 }
                 if from == db::ADMIN_ROLE {
-                    permissions::all_ids().iter().map(|id| id.to_string()).collect()
+                    permissions::all_ids()
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect()
                 } else {
                     db::role_permissions(conn, from)?
                 }
@@ -767,16 +782,14 @@ pub async fn set_default_role(
     State(state): State<AppState>,
     Json(request): Json<DefaultRole>,
 ) -> Response {
-    match state.auth.db(|conn| {
-        match &request.uuid {
-            Some(uuid) => {
-                if db::find_role(conn, uuid)?.is_none() {
-                    return Err("unknown_role".to_string());
-                }
-                db::set_setting(conn, db::DEFAULT_ROLE, Some(uuid))
+    match state.auth.db(|conn| match &request.uuid {
+        Some(uuid) => {
+            if db::find_role(conn, uuid)?.is_none() {
+                return Err("unknown_role".to_string());
             }
-            None => db::set_setting(conn, db::DEFAULT_ROLE, None),
+            db::set_setting(conn, db::DEFAULT_ROLE, Some(uuid))
         }
+        None => db::set_setting(conn, db::DEFAULT_ROLE, None),
     }) {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
@@ -985,7 +998,10 @@ mod tests {
 
     #[test]
     fn tous_les_droits_connus_sont_acceptes() {
-        let tous: Vec<String> = permissions::all_ids().iter().map(|id| (*id).to_string()).collect();
+        let tous: Vec<String> = permissions::all_ids()
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect();
         assert_eq!(known_permissions(&tous), Ok(tous.clone()));
 
         // Une liste vide est valide : un rôle sans droit existe (c'est même le
@@ -1019,8 +1035,17 @@ mod tests {
 
         // Un conflit d'unicité (409) n'est pas un refus de saisie (400) : il a
         // son propre chemin, `conflict_or_internal`.
-        for code in ["internal_error", "username_taken", "email_taken", "name_taken", ""] {
-            assert!(!is_client_error(code), "{code} ne doit pas être un refus client");
+        for code in [
+            "internal_error",
+            "username_taken",
+            "email_taken",
+            "name_taken",
+            "",
+        ] {
+            assert!(
+                !is_client_error(code),
+                "{code} ne doit pas être un refus client"
+            );
         }
     }
 

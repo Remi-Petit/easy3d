@@ -261,7 +261,10 @@ impl Oidc {
     /// Copie où le secret client est remplacé par [`KEY_PLACEHOLDER`].
     pub fn redacted(&self) -> Self {
         Self {
-            client_secret: self.client_secret.as_ref().map(|_| KEY_PLACEHOLDER.to_string()),
+            client_secret: self
+                .client_secret
+                .as_ref()
+                .map(|_| KEY_PLACEHOLDER.to_string()),
             ..self.clone()
         }
     }

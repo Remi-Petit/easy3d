@@ -112,7 +112,10 @@ mod tests {
         assert_eq!(check_length("court"), Err("password_too_short"));
         assert_eq!(check_length(&"a".repeat(MIN_LEN)), Ok(()));
         assert_eq!(check_length(&"a".repeat(MAX_LEN)), Ok(()));
-        assert_eq!(check_length(&"a".repeat(MAX_LEN + 1)), Err("password_too_long"));
+        assert_eq!(
+            check_length(&"a".repeat(MAX_LEN + 1)),
+            Err("password_too_long")
+        );
 
         // Bornes comptées en **caractères**, pas en octets : une phrase de passe
         // accentuée ne doit pas être refusée parce qu'elle pèse plus lourd.

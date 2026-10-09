@@ -151,6 +151,13 @@ correspondant : un compte qui n'a que `catalog.read` peut lister et lire, mais
 et `list_audit` (le journal) `droit « users.read » requis pour l'outil « list_audit »`.
 Révoquer le jeton depuis la même page coupe l'agent immédiatement (401).
 
+Les **comptes** se lisent avec le même droit `users.read` : `list_users` donne le
+nom, l'adresse, les rôles, les droits **effectifs** et l'état (désactivé, rattaché
+au SSO, mot de passe local) — de quoi répondre à « qui a accès à quoi ». C'est de
+la lecture seule : **aucun outil MCP ne crée, ne modifie ni ne supprime un
+compte**, aucun ne touche aux rôles, et aucun ne renvoie de mot de passe (seulement
+le fait qu'il en existe un).
+
 ## Recherche assistée (IA)
 
 Désactivée par défaut : dans **Administration → Recherche assistée**, on choisit
