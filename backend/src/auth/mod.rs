@@ -292,9 +292,9 @@ impl Auth {
         // dit plutôt qu'une adresse qui ne désignerait personne.
         let ip = client_ip(headers);
         let user_agent = header_value(headers, header::USER_AGENT.as_str(), 200);
-        if let Err(e) = self.db(|conn| {
-            db::log_event(conn, kind, actor_uuid, subject, detail, &ip, &user_agent)
-        }) {
+        if let Err(e) =
+            self.db(|conn| db::log_event(conn, kind, actor_uuid, subject, detail, &ip, &user_agent))
+        {
             eprintln!("⚠️  journal : {e}");
         }
     }
@@ -643,7 +643,9 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
         .into_response();
     }
 
-    let user = auth.resolve(&headers).and_then(|user| auth.view(&user).ok());
+    let user = auth
+        .resolve(&headers)
+        .and_then(|user| auth.view(&user).ok());
     Json(Status {
         enabled: true,
         user,
@@ -732,7 +734,13 @@ pub async fn login(
             auth.record_failure(&login);
             // Le journal note l'identifiant **essayé** : c'est ce qu'on cherche
             // ensuite (« qui a tenté d'entrer sous ce nom »).
-            auth.log(&headers, "login_failed", None, &login, "invalid_credentials");
+            auth.log(
+                &headers,
+                "login_failed",
+                None,
+                &login,
+                "invalid_credentials",
+            );
             return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
         }
     };
@@ -746,7 +754,13 @@ pub async fn login(
         Err(e) => return internal(&e),
     };
     auth.clear_failures(&login);
-    auth.log(&headers, "login_ok", Some(&user.uuid), &user.username, "password");
+    auth.log(
+        &headers,
+        "login_ok",
+        Some(&user.uuid),
+        &user.username,
+        "password",
+    );
 
     (
         StatusCode::OK,
@@ -774,10 +788,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     }
     (
         StatusCode::OK,
-        [(
-            header::SET_COOKIE,
-            clear_cookie_value(auth.cookie_secure),
-        )],
+        [(header::SET_COOKIE, clear_cookie_value(auth.cookie_secure))],
         Json(serde_json::json!({ "ok": true })),
     )
         .into_response()
@@ -1137,9 +1148,12 @@ mod tests {
         assert_ne!(ticket, ticket_autre);
 
         auth.db(|conn| {
-            conn.execute("UPDATE users SET disabled = 1 WHERE uuid = ?1", [&remi.uuid])
-                .map(|_| ())
-                .map_err(|e| e.to_string())
+            conn.execute(
+                "UPDATE users SET disabled = 1 WHERE uuid = ?1",
+                [&remi.uuid],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
         })
         .unwrap();
 
@@ -1220,7 +1234,10 @@ mod tests {
             header::COOKIE,
             format!("easy3d_session={token}").parse().unwrap(),
         );
-        assert_eq!(auth.resolve(&headers).map(|u| u.uuid), Some(user.uuid.clone()));
+        assert_eq!(
+            auth.resolve(&headers).map(|u| u.uuid),
+            Some(user.uuid.clone())
+        );
 
         auth.end_session(&headers).unwrap();
         assert!(auth.resolve(&headers).is_none());
@@ -1374,9 +1391,10 @@ mod tests {
     #[test]
     fn seule_la_premiere_adresse_de_la_chaine_compte() {
         assert_eq!(
-            client_ip(&en_tetes(&[
-                ("x-forwarded-for", "203.0.113.7, 172.18.0.1, 172.18.0.2")
-            ])),
+            client_ip(&en_tetes(&[(
+                "x-forwarded-for",
+                "203.0.113.7, 172.18.0.1, 172.18.0.2"
+            )])),
             "203.0.113.7"
         );
         // Premier maillon vide (relais maladroit) : on retombe sur `X-Real-IP`

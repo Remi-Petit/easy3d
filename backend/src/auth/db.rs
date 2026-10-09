@@ -190,7 +190,8 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 
     let conn = Connection::open(path).map_err(err)?;
     // Les contraintes de clés étrangères ne sont **pas** actives par défaut.
-    conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(err)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(err)?;
     migrate(&conn)?;
     Ok(conn)
 }
@@ -290,7 +291,8 @@ impl NewUser {
     }
 }
 
-const USER_COLUMNS: &str = "uuid, username, email, password_hash, oidc_subject, disabled, created_at";
+const USER_COLUMNS: &str =
+    "uuid, username, email, password_hash, oidc_subject, disabled, created_at";
 
 fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
@@ -399,7 +401,11 @@ pub fn insert_user(conn: &Connection, user: &NewUser) -> Result<(), String> {
 pub fn ensure_builtin_roles(conn: &Connection) -> Result<(), String> {
     let roles = [
         (ADMIN_ROLE, "admin", "Accès complet (superutilisateur)"),
-        (READER_ROLE, "lecteur", "Consulte le catalogue, sans modification"),
+        (
+            READER_ROLE,
+            "lecteur",
+            "Consulte le catalogue, sans modification",
+        ),
     ];
     for (uuid, name, description) in roles {
         conn.execute(
@@ -541,8 +547,11 @@ pub fn delete_session(conn: &Connection, token: &str) -> Result<(), String> {
 
 /// Retire les sessions expirées. Renvoie le nombre de lignes supprimées.
 pub fn purge_expired_sessions(conn: &Connection) -> Result<usize, String> {
-    conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", params![now()])
-        .map_err(err)
+    conn.execute(
+        "DELETE FROM sessions WHERE expires_at <= ?1",
+        params![now()],
+    )
+    .map_err(err)
 }
 
 /// Ferme **toutes** les sessions d'un compte (changement de mot de passe,
@@ -624,7 +633,12 @@ pub fn insert_role(conn: &Connection, name: &str, description: &str) -> Result<S
 }
 
 /// Renomme et redécrit un rôle **non livré**.
-pub fn update_role(conn: &Connection, uuid: &str, name: &str, description: &str) -> Result<(), String> {
+pub fn update_role(
+    conn: &Connection,
+    uuid: &str,
+    name: &str,
+    description: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE roles SET name = ?2, description = ?3 WHERE uuid = ?1 AND builtin = 0",
         params![uuid, name.trim(), description.trim()],
@@ -635,9 +649,12 @@ pub fn update_role(conn: &Connection, uuid: &str, name: &str, description: &str)
 
 /// Supprime un rôle **non livré** (ses liens suivent en cascade).
 pub fn delete_role(conn: &Connection, uuid: &str) -> Result<(), String> {
-    conn.execute("DELETE FROM roles WHERE uuid = ?1 AND builtin = 0", params![uuid])
-        .map(|_| ())
-        .map_err(err)
+    conn.execute(
+        "DELETE FROM roles WHERE uuid = ?1 AND builtin = 0",
+        params![uuid],
+    )
+    .map(|_| ())
+    .map_err(err)
 }
 
 /// Nombre de comptes portant ce rôle.
@@ -742,7 +759,9 @@ pub fn effective_permissions(conn: &Connection, user_uuid: &str) -> Result<Vec<S
 /// Tous les comptes, par nom d'utilisateur.
 pub fn list_users(conn: &Connection) -> Result<Vec<User>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {USER_COLUMNS} FROM users ORDER BY username"))
+        .prepare(&format!(
+            "SELECT {USER_COLUMNS} FROM users ORDER BY username"
+        ))
         .map_err(err)?;
     let rows = stmt.query_map([], row_to_user).map_err(err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
@@ -792,7 +811,12 @@ pub fn set_user_roles(
 }
 
 /// Met à jour le nom et l'adresse e-mail d'un compte.
-pub fn update_identity(conn: &Connection, uuid: &str, username: &str, email: &str) -> Result<(), String> {
+pub fn update_identity(
+    conn: &Connection,
+    uuid: &str,
+    username: &str,
+    email: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE users SET username = ?2, email = ?3 WHERE uuid = ?1",
         params![uuid, username.trim(), email.trim().to_lowercase()],
@@ -929,8 +953,8 @@ pub fn insert_token(
 ) -> Result<(), String> {
     // `None` reste `NULL` (aucune restriction) : c'est ce qui distingue « tous
     // les droits à venir » d'une liste, qui elle est figée.
-    let permissions = permissions
-        .map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()));
+    let permissions =
+        permissions.map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()));
     conn.execute(
         "INSERT INTO api_tokens (uuid, user_uuid, name, token_hash, created_at, expires_at, permissions)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -948,12 +972,17 @@ pub fn list_tokens(conn: &Connection, user_uuid: &str) -> Result<Vec<ApiToken>, 
              WHERE user_uuid = ?1 ORDER BY created_at DESC"
         ))
         .map_err(err)?;
-    let rows = stmt.query_map(params![user_uuid], row_to_token).map_err(err)?;
+    let rows = stmt
+        .query_map(params![user_uuid], row_to_token)
+        .map_err(err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
 }
 
 /// Compte associé à l'empreinte d'un jeton (avec le jeton, pour son identifiant).
-pub fn find_token(conn: &Connection, token_hash: &str) -> Result<Option<(ApiToken, String)>, String> {
+pub fn find_token(
+    conn: &Connection,
+    token_hash: &str,
+) -> Result<Option<(ApiToken, String)>, String> {
     conn.query_row(
         &format!("SELECT {TOKEN_COLUMNS}, user_uuid FROM api_tokens WHERE token_hash = ?1"),
         params![token_hash],
@@ -1237,7 +1266,11 @@ mod tests {
 
         for login in ["Remi", "remi", "REMI", "remi@exemple.fr", "REMI@EXEMPLE.FR"] {
             let found = find_by_login(&conn, login).unwrap();
-            assert_eq!(found.map(|u| u.uuid), Some(user.uuid.clone()), "login : {login}");
+            assert_eq!(
+                found.map(|u| u.uuid),
+                Some(user.uuid.clone()),
+                "login : {login}"
+            );
         }
         assert!(find_by_login(&conn, "inconnu").unwrap().is_none());
     }
@@ -1271,13 +1304,19 @@ mod tests {
         );
 
         // Compte désactivé : la session en cours cesse de valoir.
-        conn.execute("UPDATE users SET disabled = 1 WHERE uuid = ?1", params![user.uuid])
-            .unwrap();
+        conn.execute(
+            "UPDATE users SET disabled = 1 WHERE uuid = ?1",
+            params![user.uuid],
+        )
+        .unwrap();
         assert!(session_user(&conn, "jeton", maintenant).unwrap().is_none());
 
         // Le ménage emporte les sessions expirées, pas les autres.
-        conn.execute("UPDATE users SET disabled = 0 WHERE uuid = ?1", params![user.uuid])
-            .unwrap();
+        conn.execute(
+            "UPDATE users SET disabled = 0 WHERE uuid = ?1",
+            params![user.uuid],
+        )
+        .unwrap();
         create_session(&conn, "perime", &user.uuid, maintenant - 1, "", "").unwrap();
         assert_eq!(purge_expired_sessions(&conn).unwrap(), 1);
         assert!(session_user(&conn, "jeton", maintenant).unwrap().is_some());
@@ -1296,8 +1335,11 @@ mod tests {
         assert_eq!(count_admins(&conn).unwrap(), 1);
         assert_eq!(roles_of(&conn, &user.uuid).unwrap(), vec!["admin"]);
 
-        conn.execute("UPDATE users SET disabled = 1 WHERE uuid = ?1", params![user.uuid])
-            .unwrap();
+        conn.execute(
+            "UPDATE users SET disabled = 1 WHERE uuid = ?1",
+            params![user.uuid],
+        )
+        .unwrap();
         assert_eq!(count_admins(&conn).unwrap(), 0);
     }
 
@@ -1354,8 +1396,16 @@ mod tests {
             "curl",
         )
         .unwrap();
-        log_event(&conn, "login_ok", Some("u-1"), "remi", "password", "10.0.0.1", "firefox")
-            .unwrap();
+        log_event(
+            &conn,
+            "login_ok",
+            Some("u-1"),
+            "remi",
+            "password",
+            "10.0.0.1",
+            "firefox",
+        )
+        .unwrap();
         log_event(&conn, "token_created", Some("u-1"), "ci", "30", "", "").unwrap();
 
         let events = list_events(&conn, 10).unwrap();
@@ -1382,8 +1432,16 @@ mod tests {
         // que produirait une attaque, et le journal doit rester borné.
         conn.execute("BEGIN", []).unwrap();
         for i in 0..(MAX_EVENTS + 5) {
-            log_event(&conn, "login_failed", None, &format!("tentative {i}"), "", "", "")
-                .unwrap();
+            log_event(
+                &conn,
+                "login_failed",
+                None,
+                &format!("tentative {i}"),
+                "",
+                "",
+                "",
+            )
+            .unwrap();
         }
         conn.execute("COMMIT", []).unwrap();
 

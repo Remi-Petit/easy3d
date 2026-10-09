@@ -366,8 +366,8 @@ pub fn discovery_url(issuer: &str) -> String {
 
 /// Lit le document de découverte.
 pub fn parse_discovery(body: &str) -> Result<Discovery, String> {
-    let value: Value = serde_json::from_str(body)
-        .map_err(|e| format!("découverte OIDC illisible : {e}"))?;
+    let value: Value =
+        serde_json::from_str(body).map_err(|e| format!("découverte OIDC illisible : {e}"))?;
     let field = |name: &str| -> Result<String, String> {
         value
             .get(name)
@@ -517,7 +517,11 @@ pub fn is_client_code(code: &str) -> bool {
 ///
 /// Fonction **pure au sens du réseau** : elle ne parle qu'à la base, donc elle
 /// se teste entièrement (c'est ici que se joue « qui a le droit d'entrer »).
-pub fn provision(auth: &Auth, settings: &Settings, identity: &Identity) -> Result<db::User, String> {
+pub fn provision(
+    auth: &Auth,
+    settings: &Settings,
+    identity: &Identity,
+) -> Result<db::User, String> {
     // 1. Déjà rattaché : le cas normal, à partir du deuxième login. Le `sub` est
     //    la seule chose qui compte alors — l'e-mail peut avoir changé chez le
     //    fournisseur.
@@ -599,7 +603,9 @@ fn unique_username(auth: &Auth, wanted: &str) -> Result<String, String> {
     };
     let mut candidate = base.clone();
     for suffixe in 2..100 {
-        let pris = auth.db(|conn| db::find_by_login(conn, &candidate))?.is_some();
+        let pris = auth
+            .db(|conn| db::find_by_login(conn, &candidate))?
+            .is_some();
         if !pris {
             return Ok(candidate);
         }
@@ -622,10 +628,7 @@ type Answer = Pin<Box<dyn Future<Output = Raw> + Send>>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// `GET` avec, éventuellement, un jeton porteur.
-    Get {
-        url: String,
-        bearer: Option<String>,
-    },
+    Get { url: String, bearer: Option<String> },
     /// `POST` d'un formulaire (`application/x-www-form-urlencoded`).
     Form { url: String, body: String },
 }
@@ -650,7 +653,10 @@ async fn send(client: &reqwest::Client, request: Request) -> Raw {
         }
         Request::Form { url, body } => client
             .post(url)
-            .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
             .body(body),
     };
 
@@ -860,9 +866,7 @@ where
     let identite = match parse_identity(&body) {
         Ok(identite) => identite,
         Err(code) => {
-            state
-                .auth
-                .log(headers, "sso_refused", None, "", &code);
+            state.auth.log(headers, "sso_refused", None, "", &code);
             return login_error(&code);
         }
     };
@@ -902,14 +906,8 @@ where
     (
         StatusCode::FOUND,
         [
-            (
-                header::LOCATION,
-                pending.return_to.clone(),
-            ),
-            (
-                header::SET_COOKIE,
-                state.auth.session_cookie(&token),
-            ),
+            (header::LOCATION, pending.return_to.clone()),
+            (header::SET_COOKIE, state.auth.session_cookie(&token)),
         ],
     )
         .into_response()
@@ -1276,7 +1274,10 @@ mod tests {
         assert!(url.starts_with("https://sso.exemple.fr/auth?"), "{url}");
         assert!(url.contains("response_type=code"), "{url}");
         assert!(url.contains("client_id=easy3d"), "{url}");
-        assert!(url.contains("redirect_uri=https%3A%2F%2Fex.fr%2Fcb"), "{url}");
+        assert!(
+            url.contains("redirect_uri=https%3A%2F%2Fex.fr%2Fcb"),
+            "{url}"
+        );
         assert!(url.contains("scope=openid%20email"), "{url}");
         assert!(url.contains("state=abc"), "{url}");
     }
@@ -1407,10 +1408,7 @@ mod tests {
         );
         assert_eq!(config.merge_secret(None), Some("vrai-secret".to_string()));
         assert_eq!(config.merge_secret(Some("")), None);
-        assert_eq!(
-            config.merge_secret(Some("neuf")),
-            Some("neuf".to_string())
-        );
+        assert_eq!(config.merge_secret(Some("neuf")), Some("neuf".to_string()));
     }
 
     // ── Provisionnement ─────────────────────────────────────────────────
@@ -1421,8 +1419,12 @@ mod tests {
         auth.db(|conn| db::set_setting(conn, db::DEFAULT_ROLE, Some(db::READER_ROLE)))
             .unwrap();
 
-        let user = provision(&auth, &reglages(Provisioning::Auto), &identite("neuf@exemple.fr"))
-            .unwrap();
+        let user = provision(
+            &auth,
+            &reglages(Provisioning::Auto),
+            &identite("neuf@exemple.fr"),
+        )
+        .unwrap();
         assert_eq!(user.email, "neuf@exemple.fr");
         assert_eq!(user.username, "neuf");
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-neuf@exemple.fr"));
@@ -1460,8 +1462,12 @@ mod tests {
         auth.db(|conn| db::insert_user(conn, &prepare)).unwrap();
 
         // Connu par son adresse : rattaché, et le `sub` est retenu.
-        let user = provision(&auth, &reglages(Provisioning::Manual), &identite("remi@exemple.fr"))
-            .unwrap();
+        let user = provision(
+            &auth,
+            &reglages(Provisioning::Manual),
+            &identite("remi@exemple.fr"),
+        )
+        .unwrap();
         assert_eq!(user.uuid, prepare.uuid);
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-remi@exemple.fr"));
         // **Le rattachement ne détruit rien** : l'empreinte reste en base. Ce qui
@@ -1587,12 +1593,21 @@ mod tests {
     #[test]
     fn un_compte_desactive_ne_se_connecte_pas() {
         let (_dir, auth) = base();
-        let user = provision(&auth, &reglages(Provisioning::Auto), &identite("remi@exemple.fr"))
+        let user = provision(
+            &auth,
+            &reglages(Provisioning::Auto),
+            &identite("remi@exemple.fr"),
+        )
+        .unwrap();
+        auth.db(|conn| db::set_disabled(conn, &user.uuid, true))
             .unwrap();
-        auth.db(|conn| db::set_disabled(conn, &user.uuid, true)).unwrap();
         assert_eq!(
-            provision(&auth, &reglages(Provisioning::Auto), &identite("remi@exemple.fr"))
-                .unwrap_err(),
+            provision(
+                &auth,
+                &reglages(Provisioning::Auto),
+                &identite("remi@exemple.fr")
+            )
+            .unwrap_err(),
             "account_disabled"
         );
     }
@@ -1600,13 +1615,21 @@ mod tests {
     #[test]
     fn le_nom_d_utilisateur_est_rendu_unique() {
         let (_dir, auth) = base();
-        let premier =
-            provision(&auth, &reglages(Provisioning::Auto), &identite("remi@exemple.fr")).unwrap();
+        let premier = provision(
+            &auth,
+            &reglages(Provisioning::Auto),
+            &identite("remi@exemple.fr"),
+        )
+        .unwrap();
         assert_eq!(premier.username, "remi");
         // Même partie locale, autre adresse : la base refuserait le doublon,
         // donc on suffixe avant d'écrire.
-        let second =
-            provision(&auth, &reglages(Provisioning::Auto), &identite("remi@ailleurs.fr")).unwrap();
+        let second = provision(
+            &auth,
+            &reglages(Provisioning::Auto),
+            &identite("remi@ailleurs.fr"),
+        )
+        .unwrap();
         assert_eq!(second.username, "remi-2");
         assert_ne!(second.uuid, premier.uuid);
     }
@@ -1655,7 +1678,10 @@ mod tests {
             header::COOKIE,
             format!("easy3d_session={jeton}").parse().unwrap(),
         );
-        let connecte = state.auth.resolve(&entetes_session).expect("session résolue");
+        let connecte = state
+            .auth
+            .resolve(&entetes_session)
+            .expect("session résolue");
         assert_eq!(connecte.email, "remi@exemple.fr");
         // Le compte créé à la volée reçoit le **rôle par défaut** de
         // l'installation (`lecteur` sur une base neuve) : il peut consulter le
@@ -1821,7 +1847,9 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(
-            location.contains(&encode("https://catalogue.exemple.fr/api/auth/oidc/callback")),
+            location.contains(&encode(
+                "https://catalogue.exemple.fr/api/auth/oidc/callback"
+            )),
             "{location}"
         );
         // Aucun `redirect` demandé : on revient à l'accueil, jamais ailleurs.
@@ -1871,9 +1899,19 @@ mod tests {
         let (faux, journal) = transport(vec![Ok((200, decouverte_json()))]);
         let reponse = check_with(&state, faux).await;
         assert_eq!(reponse.status(), StatusCode::OK);
-        assert_eq!(journal.lock().unwrap().len(), 1, "la découverte doit être refaite");
+        assert_eq!(
+            journal.lock().unwrap().len(),
+            1,
+            "la découverte doit être refaite"
+        );
         // Et la réponse a été retenue : le flux qui suit n'ira pas la rechercher.
-        assert!(state.auth.oidc.discovery_of("https://sso.exemple.fr").is_some());
+        assert!(
+            state
+                .auth
+                .oidc
+                .discovery_of("https://sso.exemple.fr")
+                .is_some()
+        );
 
         // Fournisseur muet ou illisible : un 502 motivé, jamais une page blanche.
         let (faux, _) = transport(vec![Ok((500, "boum".to_string()))]);
@@ -1902,4 +1940,3 @@ mod tests {
         );
     }
 }
-

@@ -168,7 +168,15 @@ impl Auth {
             // liste, et la ligne ne sert plus à rien. C'est le seul moment où
             // l'occasion se présente sans requête supplémentaire périodique.
             db::purge_expired_tokens(conn)?;
-            db::insert_token(conn, &uuid, user_uuid, &name, &hash, expires_at, permissions)
+            db::insert_token(
+                conn,
+                &uuid,
+                user_uuid,
+                &name,
+                &hash,
+                expires_at,
+                permissions,
+            )
         })?;
         Ok((
             token,
@@ -280,7 +288,7 @@ pub async fn create(
     let scope = match &request.permissions {
         None => None,
         Some(ids) if ids.is_empty() => {
-            return auth::error(StatusCode::BAD_REQUEST, "permission_required")
+            return auth::error(StatusCode::BAD_REQUEST, "permission_required");
         }
         Some(ids) => {
             let detenus = match state.auth.permissions_for(&caller.0) {
@@ -307,7 +315,11 @@ pub async fn create(
                 "token_created",
                 Some(&caller.0.uuid),
                 name,
-                &request.expires_in_days.unwrap_or(0).clamp(0, u32::MAX as i64).to_string(),
+                &request
+                    .expires_in_days
+                    .unwrap_or(0)
+                    .clamp(0, u32::MAX as i64)
+                    .to_string(),
             );
             (
                 StatusCode::CREATED,
@@ -376,8 +388,15 @@ mod tests {
 
         assert_eq!(empreinte.len(), 64, "BLAKE2s-256 en hexadécimal");
         assert_eq!(empreinte, hash(&token), "même jeton, même empreinte");
-        assert!(!empreinte.contains(PREFIX), "l'empreinte ne dit rien du jeton");
-        assert_ne!(empreinte, hash(&new_token()), "deux jetons, deux empreintes");
+        assert!(
+            !empreinte.contains(PREFIX),
+            "l'empreinte ne dit rien du jeton"
+        );
+        assert_ne!(
+            empreinte,
+            hash(&new_token()),
+            "deux jetons, deux empreintes"
+        );
     }
 
     #[test]
@@ -425,7 +444,11 @@ mod tests {
         // Le ménage (à la création suivante) emporte la ligne expirée.
         auth.issue_token(&user.uuid, "suivant", None, None).unwrap();
         let restants = auth.tokens_of(&user.uuid).unwrap();
-        assert_eq!(restants.len(), 3, "la ligne expirée est retirée : {restants:?}");
+        assert_eq!(
+            restants.len(),
+            3,
+            "la ligne expirée est retirée : {restants:?}"
+        );
         assert!(restants.iter().all(|t| t.name != "vieil agent"));
     }
 }

@@ -59,19 +59,58 @@ pub struct Permission {
 /// L'ordre est celui de l'interface (les groupes se suivent) : le catalogue, ce
 /// qu'on y fait, l'IA, les réglages, puis les comptes.
 pub const ALL: &[Permission] = &[
-    Permission { id: CATALOG_READ, group: "catalog" },
-    Permission { id: MODEL_UPLOAD, group: "catalog" },
-    Permission { id: MODEL_RENAME, group: "catalog" },
-    Permission { id: MODEL_DELETE, group: "catalog" },
-    Permission { id: NOTE_WRITE, group: "catalog" },
-    Permission { id: AI_USE, group: "ai" },
-    Permission { id: AI_CONFIG, group: "ai" },
-    Permission { id: CONFIG_READ, group: "settings" },
-    Permission { id: CONFIG_WRITE, group: "settings" },
-    Permission { id: USERS_READ, group: "accounts" },
-    Permission { id: USERS_WRITE, group: "accounts" },
-    Permission { id: ROLES_READ, group: "accounts" },
-    Permission { id: ROLES_WRITE, group: "accounts" },
+    Permission {
+        id: CATALOG_READ,
+        group: "catalog",
+    },
+    Permission {
+        id: MODEL_UPLOAD,
+        group: "catalog",
+    },
+    Permission {
+        id: MODEL_RENAME,
+        group: "catalog",
+    },
+    Permission {
+        id: MODEL_DELETE,
+        group: "catalog",
+    },
+    Permission {
+        id: NOTE_WRITE,
+        group: "catalog",
+    },
+    Permission {
+        id: AI_USE,
+        group: "ai",
+    },
+    Permission {
+        id: AI_CONFIG,
+        group: "ai",
+    },
+    Permission {
+        id: CONFIG_READ,
+        group: "settings",
+    },
+    Permission {
+        id: CONFIG_WRITE,
+        group: "settings",
+    },
+    Permission {
+        id: USERS_READ,
+        group: "accounts",
+    },
+    Permission {
+        id: USERS_WRITE,
+        group: "accounts",
+    },
+    Permission {
+        id: ROLES_READ,
+        group: "accounts",
+    },
+    Permission {
+        id: ROLES_WRITE,
+        group: "accounts",
+    },
 ];
 
 /// Tous les identifiants connus, dans l'ordre d'affichage.
@@ -104,9 +143,9 @@ pub fn for_tool(tool: &str) -> Option<&'static str> {
         "create_note" | "update_note" | "append_note" | "delete_note" => Some(NOTE_WRITE),
         "get_config" => Some(CONFIG_READ),
         "set_display_mode" | "set_models_root" => Some(CONFIG_WRITE),
-        // Lire le journal d'audit : c'est le sujet des comptes, et la page
-        // d'administration demande déjà ce droit-là pour l'afficher.
-        "list_audit" => Some(USERS_READ),
+        // Lire le journal d'audit et les comptes : c'est le sujet des comptes, et
+        // la page d'administration demande déjà ce droit-là pour les afficher.
+        "list_audit" | "list_users" => Some(USERS_READ),
         _ => None,
     }
 }
@@ -145,11 +184,13 @@ mod tests {
         for id in ids {
             assert_eq!(id, id.trim());
             assert!(
-                id.split_once('.').is_some_and(|(domaine, action)| !domaine.is_empty() && !action.is_empty()),
+                id.split_once('.')
+                    .is_some_and(|(domaine, action)| !domaine.is_empty() && !action.is_empty()),
                 "identifiant mal formé : {id}"
             );
             assert!(
-                id.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_'),
+                id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '.' || c == '_'),
                 "identifiant à minuscules attendu : {id}"
             );
         }
@@ -184,6 +225,7 @@ mod tests {
             "set_display_mode",
             "set_models_root",
             "list_audit",
+            "list_users",
         ] {
             let droit = for_tool(outil).unwrap_or_else(|| panic!("outil non classé : {outil}"));
             assert!(is_known(droit), "droit inconnu pour {outil} : {droit}");

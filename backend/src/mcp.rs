@@ -18,7 +18,9 @@
 //! pas supprimer de travail.
 
 use crate::api::{self, AppState};
+use crate::auth::db;
 use crate::auth::journal;
+use crate::auth::permissions;
 use crate::collab;
 use crate::config::{Config, DisplayMode};
 use crate::formats::{self, Viewer};
@@ -27,7 +29,6 @@ use crate::scanner::{self, FileInfo};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
-use crate::auth::permissions;
 use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -72,11 +73,7 @@ impl Easy3dMcp {
     }
 
     /// Serveur au nom d'un compte (voir `api::AppState::mcp_service`).
-    pub fn for_user(
-        state: AppState,
-        user: Option<String>,
-        scope: Option<Vec<String>>,
-    ) -> Self {
+    pub fn for_user(state: AppState, user: Option<String>, scope: Option<Vec<String>>) -> Self {
         Self {
             user,
             scope,
@@ -230,6 +227,9 @@ impl ServerHandler for Easy3dMcp {
                  list_audit lit le journal de l'installation (connexions, refus, jetons créés ou \
                  révoqués, changements de comptes et de rôles) : en lecture seule, et réservé au \
                  droit `users.read`.\n\
+                 list_users donne les comptes de l'installation (nom, adresse, rôles, droits \
+                 effectifs, état) avec le même droit `users.read`, et jamais un mot de passe : \
+                 aucun outil MCP ne crée ni ne modifie un compte.\n\
                  Une note est rattachée à un élément **existant** du catalogue (fichier ou \
                  dossier) ; son écriture est immédiatement visible dans l'application.",
             )
@@ -314,6 +314,32 @@ struct ListAuditArgs {
     /// Nombre maximum d'événements renvoyés (défaut 50, maximum 500).
     #[serde(default)]
     limit: Option<u32>,
+}
+
+/// Entrée de `list_users`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct ListUsersArgs {
+    /// Mots à chercher dans le nom, l'adresse e-mail ou le nom d'un rôle
+    /// (insensible à la casse).
+    #[serde(default)]
+    query: Option<String>,
+    /// Ne garder qu'un état de compte : absent = tous, `active` = ceux qui
+    /// peuvent entrer, `disabled` = ceux dont l'accès a été retiré.
+    #[serde(default)]
+    status: Option<StatusArg>,
+    /// Nombre maximum de comptes renvoyés (défaut 50, maximum 500).
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+/// État d'un compte, tel qu'on le filtre.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum StatusArg {
+    /// Comptes autorisés à se connecter.
+    Active,
+    /// Comptes désactivés : accès retiré, sessions fermées.
+    Disabled,
 }
 
 /// Entrée des outils d'écriture de note.
@@ -525,6 +551,45 @@ impl From<journal::EventView> for AuditEvent {
             ip: vue.ip,
         }
     }
+}
+
+/// Un compte, tel qu'un agent le lit.
+///
+/// Aucun secret n'y entre : ni mot de passe, ni empreinte, ni identifiant du
+/// fournisseur d'identité — seulement des **états** (`has_password`, `oidc`), et
+/// jamais la valeur derrière. C'est la même règle que `config.yml` et sa clé
+/// d'API : l'interface (et donc un agent autorisé) sait *s'il y a* un mot de
+/// passe, pas *lequel*.
+#[derive(Debug, Serialize, JsonSchema)]
+struct UserInfo {
+    /// Identifiant stable du compte (celui des routes d'administration).
+    uuid: String,
+    username: String,
+    email: String,
+    /// Noms des rôles portés, par ordre alphabétique.
+    roles: Vec<String>,
+    /// Droits **effectifs** (rôles ∪ droits posés sur le compte) : ce que le
+    /// serveur appliquera vraiment. C'est la réponse à « qui a accès à quoi ».
+    permissions: Vec<String>,
+    /// Accès retiré : le compte ne peut plus se connecter, et ses sessions
+    /// avec lui.
+    disabled: bool,
+    /// Compte rattaché à une identité du fournisseur d'identité (SSO).
+    oidc: bool,
+    /// Le compte a un mot de passe local (il peut donc entrer sans SSO).
+    has_password: bool,
+    /// Date de création, en secondes unix.
+    created_at: i64,
+}
+
+/// Sortie de `list_users`.
+#[derive(Debug, Serialize, JsonSchema)]
+struct ListUsersOutput {
+    /// Comptes correspondants, **avant** `limit`.
+    total: usize,
+    /// Comptes effectivement renvoyés, par nom d'utilisateur.
+    returned: usize,
+    users: Vec<UserInfo>,
 }
 
 /// Sortie de `get_config`.
@@ -828,6 +893,98 @@ impl Easy3dMcp {
         }))
     }
 
+    /// Comptes de l'installation : identité, rôles, droits effectifs, état.
+    #[tool(
+        description = "List the easy3d user accounts: username, e-mail, roles, effective \
+                       permissions (what the server actually enforces), and whether an account \
+                       is disabled, linked to single sign-on, or has a local password. \
+                       Read-only — no MCP tool can create, change, disable or delete an \
+                       account. No password and no password hash is ever returned. Requires \
+                       the `users.read` permission, exactly like the accounts page."
+    )]
+    fn list_users(
+        &self,
+        Parameters(args): Parameters<ListUsersArgs>,
+    ) -> Result<Json<ListUsersOutput>, ErrorData> {
+        if !self.state.auth.is_enabled() {
+            // Sans comptes activés, il n'y a personne à lister — et ce n'est pas
+            // une erreur : c'est une installation ouverte, comme pour `GET /users`.
+            return Ok(Json(ListUsersOutput {
+                total: 0,
+                returned: 0,
+                users: Vec::new(),
+            }));
+        }
+
+        let users = self
+            .state
+            .auth
+            .db(|conn| {
+                let mut out = Vec::new();
+                for user in db::list_users(conn)? {
+                    out.push(UserInfo {
+                        roles: db::roles_named(conn, &user.uuid)?
+                            .into_iter()
+                            .map(|(_, name)| name)
+                            .collect(),
+                        // Le rôle `admin` est un superutilisateur **codé** : ses
+                        // droits effectifs sont tous ceux du catalogue, comme
+                        // l'écran d'administration les affiche.
+                        permissions: if db::has_role(conn, &user.uuid, db::ADMIN_ROLE)? {
+                            permissions::all_ids()
+                                .iter()
+                                .map(|id| (*id).to_string())
+                                .collect()
+                        } else {
+                            db::effective_permissions(conn, &user.uuid)?
+                        },
+                        disabled: user.disabled,
+                        oidc: user.oidc_subject.is_some(),
+                        has_password: user.password_hash.is_some(),
+                        created_at: user.created_at,
+                        uuid: user.uuid,
+                        username: user.username,
+                        email: user.email,
+                    });
+                }
+                Ok(out)
+            })
+            .map_err(|msg| ErrorData::internal_error(msg, None))?;
+
+        // Les filtres de l'outil : les mêmes questions que la page des comptes
+        // (« qui a encore accès ? », « qui porte ce rôle ? »).
+        let query = args
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(str::to_lowercase);
+        let mut users: Vec<UserInfo> = users
+            .into_iter()
+            .filter(|user| match args.status {
+                Some(StatusArg::Active) => !user.disabled,
+                Some(StatusArg::Disabled) => user.disabled,
+                None => true,
+            })
+            .filter(|user| match &query {
+                None => true,
+                Some(query) => [&user.username, &user.email, &user.roles.join(" ")]
+                    .iter()
+                    .any(|champ| champ.to_lowercase().contains(query)),
+            })
+            .collect();
+
+        let total = users.len();
+        let limit = args.limit.unwrap_or(50).clamp(1, 500) as usize;
+        users.truncate(limit);
+
+        Ok(Json(ListUsersOutput {
+            total,
+            returned: users.len(),
+            users,
+        }))
+    }
+
     /// Crée la note d'un élément.
     #[tool(
         description = "Create the Markdown note of a catalogue entry. Fails if a note \
@@ -1089,24 +1246,43 @@ mod tests {
         // Un compte avec le seul rôle livré `lecteur` : il consulte, il n'écrit
         // rien.
         let user = crate::auth::db::NewUser::new("bob", "bob@exemple.fr", None);
-        comptes.db(|conn| crate::auth::db::insert_user(conn, &user)).unwrap();
+        comptes
+            .db(|conn| crate::auth::db::insert_user(conn, &user))
+            .unwrap();
         comptes
             .db(|conn| crate::auth::db::assign_role(conn, &user.uuid, crate::auth::db::READER_ROLE))
             .unwrap();
 
         let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
-        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
-            .with_auth(comptes);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws,
+            crate::config::Config::default(),
+        )
+        .with_auth(comptes);
         let serveur = Easy3dMcp::for_user(state.clone(), Some(user.uuid.clone()), None);
 
         // Lire le catalogue, ses notes et les formats : oui.
-        for outil in ["list_formats", "list_models", "find_models", "get_model", "list_notes", "read_note"] {
+        for outil in [
+            "list_formats",
+            "list_models",
+            "find_models",
+            "get_model",
+            "list_notes",
+            "read_note",
+        ] {
             assert!(serveur.require_for(outil).is_ok(), "outil : {outil}");
         }
 
         // Écrire une note, lire ou modifier les réglages : non — c'est ce qui
         // empêche un agent de contourner les droits de l'interface.
-        for outil in ["create_note", "delete_note", "get_config", "set_display_mode", "set_models_root"] {
+        for outil in [
+            "create_note",
+            "delete_note",
+            "get_config",
+            "set_display_mode",
+            "set_models_root",
+        ] {
             assert!(serveur.require_for(outil).is_err(), "outil : {outil}");
         }
 
@@ -1131,14 +1307,20 @@ mod tests {
 
         // Un compte administrateur : sans restriction, il peut tout.
         let admin = crate::auth::db::NewUser::new("root", "root@exemple.fr", None);
-        comptes.db(|conn| crate::auth::db::insert_user(conn, &admin)).unwrap();
+        comptes
+            .db(|conn| crate::auth::db::insert_user(conn, &admin))
+            .unwrap();
         comptes
             .db(|conn| crate::auth::db::assign_role(conn, &admin.uuid, crate::auth::db::ADMIN_ROLE))
             .unwrap();
 
         let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
-        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
-            .with_auth(comptes);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws,
+            crate::config::Config::default(),
+        )
+        .with_auth(comptes);
 
         let entier = Easy3dMcp::for_user(state.clone(), Some(admin.uuid.clone()), None);
         assert!(entier.require_for("get_config").is_ok(), "sans restriction");
@@ -1206,8 +1388,12 @@ mod tests {
             .unwrap();
 
         let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
-        let state = AppState::new(dir.path().to_path_buf(), ws, crate::config::Config::default())
-            .with_auth(comptes);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws,
+            crate::config::Config::default(),
+        )
+        .with_auth(comptes);
         let serveur = Easy3dMcp::for_user(state.clone(), Some(admin.uuid.clone()), None);
 
         assert!(
@@ -1250,6 +1436,136 @@ mod tests {
             restreint.require_for("list_audit").is_err(),
             "hors portée, même pour un administrateur"
         );
+    }
+
+    /// Les comptes se lisent avec le droit `users.read` — le même que la page
+    /// d'administration — et l'outil rend ce qu'elle montre : nom, adresse,
+    /// rôles, droits **effectifs**, état. Jamais un mot de passe, seulement le
+    /// fait qu'il y en ait un.
+    #[test]
+    fn les_comptes_se_lisent_avec_le_droit_des_comptes() {
+        let dir = tempfile::tempdir().unwrap();
+        let comptes = crate::auth::Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+        comptes.db(crate::auth::db::ensure_builtin_roles).unwrap();
+
+        // Un administrateur, et un lecteur qui n'a que le catalogue.
+        let admin = crate::auth::db::NewUser::new("root", "root@exemple.fr", None);
+        comptes
+            .db(|conn| crate::auth::db::insert_user(conn, &admin))
+            .unwrap();
+        comptes
+            .db(|conn| crate::auth::db::assign_role(conn, &admin.uuid, crate::auth::db::ADMIN_ROLE))
+            .unwrap();
+
+        let lecteur = crate::auth::db::NewUser::new("lecteur", "lecteur@exemple.fr", None);
+        comptes
+            .db(|conn| crate::auth::db::insert_user(conn, &lecteur))
+            .unwrap();
+        comptes
+            .db(|conn| {
+                crate::auth::db::set_user_permissions(
+                    conn,
+                    &lecteur.uuid,
+                    &["catalog.read".to_string()],
+                )
+            })
+            .unwrap();
+
+        let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws,
+            crate::config::Config::default(),
+        )
+        .with_auth(comptes);
+
+        let serveur = Easy3dMcp::for_user(state.clone(), Some(admin.uuid.clone()), None);
+        assert!(
+            serveur.require_for("list_users").is_ok(),
+            "le droit des comptes ouvre la liste"
+        );
+
+        let liste = serveur
+            .list_users(Parameters(ListUsersArgs::default()))
+            .unwrap()
+            .0;
+        assert_eq!((liste.total, liste.returned), (2, 2));
+        // Par nom d'utilisateur, comme `GET /users`.
+        assert_eq!(liste.users[0].username, "lecteur");
+        assert_eq!(liste.users[0].email, "lecteur@exemple.fr");
+        assert_eq!(liste.users[0].permissions, vec!["catalog.read"]);
+        assert!(!liste.users[0].disabled && !liste.users[0].oidc && !liste.users[0].has_password);
+
+        let root = &liste.users[1];
+        assert_eq!(root.roles, vec!["admin"]);
+        assert!(
+            root.permissions.iter().any(|d| d == "users.write"),
+            "un administrateur a tous les droits : {root:?}"
+        );
+
+        // Les filtres de l'outil : par état, puis par mots.
+        let desactives = serveur
+            .list_users(Parameters(ListUsersArgs {
+                status: Some(StatusArg::Disabled),
+                ..Default::default()
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(desactives.total, 0);
+
+        let cherche = serveur
+            .list_users(Parameters(ListUsersArgs {
+                query: Some("EXEMPLE.FR".to_string()),
+                ..Default::default()
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(cherche.total, 2, "l'adresse compte dans la recherche");
+
+        let par_role = serveur
+            .list_users(Parameters(ListUsersArgs {
+                query: Some("admin".to_string()),
+                ..Default::default()
+            }))
+            .unwrap()
+            .0;
+        assert_eq!(par_role.total, 1, "le nom d'un rôle compte aussi");
+        assert_eq!(par_role.users[0].username, "root");
+
+        // Le compte n'a pas le droit : l'outil lui est fermé.
+        let sans_droit = Easy3dMcp::for_user(state.clone(), Some(lecteur.uuid.clone()), None);
+        let refus = sans_droit.require_for("list_users").unwrap_err();
+        assert!(
+            refus.message.contains("users.read"),
+            "le refus dit quel droit manque : {}",
+            refus.message
+        );
+
+        // Un jeton restreint ne contourne pas le droit du compte.
+        let restreint = Easy3dMcp::for_user(
+            state,
+            Some(admin.uuid.clone()),
+            Some(vec!["catalog.read".to_string()]),
+        );
+        assert!(
+            restreint.require_for("list_users").is_err(),
+            "hors portée, même pour un administrateur"
+        );
+
+        // Installation ouverte : aucun compte, et aucune erreur non plus.
+        let vide = tempfile::tempdir().unwrap();
+        let (ws, _) = tokio::sync::broadcast::channel::<String>(16);
+        let ouvert = AppState::new(
+            vide.path().to_path_buf(),
+            ws,
+            crate::config::Config::default(),
+        );
+        let serveur = Easy3dMcp::for_user(ouvert, None, None);
+        let liste = serveur
+            .list_users(Parameters(ListUsersArgs::default()))
+            .unwrap()
+            .0;
+        assert_eq!(liste.total, 0, "sans comptes activés, la liste est vide");
     }
 
     #[test]
