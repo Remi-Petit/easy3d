@@ -27,7 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: check
         name: Tag == Cargo.toml == package.json
         run: |
@@ -51,7 +51,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: rustup update stable && rustup default stable
       - run: cargo build --release --verbose
 
@@ -80,7 +80,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - name: Connexion à GHCR
         run: |
@@ -110,7 +110,7 @@ jobs:
     needs: [verify, binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           path: dist

@@ -48,7 +48,7 @@ jobs:
       scripts: ${{ steps.filter.outputs.scripts }}
       docker: ${{ steps.filter.outputs.docker }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Comparer au commit précédent, pas seulement au dernier commit.
           fetch-depth: 0
@@ -81,7 +81,7 @@ jobs:
           - beta
           - nightly
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
       - run: cargo build --verbose
       - run: cargo test --verbose
@@ -95,7 +95,7 @@ jobs:
     env:
       CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: allow
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: rustup update stable && rustup default stable
       - run: cargo update --verbose
       - run: cargo build --verbose
@@ -106,7 +106,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
     - uses: taiki-e/install-action@cargo-hack
     - run: cargo hack check --rust-version --workspace --all-targets --ignore-private
 
@@ -117,7 +117,7 @@ jobs:
     env:
       CARGO_BUILD_WARNINGS: deny
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       - run: cargo clippy --all-targets --all-features --keep-going
@@ -135,7 +135,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # `cargo-audit` (RustSec) : binaire installé à la demande ; la base d'avis
       # est téléchargée à chaque exécution (elle bouge tous les jours).
       - uses: taiki-e/install-action@cargo-audit
@@ -159,7 +159,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Version de bun lue dans `packageManager` (frontend/package.json).
       - uses: oven-sh/setup-bun@v2
         with:
@@ -189,7 +189,7 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: node scripts/readme-langs.mjs
       - run: |
           if git diff --quiet -- README.md; then
@@ -215,7 +215,7 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
