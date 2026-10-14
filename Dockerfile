@@ -54,7 +54,7 @@ RUN bun run build
 # Base Node (Debian bookworm, comme la compilation du backend : glibc
 # compatible) : elle fournit le runtime du serveur SSR et `debian:bookworm-slim`
 # apporte `curl` pour le healthcheck.
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
