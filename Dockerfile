@@ -38,7 +38,7 @@ COPY backend/ai-presets.yml ./
 RUN touch src/lib.rs src/main.rs && cargo build --release
 
 # ── 2. Frontend (Nuxt) ─────────────────────────────────────────────────────
-FROM oven/bun:1.3.14-slim AS frontend
+FROM oven/bun:1.4.3-slim AS frontend
 
 WORKDIR /build/frontend
 
