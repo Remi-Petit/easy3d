@@ -110,6 +110,10 @@ const tokenBody = new URLSearchParams({
 const tokenRes = await fetch(disc.token_endpoint, { method: 'POST', body: tokenBody })
 const token = await tokenRes.json()
 check('jeton délivré', tokenRes.status === 200 && !!token.access_token, token.token_type)
+// Le jeton de rafraîchissement est ce que easy3d garde pour **revérifier**
+// périodiquement l'accès (`auth::oidc::revalidate_sessions`) : sans lui, un
+// compte fermé chez le fournisseur garderait sa session locale.
+check('jeton de rafraîchissement délivré', !!token.refresh_token)
 
 const userRes = await fetch(disc.userinfo_endpoint, {
   headers: { authorization: `Bearer ${token.access_token}` },
@@ -128,6 +132,40 @@ check('secret refusé', faux.status === 401, String(faux.status))
 
 const sansJeton = await fetch(disc.userinfo_endpoint)
 check('userinfo sans jeton refusé', sansJeton.status === 401, String(sansJeton.status))
+
+// ── Rafraîchissement (revalidation des sessions côté easy3d) ─────────────
+const refresh = await fetch(disc.token_endpoint, {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: token.refresh_token,
+    client_id: clientId,
+    client_secret: clientSecret,
+  }),
+})
+const renouvele = await refresh.json()
+check('rafraîchissement accepté', refresh.status === 200 && !!renouvele.access_token, String(refresh.status))
+// Le jeton **tourne** : l'ancien ne vaut plus rien, et easy3d doit garder le
+// nouveau — c'est exactement ce que fait la revalidation.
+check('jeton de rafraîchissement renouvelé', !!renouvele.refresh_token && renouvele.refresh_token !== token.refresh_token)
+const rejoueRefresh = await fetch(disc.token_endpoint, {
+  method: 'POST',
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: token.refresh_token,
+    client_id: clientId,
+    client_secret: clientSecret,
+  }),
+})
+check('ancien rafraîchissement refusé', rejoueRefresh.status === 400, String(rejoueRefresh.status))
+const grantInconnu = await fetch(disc.token_endpoint, {
+  method: 'POST',
+  body: new URLSearchParams({ grant_type: 'password', client_id: clientId, client_secret: clientSecret }),
+})
+const corpsInconnu = await grantInconnu.json()
+// Ce refus-là parle de **nous** (configuration), pas d'un accès révoqué : easy3d
+// ne doit surtout pas fermer de compte en le lisant.
+check('grant inconnu refusé sans « invalid_grant »', grantInconnu.status === 400 && corpsInconnu.error !== 'invalid_grant', corpsInconnu.error)
 
 // L'instance lancée pour le test n'est pas laissée derrière : le port doit être
 // libre à la sortie, sinon l'exécution suivante viserait l'ancienne — avec ses

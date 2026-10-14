@@ -122,6 +122,30 @@ jobs:
       - run: rustup component add clippy
       - run: cargo clippy --all-targets --all-features --keep-going
 
+  # Vulnérabilités **publiées** dans les dépendances (base RustSec). Ce n'est pas
+  # un doublon de Dependabot : celui-ci propose des mises à jour, celui-là dit
+  # « la version que tu as est vulnérable » — et il le dit même quand aucune
+  # version corrigée n'existe encore.
+  #
+  # Pas de `continue-on-error` à dessein : un avis RustSec fait échouer le job,
+  # donc le run. Une alerte qu'on peut ignorer sans rien faire n'est jamais
+  # traitée.
+  audit:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # `cargo-audit` (RustSec) : binaire installé à la demande ; la base d'avis
+      # est téléchargée à chaque exécution (elle bouge tous les jours).
+      - uses: taiki-e/install-action@cargo-audit
+      # `Cargo.lock` n'est **pas** versionné dans ce dépôt : on le résout ici
+      # pour auditer exactement ce que les autres jobs compilent. Le commit du
+      # verrou reste une décision à part (elle figerait aussi les mises à jour
+      # automatiques) ; l'audit, lui, n'attend pas.
+      - run: cargo generate-lockfile
+      - run: cargo audit
+
   # Tests unitaires (vitest) et build Nuxt : le build est le seul endroit qui
   # attrape une erreur de gabarit ou de SSR, invisible aux tests unitaires.
   # Les tests de bout en bout (Playwright) ne sont pas encore ici : ils attendent

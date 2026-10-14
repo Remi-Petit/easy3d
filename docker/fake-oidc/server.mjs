@@ -43,6 +43,10 @@
  *                   `[{"id":"admin","email":"…","username":"…"}, …]`
  *                   Au-delà d'un compte, `/authorize` propose de choisir.
  *   SUBJECT/EMAIL/USERNAME/NAME   le compte simulé **unique** (sans `ACCOUNTS`)
+ *   REVOKED_EMAILS  adresses (séparées par des virgules) dont l'accès est
+ *                   **fermé** : `invalid_grant` au rafraîchissement, refus à
+ *                   l'autorisation. Sert à vérifier la revalidation des
+ *                   sessions SSO (`auth::oidc::revalidate_sessions`).
  *
  * Tout est journalisé sur la sortie du conteneur (`docker compose logs -f fake-oidc`).
  */
@@ -103,10 +107,27 @@ const TOKEN_TTL = 3600
 /** Durée de vie d'un code d'autorisation, en millisecondes. */
 const CODE_TTL = 120_000
 
+/**
+ * Adresses dont l'accès est fermé chez ce fournisseur (`REVOKED_EMAILS`).
+ *
+ * C'est le seul moyen de fabriquer, dans le brouillon, ce que le backend doit
+ * savoir reconnaître : un compte qui existe encore mais que l'annuaire
+ * **refuse**. Un fournisseur réel répond alors `invalid_grant` au
+ * rafraîchissement — et easy3d ferme les sessions et le compte local.
+ */
+const REVOKED_EMAILS = new Set(
+  (process.env.REVOKED_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+)
+
 /** Codes d'autorisation en cours : `code` → demande. */
 const codes = new Map()
 /** Jetons d'accès en cours : `access_token` → compte décrit. */
 const tokens = new Map()
+/** Jetons de rafraîchissement en cours : `refresh_token` → compte décrit. */
+const refreshes = new Map()
 
 const log = (...args) => console.log(new Date().toISOString(), ...args)
 
@@ -164,7 +185,7 @@ function discovery(req, res) {
     token_endpoint: `${internal}/token`,
     userinfo_endpoint: `${internal}/userinfo`,
     response_types_supported: ['code'],
-    grant_types_supported: ['authorization_code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
     subject_types_supported: ['public'],
     scopes_supported: ['openid', 'email', 'profile'],
   }
@@ -195,6 +216,12 @@ function authorize(url, req, res) {
     return choisirCompte(url, res)
   }
   const choisi = compte ?? ACCOUNTS[0]
+
+  // Compte fermé chez le fournisseur : il ne délivre plus de code, comme le
+  // ferait un annuaire dont le compte a été désactivé.
+  if (REVOKED_EMAILS.has(choisi.email)) {
+    return redirectError(res, redirectUri, 'access_denied', state)
+  }
 
   const code = randomBytes(24).toString('hex')
   codes.set(code, {
@@ -256,7 +283,7 @@ function choisirCompte(url, res) {
   )
 }
 
-/** 3. Échange du code contre un jeton d'accès. */
+/** 3. Échange du code contre un jeton d'accès, ou rafraîchissement d'un jeton. */
 async function token(req, res) {
   const form = new URLSearchParams(await readBody(req))
 
@@ -271,14 +298,53 @@ async function token(req, res) {
     clientSecret = clientSecret ?? secret
   }
 
-  if (form.get('grant_type') !== 'authorization_code') {
-    return oidcError(res, 400, 'unsupported_grant_type', 'seul « authorization_code » est accepté')
+  const grant = form.get('grant_type')
+  if (grant !== 'authorization_code' && grant !== 'refresh_token') {
+    return oidcError(
+      res,
+      400,
+      'unsupported_grant_type',
+      '« authorization_code » et « refresh_token » sont acceptés',
+    )
   }
   if (CLIENT_ID && clientId !== CLIENT_ID) {
     return oidcError(res, 401, 'invalid_client', `client_id « ${clientId} » inconnu`)
   }
   if (CLIENT_SECRET && clientSecret !== CLIENT_SECRET) {
     return oidcError(res, 401, 'invalid_client', 'client_secret incorrect')
+  }
+
+  // ── Rafraîchissement (revalidation périodique des sessions, côté easy3d) ──
+  //
+  // C'est ce que le backend appelle toutes les cinq minutes pour vérifier que
+  // l'accès existe encore : `invalid_grant` est le signal d'un accès fermé, et
+  // c'est le seul que easy3d traite comme une révocation.
+  if (grant === 'refresh_token') {
+    const refresh = form.get('refresh_token')
+    const connu = refresh && refreshes.get(refresh)
+    if (!connu) {
+      log(`rafraîchissement refusé : jeton inconnu (${String(refresh).slice(0, 12)}…)`)
+      return oidcError(res, 400, 'invalid_grant', 'jeton de rafraîchissement inconnu ou révoqué')
+    }
+    if (REVOKED_EMAILS.has(connu.account.email)) {
+      refreshes.delete(refresh)
+      log(`rafraîchissement refusé : accès fermé pour ${connu.account.email}`)
+      return oidcError(res, 400, 'invalid_grant', 'accès fermé par le fournisseur')
+    }
+    // Le jeton de rafraîchissement **tourne**, comme chez la plupart des vrais
+    // fournisseurs : easy3d doit garder le nouveau, sinon la vérification
+    // suivante échouerait.
+    refreshes.delete(refresh)
+    const nouveau = randomBytes(24).toString('hex')
+    refreshes.set(nouveau, connu)
+    log(`rafraîchissement accepté pour ${connu.account.email}`)
+    return send(res, 200, {
+      access_token: randomBytes(32).toString('hex'),
+      refresh_token: nouveau,
+      token_type: 'Bearer',
+      expires_in: TOKEN_TTL,
+      scope: 'openid email profile',
+    })
   }
 
   const code = form.get('code')
@@ -296,10 +362,13 @@ async function token(req, res) {
 
   const accessToken = randomBytes(32).toString('hex')
   tokens.set(accessToken, { account: { ...demande.account }, expiresAt: Date.now() + TOKEN_TTL * 1000 })
+  const refreshToken = randomBytes(24).toString('hex')
+  refreshes.set(refreshToken, { account: { ...demande.account } })
   log(`jeton délivré pour ${demande.account.email} (${accessToken.slice(0, 12)}…)`)
 
   send(res, 200, {
     access_token: accessToken,
+    refresh_token: refreshToken,
     token_type: 'Bearer',
     expires_in: TOKEN_TTL,
     scope: 'openid email profile',

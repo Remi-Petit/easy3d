@@ -34,7 +34,6 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use blake2::{Blake2s256, Digest};
 use serde::{Deserialize, Serialize};
 
 /// Préfixe des jetons, visible en clair.
@@ -43,12 +42,10 @@ const PREFIX: &str = "e3d_";
 /// Empreinte d'un jeton, telle qu'elle est stockée.
 ///
 /// Le préfixe fait partie de ce qui est haché : l'empreinte d'un jeton donné ne
-/// peut donc pas être confondue avec celle d'une autre chaîne.
+/// peut donc pas être confondue avec celle d'une autre chaîne. Même fonction que
+/// les jetons de session (voir [`crate::auth::hash_secret`]).
 pub fn hash(token: &str) -> String {
-    Blake2s256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crate::auth::hash_secret(token)
 }
 
 /// Jeton neuf : `e3d_` suivi de 32 octets aléatoires en hexadécimal.

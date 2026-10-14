@@ -199,6 +199,7 @@ describe('familyCounts', () => {
       tokens: 1,
       accounts: 0,
       roles: 0,
+      audit: 0,
     })
     expect(familyCounts(events, 1_500)).toEqual({
       sessions: 0,
@@ -206,6 +207,24 @@ describe('familyCounts', () => {
       tokens: 1,
       accounts: 0,
       roles: 0,
+      audit: 0,
+    })
+  })
+
+  it('range les événements de sécurité ajoutés dans la bonne famille', () => {
+    // Fermer une session est un acte de **session** (comme une déconnexion),
+    // un refus du fournisseur d'identité est un **refus**, et consulter le
+    // journal parle du journal lui-même.
+    expect(eventFamily('session_revoked')).toBe('sessions')
+    expect(eventFamily('sso_revoked')).toBe('refusals')
+    expect(eventFamily('audit_read')).toBe('audit')
+    expect(familyCounts([evenement('session_revoked', 1_000), evenement('audit_read', 2_000)])).toEqual({
+      sessions: 1,
+      refusals: 0,
+      tokens: 0,
+      accounts: 0,
+      roles: 0,
+      audit: 1,
     })
   })
 })

@@ -94,14 +94,28 @@ impl Easy3dMcp {
 
     /// Refuse l'appel si le compte n'a pas le droit qu'exige cet outil.
     ///
-    /// C'est le pendant MCP de la table des routes : un outil sans droit déclaré
-    /// laisse le routeur répondre (« outil inconnu »).
+    /// C'est le pendant MCP de la table des routes. Deux différences avec elle,
+    /// et elles vont dans le sens de la sécurité :
+    ///
+    /// - un outil **non classé** dans [`permissions::for_tool`] est **refusé**.
+    ///   L'inverse (laisser passer) faisait d'un simple oubli de classement une
+    ///   ouverture à *tous* les comptes connectés — le routeur répondait bien
+    ///   « outil inconnu » pour un nom inventé, mais un outil **existant** et mal
+    ///   classé passait sans contrôle ;
+    /// - quand aucun compte n'est en jeu (installation ouverte, `EASY3D_AUTH`
+    ///   absent), tout passe : il n'y a pas de droits à opposer.
     fn require_for(&self, tool: &str) -> Result<(), ErrorData> {
         let Some(uuid) = self.user.as_deref() else {
             return Ok(());
         };
         let Some(permission) = permissions::for_tool(tool) else {
-            return Ok(());
+            // Cas qui ne devrait pas arriver : l'outil existe (le routeur l'a
+            // reconnu) mais personne n'a dit quel droit il demande. On refuse en
+            // le disant — c'est un défaut de code, pas un refus d'utilisateur.
+            return Err(ErrorData::invalid_params(
+                format!("outil « {tool} » sans droit déclaré : appel refusé"),
+                None,
+            ));
         };
 
         match self
@@ -209,7 +223,13 @@ impl ServerHandler for Easy3dMcp {
         request: rmcp::model::CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
-        self.require_for(&request.name)?;
+        // Un nom **inconnu** n'a pas de droit : on laisse le routeur répondre
+        // « outil inconnu », ce qui est plus utile à l'agent qu'un refus de
+        // droits inventé. Un outil connu mais **non classé** est refusé par
+        // `require_for` (voir sa documentation).
+        if self.tool_router.has_route(&request.name) {
+            self.require_for(&request.name)?;
+        }
         let call = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(call).await
     }
@@ -1286,13 +1306,29 @@ mod tests {
             assert!(serveur.require_for(outil).is_err(), "outil : {outil}");
         }
 
-        // Un outil inconnu n'est pas de son ressort : le routeur répondra.
-        assert!(serveur.require_for("outil_invente").is_ok());
+        // Un outil non classé est **refusé** : un oubli de classement ne doit
+        // pas ouvrir l'outil à tous les comptes connectés.
+        assert!(serveur.require_for("outil_invente").is_err());
+
+        // Et **chaque** outil réellement exposé porte un droit : c'est le test
+        // qui empêche l'oubli de classement (la liste vient du routeur, donc
+        // elle ne peut pas être périmée).
+        let outils = serveur.tool_router.list_all();
+        assert!(!outils.is_empty(), "le routeur doit exposer des outils");
+        for outil in &outils {
+            assert!(
+                crate::auth::permissions::for_tool(&outil.name).is_some(),
+                "l'outil « {} » n'est classé dans aucun droit",
+                outil.name
+            );
+        }
 
         // Sans compte (installation ouverte), tout passe : le serveur MCP est
-        // celui d'avant les comptes.
+        // celui d'avant les comptes. Même un outil non classé, puisqu'il n'y a
+        // personne à qui opposer un droit.
         let ouvert = Easy3dMcp::for_user(state, None, None);
         assert!(ouvert.require_for("delete_note").is_ok());
+        assert!(ouvert.require_for("outil_invente").is_ok());
     }
 
     /// Un jeton **restreint** refuse aussi les outils hors de sa portée, même

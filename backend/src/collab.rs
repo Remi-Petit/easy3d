@@ -312,13 +312,25 @@ fn flush(room: &Room, state: &AppState, rel: &str) -> bool {
 }
 
 /// Sert une connexion `/collab/{rel}` : une note = un document partagé.
-pub async fn handle_socket(socket: WebSocket, state: AppState, rel: String) {
+///
+/// `user` et `session` viennent de `require_auth` (cookie du navigateur ou
+/// ticket du relais Nitro) : ils permettent de fermer la connexion si le compte
+/// est coupé en cours de route — la boucle ne revérifie rien trame par trame,
+/// c'est le signal `AppState::kick_user` qui la réveille.
+pub async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    rel: String,
+    user: Option<String>,
+    session: Option<String>,
+) {
     let Some((room, mut rx)) = Rooms::join(&state, &rel) else {
         // Chemin invalide ou élément inexistant : on ferme sans rien dire.
         return;
     };
 
     let (mut sink, mut stream) = socket.split();
+    let mut kick = state.kick.subscribe();
 
     for frame in handshake(&room) {
         if sink.send(WsMessage::Binary(frame.into())).await.is_err() {
@@ -328,6 +340,24 @@ pub async fn handle_socket(socket: WebSocket, state: AppState, rel: String) {
 
     loop {
         tokio::select! {
+            coupe = kick.recv() => match coupe {
+                Ok(uuid) => {
+                    // Le compte visé est-il le mien, et ma session a-t-elle
+                    // disparu ? Voir `api::socket_survives_kick` : révoquer la
+                    // session d'un autre appareil ne coupe pas celle-ci.
+                    if user.as_deref() == Some(uuid.as_str())
+                        && !crate::api::socket_survives_kick(&state, session.as_deref())
+                    {
+                        // Fermeture propre : le client sait que c'est
+                        // l'authentification qui a coupé, pas le réseau.
+                        let _ = sink.send(WsMessage::Close(None)).await;
+                        break;
+                    }
+                }
+                // Signal manqué : on ferme (le client rouvrira).
+                Err(broadcast::error::RecvError::Lagged(_)) => break,
+                Err(_) => {}
+            },
             incoming = stream.next() => match incoming {
                 Some(Ok(WsMessage::Binary(data))) => {
                     let handled = handle_frame(&room, &data);

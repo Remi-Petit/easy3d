@@ -3,6 +3,7 @@ import {
   getMethod,
   getRequestHeader,
   getRequestIP,
+  getRequestProtocol,
   readRawBody,
   type H3Event,
 } from 'h3'
@@ -87,6 +88,11 @@ export function callerHeaders(event: H3Event): Record<string, string> {
   return {
     ...(ip ? { 'x-forwarded-for': ip } : {}),
     ...(userAgent ? { 'user-agent': userAgent } : {}),
+    // Le protocole vu par Nitro (`x-forwarded-proto` du proxy amont compris) :
+    // c'est ce qui permet au backend de décider d'un cookie `Secure` et d'un
+    // en-tête HSTS **sans** dépendre de `EASY3D_PUBLIC_URL`. Sans relais qui le
+    // pose, un déploiement HTTPS sortait un cookie transmissible en clair.
+    'x-forwarded-proto': getRequestProtocol(event),
   }
 }
 

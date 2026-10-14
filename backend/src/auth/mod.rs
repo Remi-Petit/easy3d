@@ -16,6 +16,11 @@
 //!
 //! - **Le cookie porte un jeton opaque**, pas l'UUID du compte : fermer une
 //!   session ne touche pas au compte, et un jeton ne dit rien de son porteur.
+//! - **Le jeton de session est stocké haché** (BLAKE2s, voir [`hash_secret`]),
+//!   comme ceux de l'API : lire la base ne permet donc **pas** de rejouer une
+//!   session en cours. Conséquence assumée : la table `sessions` a été recréée
+//!   au schéma v4, donc les sessions ouvertes par une version antérieure ne
+//!   survivent pas à la mise à jour (tout le monde se reconnecte une fois).
 //! - **`SameSite=Lax`, pas de vérification d'`Origin`** : derrière le relais
 //!   Nitro, le backend voit l'origine *du relais* et non celle du navigateur —
 //!   comparer `Origin` et `Host` ici refuserait **toutes** les requêtes légitimes.
@@ -72,8 +77,20 @@ const LOCKOUT_SECONDS: i64 = 60;
 /// Nombre maximal d'identifiants suivis par le compteur de tentatives.
 ///
 /// Garde-fou : sans lui, essayer des identifiants au hasard ferait grossir la
-/// table indéfiniment (mémoire du serveur).
+/// table indéfiniment (mémoire du serveur). Au-delà, c'est **l'entrée la plus
+/// ancienne** qui est oubliée — jamais l'entrée courante : refuser d'enregistrer
+/// un échec (ce que faisait la version précédente) suffisait à saturer la table
+/// avec mille identifiants bidons pour **désactiver le verrouillage** du compte
+/// que l'on vise.
 const MAX_TRACKED: usize = 1000;
+
+/// Tentatives ratées tolérées **par adresse de client**, avant blocage.
+///
+/// Volontairement large : une même adresse peut désigner tout un réseau
+/// (`192.168.1.0/24` sortant par la même box), et un blocage par IP se
+/// retournerait alors contre les utilisateurs légitimes. C'est un garde-fou
+/// contre le balayage, pas la protection principale (qui est par identifiant).
+const MAX_ATTEMPTS_PER_IP: u32 = 30;
 
 /// Durée de vie d'un ticket d'accès WebSocket, en secondes.
 ///
@@ -94,8 +111,14 @@ pub struct Auth {
     db: Option<Mutex<Connection>>,
     /// Fichier SQLite (journalisé au démarrage, utilisé par les tests).
     path: PathBuf,
-    /// `true` : le cookie de session porte `Secure` (interface en HTTPS).
+    /// Valeur de repli de `Secure` sur le cookie de session.
     cookie_secure: bool,
+    /// `true` quand `EASY3D_COOKIE_SECURE` **impose** la valeur ci-dessus.
+    ///
+    /// Sans cette variable, `Secure` est décidé **par requête** (voir
+    /// [`Auth::secure_for`]) : un relais qui annonce `x-forwarded-proto: https`
+    /// suffit, même si `EASY3D_PUBLIC_URL` n'est pas renseignée.
+    cookie_secure_forced: bool,
     session_days: i64,
     /// Connexions ratées, par identifiant.
     attempts: Mutex<HashMap<String, Attempts>>,
@@ -121,6 +144,10 @@ struct Attempts {
 #[derive(Debug, Clone)]
 struct Ticket {
     user_uuid: String,
+    /// Session qui a demandé le ticket : les WebSocket s'en servent pour savoir
+    /// si **leur** session est celle qui vient d'être fermée (voir
+    /// [`SessionRef`]).
+    session_uuid: Option<String>,
     expires_at: i64,
 }
 
@@ -131,6 +158,7 @@ impl Auth {
             db: None,
             path: PathBuf::new(),
             cookie_secure: true,
+            cookie_secure_forced: false,
             session_days: SESSION_DAYS,
             attempts: Mutex::new(HashMap::new()),
             tickets: Mutex::new(HashMap::new()),
@@ -152,12 +180,23 @@ impl Auth {
             db: Some(Mutex::new(conn)),
             path: path.to_path_buf(),
             cookie_secure,
+            cookie_secure_forced: false,
             session_days: SESSION_DAYS,
             attempts: Mutex::new(HashMap::new()),
             tickets: Mutex::new(HashMap::new()),
             ticket_seconds: TICKET_SECONDS,
             oidc: oidc::Flow::default(),
         })
+    }
+
+    /// Force la valeur de `Secure` sur le cookie de session.
+    ///
+    /// Appelé par [`Auth::from_env`] quand `EASY3D_COOKIE_SECURE` est posé :
+    /// dans ce cas, et dans ce cas seulement, la valeur écrase ce que le relais
+    /// annonce (utile quand celui-ci ne transmet pas le protocole d'origine).
+    pub fn with_forced_secure(mut self, forced: bool) -> Self {
+        self.cookie_secure_forced = forced;
+        self
     }
 
     /// Construit l'état à partir de l'environnement.
@@ -181,14 +220,23 @@ impl Auth {
         // `Secure` n'est posé que si l'interface est servie en HTTPS : sur un
         // déploiement local en `http://192.168.1.10`, un cookie `Secure` n'est
         // jamais renvoyé par le navigateur et la connexion boucle sans fin.
-        let secure = match std::env::var("EASY3D_COOKIE_SECURE") {
-            Ok(valeur) => parse_bool(Some(&valeur), "EASY3D_COOKIE_SECURE")?,
-            Err(_) => std::env::var("EASY3D_PUBLIC_URL")
-                .unwrap_or_default()
-                .starts_with("https://"),
+        //
+        // Ce n'est ici qu'une valeur de **repli** : à chaque connexion,
+        // [`Auth::secure_for`] regarde aussi ce que le relais annonce
+        // (`x-forwarded-proto`). Une interface réellement servie en HTTPS mais
+        // dont `EASY3D_PUBLIC_URL` n'a pas été renseignée sortait sinon un
+        // cookie sans `Secure`, c'est-à-dire en clair sur le réseau.
+        let (secure, forced) = match std::env::var("EASY3D_COOKIE_SECURE") {
+            Ok(valeur) => (parse_bool(Some(&valeur), "EASY3D_COOKIE_SECURE")?, true),
+            Err(_) => (
+                std::env::var("EASY3D_PUBLIC_URL")
+                    .unwrap_or_default()
+                    .starts_with("https://"),
+                false,
+            ),
         };
 
-        Self::open(&path, secure)
+        Ok(Self::open(&path, secure)?.with_forced_secure(forced))
     }
 
     /// `true` si l'authentification est active.
@@ -201,9 +249,27 @@ impl Auth {
         &self.path
     }
 
-    /// `true` si le cookie porte l'attribut `Secure`.
+    /// Valeur **de repli** de `Secure` (voir [`Auth::secure_for`]).
     pub fn cookie_secure(&self) -> bool {
         self.cookie_secure
+    }
+
+    /// `true` si le cookie de **cette** requête doit porter `Secure`.
+    ///
+    /// `EASY3D_COOKIE_SECURE` (explicite) gagne ; sinon la valeur de repli
+    /// (`EASY3D_PUBLIC_URL` en https) est complétée par ce que le relais
+    /// annonce : `x-forwarded-proto: https` suffit à exiger `Secure`, et c'est
+    /// le seul moyen de le savoir quand le certificat est terminé en amont
+    /// (nginx, Traefik, Cloudflare…) sans URL publique déclarée.
+    pub fn secure_for(&self, headers: &HeaderMap) -> bool {
+        if self.cookie_secure_forced {
+            return self.cookie_secure;
+        }
+        self.cookie_secure
+            || header_value(headers, "x-forwarded-proto", 16)
+                .split(',')
+                .next()
+                .is_some_and(|proto| proto.trim().eq_ignore_ascii_case("https"))
     }
 
     /// Exécute une requête sous le verrou de la base.
@@ -223,12 +289,40 @@ impl Auth {
         f(&guard)
     }
 
-    /// Ouvre une session et renvoie son jeton.
+    /// Ouvre une session par mot de passe et renvoie son jeton.
     ///
     /// Publique : le changement de mot de passe renouvelle la session de
     /// l'appelant (toutes les autres sont fermées au passage).
     pub fn start_session(&self, user_uuid: &str, headers: &HeaderMap) -> Result<String, String> {
+        self.open_session(user_uuid, headers, None)
+    }
+
+    /// Ouvre une session issue du fournisseur d'identité.
+    ///
+    /// Le `refresh_token` est **conservé par la session** : c'est lui qui permet
+    /// de revalider périodiquement l'accès auprès du fournisseur (voir
+    /// `oidc::revalidate_sessions`), sans quoi une désactivation chez lui
+    /// laisserait la session locale vivante jusqu'à son expiration.
+    pub fn start_sso_session(
+        &self,
+        user_uuid: &str,
+        headers: &HeaderMap,
+        refresh_token: Option<&str>,
+    ) -> Result<String, String> {
+        self.open_session(user_uuid, headers, refresh_token)
+    }
+
+    /// Ouvre une session et renvoie son jeton **en clair** (jamais stocké tel
+    /// quel : la base ne garde que son empreinte).
+    fn open_session(
+        &self,
+        user_uuid: &str,
+        headers: &HeaderMap,
+        refresh_token: Option<&str>,
+    ) -> Result<String, String> {
         let token = new_token();
+        let token_hash = hash_secret(&token);
+        let uuid = uuid::Uuid::now_v7().to_string();
         let expires_at = db::now() + self.session_days * 86_400;
         let user_agent = header_value(headers, header::USER_AGENT.as_str(), 200);
         // L'adresse est celle que le relais annonce (voir `client_ip`) : elle ne
@@ -236,7 +330,18 @@ impl Auth {
         let ip = client_ip(headers);
 
         self.db(|conn| {
-            db::create_session(conn, &token, user_uuid, expires_at, &user_agent, &ip)?;
+            db::create_session(
+                conn,
+                &db::NewSession {
+                    token_hash: &token_hash,
+                    uuid: &uuid,
+                    user_uuid,
+                    expires_at,
+                    user_agent: &user_agent,
+                    ip: &ip,
+                    refresh_token,
+                },
+            )?;
             db::purge_expired_sessions(conn)?;
             Ok(())
         })?;
@@ -244,9 +349,9 @@ impl Auth {
     }
 
     /// `Set-Cookie` d'ouverture de session, avec la durée et les attributs de
-    /// cette installation.
-    pub fn session_cookie(&self, token: &str) -> String {
-        cookie_value(token, self.session_days, self.cookie_secure)
+    /// cette installation (voir [`Auth::secure_for`]).
+    pub fn session_cookie(&self, token: &str, headers: &HeaderMap) -> String {
+        cookie_value(token, self.session_days, self.secure_for(headers))
     }
 
     /// Ferme la session portée par la requête, et renvoie le compte concerné.
@@ -258,13 +363,14 @@ impl Auth {
         let Some(token) = token_from_headers(headers) else {
             return Ok(None);
         };
+        let token_hash = hash_secret(&token);
         // Le compte est lu **avant** la suppression : il faut son UUID pour
         // écarter aussi les tickets d'accès qu'il a reçus (une déconnexion doit
         // tout fermer, y compris la connexion WebSocket qui s'ouvrirait juste
         // après).
-        let user = self.db(|conn| db::session_user(conn, &token, db::now()))?;
-        self.db(|conn| db::delete_session(conn, &token))?;
-        let Some(user) = user else {
+        let user = self.db(|conn| db::session_of(conn, &token_hash, db::now()))?;
+        self.db(|conn| db::delete_session(conn, &token_hash))?;
+        let Some((user, _session)) = user else {
             return Ok(None);
         };
         self.forget_tickets(&user.uuid);
@@ -301,24 +407,43 @@ impl Auth {
 
     /// Compte connecté, d'après le cookie de session. `None` si personne.
     pub fn resolve(&self, headers: &HeaderMap) -> Option<db::User> {
+        self.resolve_session(headers).map(|(user, _)| user)
+    }
+
+    /// Compte **et identifiant de session** du cookie, si la session est valide.
+    ///
+    /// L'identifiant de session sert à deux choses : savoir quelle ligne on
+    /// regarde (page « Mon compte ») et permettre à un WebSocket de décider si
+    /// c'est **sa** session qui vient d'être fermée (voir [`SessionRef`]).
+    pub fn resolve_session(&self, headers: &HeaderMap) -> Option<(db::User, String)> {
         if !self.is_enabled() {
             return None;
         }
         let token = token_from_headers(headers)?;
-        self.db(|conn| db::session_user(conn, &token, db::now()))
+        self.db(|conn| db::session_of(conn, &hash_secret(&token), db::now()))
             .ok()
             .flatten()
     }
 
-    /// Compte authentifié par une requête : cookie de session, **jeton d'API**
-    /// (`Authorization: Bearer`), ou ticket d'accès WebSocket.
+    /// Identifiant de la session portée par une requête (cookie ou ticket).
+    pub fn session_uuid_of(&self, headers: &HeaderMap) -> Option<String> {
+        self.resolve_session(headers).map(|(_, uuid)| uuid)
+    }
+
+    /// Compte authentifié par une requête, et la session qui l'a porté.
     ///
     /// Trois façons d'être reconnu, parce qu'il y a trois sortes de clients : le
-    /// navigateur (cookie), l'agent (jeton), et le relais Nitro qui ouvre une
-    /// connexion WebSocket pour le compte du navigateur (ticket).
-    pub fn resolve_request(&self, request: &Request) -> Option<db::User> {
-        self.resolve(request.headers())
-            .or_else(|| self.resolve_bearer(request.headers()))
+    /// navigateur (cookie, donc une session identifiée), l'agent (**jeton
+    /// d'API**, sans session), et le relais Nitro qui ouvre une connexion
+    /// WebSocket pour le compte du navigateur (ticket, qui porte la session du
+    /// cookie qui l'a demandé).
+    pub fn resolve_request(&self, request: &Request) -> Option<(db::User, Option<String>)> {
+        self.resolve_session(request.headers())
+            .map(|(user, session)| (user, Some(session)))
+            .or_else(|| {
+                self.resolve_bearer(request.headers())
+                    .map(|user| (user, None))
+            })
             .or_else(|| {
                 let ticket = query_param(request.uri().query()?, "ticket")?;
                 self.resolve_ticket(ticket)
@@ -332,8 +457,8 @@ impl Auth {
         self.resolve_token(token)
     }
 
-    /// Délivre un ticket pour ce compte.
-    fn issue_ticket(&self, user_uuid: &str) -> String {
+    /// Délivre un ticket pour ce compte (et la session qui l'a demandé).
+    pub fn issue_ticket(&self, user_uuid: &str, session_uuid: Option<&str>) -> String {
         let now = db::now();
         let ticket = new_token();
         let mut tickets = self.tickets.lock().unwrap();
@@ -352,24 +477,26 @@ impl Auth {
             ticket.clone(),
             Ticket {
                 user_uuid: user_uuid.to_string(),
+                session_uuid: session_uuid.map(str::to_string),
                 expires_at: now + self.ticket_seconds,
             },
         );
         ticket
     }
 
-    /// Compte désigné par un ticket encore valable.
+    /// Compte **et session** désignés par un ticket encore valable.
     ///
     /// Le ticket **n'est pas consommé** à la première connexion : `y-websocket`
     /// rouvre la sienne de lui-même après une coupure, toujours avec la même
     /// URL, et un ticket à usage unique casserait cette reconnexion. Il suffit
     /// que sa durée de vie soit courte (voir [`TICKET_SECONDS`]).
-    fn resolve_ticket(&self, ticket: &str) -> Option<db::User> {
+    fn resolve_ticket(&self, ticket: &str) -> Option<(db::User, Option<String>)> {
         let now = db::now();
         let mut tickets = self.tickets.lock().unwrap();
         tickets.retain(|_, t| t.expires_at > now);
         let ticket = tickets.get(ticket)?;
         let user_uuid = ticket.user_uuid.clone();
+        let session_uuid = ticket.session_uuid.clone();
         drop(tickets);
 
         // Le compte est relu à chaque fois : un compte désactivé entre-temps ne
@@ -378,6 +505,16 @@ impl Auth {
             .ok()
             .flatten()
             .filter(|user| !user.disabled)
+            .map(|user| (user, session_uuid))
+    }
+
+    /// `true` si cette session existe encore (donc si elle n'a pas été fermée).
+    ///
+    /// Sert aux WebSocket : à la réception d'un signal de coupure, un socket
+    /// **qui n'est pas** celui de la session fermée n'a aucune raison de tomber.
+    pub fn session_alive(&self, session_uuid: &str) -> bool {
+        self.db(|conn| db::session_exists(conn, session_uuid))
+            .unwrap_or(false)
     }
 
     /// Écarte les tickets d'accès d'un compte (déconnexion).
@@ -491,10 +628,11 @@ impl Auth {
 
     /// `true` si cet identifiant a trop échoué récemment.
     ///
-    /// Le verrouillage est **par identifiant**, pas par adresse : toutes les
-    /// requêtes arrivent du relais Nitro, donc d'une seule adresse. Il protège
-    /// donc un compte donné des essais en série, ce qui est le risque réel ici
-    /// (l'interface n'est pas exposée directement).
+    /// Le verrouillage est **par identifiant** — le risque réel ici, l'interface
+    /// n'étant pas exposée directement — et doublé d'un plafond **par adresse de
+    /// client** (voir [`MAX_ATTEMPTS_PER_IP`]), que le relais Nitro annonce
+    /// (`x-forwarded-for`). Celui-ci arrête le balayage d'identifiants, celui-là
+    /// protège le compte visé.
     fn is_locked(&self, key: &str) -> bool {
         let now = db::now();
         let mut attempts = self.attempts.lock().unwrap();
@@ -504,14 +642,60 @@ impl Auth {
             .is_some_and(|a| a.count >= MAX_ATTEMPTS && now - a.first < LOCKOUT_SECONDS)
     }
 
-    /// Enregistre une tentative ratée.
-    fn record_failure(&self, key: &str) {
+    /// Même chose, pour une **adresse de client** (voir
+    /// [`MAX_ATTEMPTS_PER_IP`]).
+    ///
+    /// Une adresse vide (appel direct, sans relais qui l'annonce) n'est jamais
+    /// bloquée : c'est une information que le client peut inventer, elle ne peut
+    /// donc pas servir à éloigner tout le monde.
+    fn is_ip_locked(&self, ip: &str) -> bool {
+        if ip.is_empty() {
+            return false;
+        }
         let now = db::now();
         let mut attempts = self.attempts.lock().unwrap();
         attempts.retain(|_, a| now - a.first < LOCKOUT_SECONDS);
-        if attempts.len() >= MAX_TRACKED && !attempts.contains_key(key) {
-            return;
+        attempts
+            .get(&format!("ip:{ip}"))
+            .is_some_and(|a| a.count >= MAX_ATTEMPTS_PER_IP && now - a.first < LOCKOUT_SECONDS)
+    }
+
+    /// Enregistre une tentative ratée, pour l'identifiant et pour l'adresse.
+    ///
+    /// Le plafond de suivi (`MAX_TRACKED`) écarte l'entrée **la plus ancienne**
+    /// quand la table est pleine — jamais celle qu'on est en train d'écrire.
+    /// Refuser d'enregistrer (ce que faisait la version précédente) suffisait à
+    /// saturer la table avec mille identifiants bidons dans la minute pour
+    /// désactiver le verrouillage du compte visé.
+    fn record_failure(&self, key: &str, ip: &str) {
+        let now = db::now();
+        {
+            let mut attempts = self.attempts.lock().unwrap();
+            attempts.retain(|_, a| now - a.first < LOCKOUT_SECONDS);
+            if attempts.len() >= MAX_TRACKED && !attempts.contains_key(key) {
+                // La plus ancienne d'abord : c'est celle dont l'information a le
+                // moins de valeur, et cela ne dépend pas de l'attaquant.
+                if let Some(ancienne) = attempts
+                    .iter()
+                    .min_by_key(|(_, a)| a.first)
+                    .map(|(cle, _)| cle.clone())
+                {
+                    attempts.remove(&ancienne);
+                }
+            }
+            Self::bump(&mut attempts, key, now);
         }
+        // Adresse vide (appel direct au port du backend, sans relais qui
+        // l'annonce) : il n'y a rien de fiable à compter, on n'invente pas de clé.
+        if !ip.is_empty() {
+            let mut attempts = self.attempts.lock().unwrap();
+            Self::bump(&mut attempts, &format!("ip:{ip}"), now);
+        }
+    }
+
+    /// Incrémente le compteur d'une clé, en repartant de zéro si sa fenêtre est
+    /// passée.
+    fn bump(attempts: &mut HashMap<String, Attempts>, key: &str, now: i64) {
         let entry = attempts.entry(key.to_string()).or_insert(Attempts {
             count: 0,
             first: now,
@@ -568,6 +752,30 @@ where
         _state: &S,
     ) -> Result<Option<Self>, Self::Rejection> {
         Ok(parts.extensions.get::<AuthUser>().cloned())
+    }
+}
+
+/// Session associée à la requête, quand elle vient d'un cookie ou d'un ticket
+/// WebSocket.
+///
+/// `None` pour un jeton d'API : un agent n'a pas de session, et rien ne peut
+/// être « fermé » de son côté. L'information sert aux WebSocket, qui doivent
+/// savoir **quelle** session est tombée quand un compte est coupé : fermer la
+/// session du téléphone ne doit pas couper le direct du bureau.
+#[derive(Debug, Clone, Default)]
+pub struct SessionRef(pub Option<String>);
+
+impl<S> OptionalFromRequestParts<S> for SessionRef
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<SessionRef>().cloned())
     }
 }
 
@@ -659,8 +867,17 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
 /// Appelée par le relais Nitro, pas par le navigateur : c'est lui qui possède le
 /// cookie (il relaie `/ws` et `/collab/*`) et qui ne peut pas le transmettre à
 /// la connexion amont. Le ticket ne quitte donc jamais le serveur.
-pub async fn ws_ticket(State(state): State<AppState>, user: Option<AuthUser>) -> Response {
-    let ticket = user.map(|AuthUser(user)| state.auth.issue_ticket(&user.uuid));
+pub async fn ws_ticket(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    user: Option<AuthUser>,
+) -> Response {
+    let ticket = user.map(|AuthUser(user)| {
+        // La session est relevée dans **la requête du relais** : c'est elle qui
+        // portera le cookie du navigateur, et donc la session à surveiller.
+        let session = state.auth.session_uuid_of(&headers);
+        state.auth.issue_ticket(&user.uuid, session.as_deref())
+    });
     Json(WsTicket { ticket }).into_response()
 }
 
@@ -679,7 +896,8 @@ pub async fn login(
     if login.is_empty() || request.password.is_empty() {
         return error(StatusCode::UNAUTHORIZED, "invalid_credentials");
     }
-    if auth.is_locked(&login) {
+    let ip = client_ip(&headers);
+    if auth.is_locked(&login) || auth.is_ip_locked(&ip) {
         auth.log(&headers, "login_blocked", None, &login, "rate_limited");
         return error(StatusCode::TOO_MANY_REQUESTS, "rate_limited");
     }
@@ -725,13 +943,13 @@ pub async fn login(
             // devinette, mais on la compte comme un refus (même façon de traiter
             // un compte désactivé), et le journal note pourquoi — c'est ce qui
             // permet de répondre à « pourquoi n'entre-t-elle plus ? ».
-            auth.record_failure(&login);
+            auth.record_failure(&login, &ip);
             auth.log(&headers, "login_failed", None, &login, "password_sso");
             return error(StatusCode::UNAUTHORIZED, "password_sso");
         }
         Some(user) if verified && !user.disabled => user,
         _ => {
-            auth.record_failure(&login);
+            auth.record_failure(&login, &ip);
             // Le journal note l'identifiant **essayé** : c'est ce qu'on cherche
             // ensuite (« qui a tenté d'entrer sous ce nom »).
             auth.log(
@@ -764,10 +982,7 @@ pub async fn login(
 
     (
         StatusCode::OK,
-        [(
-            header::SET_COOKIE,
-            cookie_value(&token, auth.session_days, auth.cookie_secure),
-        )],
+        [(header::SET_COOKIE, auth.session_cookie(&token, &headers))],
         Json(view),
     )
         .into_response()
@@ -785,10 +1000,18 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     };
     if let Some(uuid) = closed {
         auth.log(&headers, "logout", Some(&uuid), "", "");
+        // Les WebSocket du compte sont coupés : la session qu'ils surveillaient
+        // vient de disparaître, et `session_alive` le leur confirmera (voir
+        // `api::handle_ws`). Sans ce signal, un onglet resté ouvert continuerait
+        // de recevoir le catalogue après une déconnexion.
+        state.kick_user(&uuid);
     }
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, clear_cookie_value(auth.cookie_secure))],
+        [(
+            header::SET_COOKIE,
+            clear_cookie_value(auth.secure_for(&headers)),
+        )],
         Json(serde_json::json!({ "ok": true })),
     )
         .into_response()
@@ -809,8 +1032,11 @@ pub async fn require_auth(
     }
 
     match state.auth.resolve_request(&request) {
-        Some(user) => {
+        Some((user, session)) => {
             request.extensions_mut().insert(AuthUser(user));
+            // La session accompagne la requête : les WebSocket s'en servent pour
+            // savoir s'ils doivent se fermer quand un compte est coupé.
+            request.extensions_mut().insert(SessionRef(session));
             next.run(request).await
         }
         None => error(StatusCode::UNAUTHORIZED, "unauthenticated"),
@@ -861,7 +1087,10 @@ pub struct AdminSeed {
 /// ne dise pourquoi).
 pub fn admin_seed_from_env() -> Result<Option<AdminSeed>, String> {
     let email = non_empty_env("EASY3D_ADMIN_EMAIL");
-    let password = non_empty_env("EASY3D_ADMIN_PASSWORD");
+    // `EASY3D_ADMIN_PASSWORD_FILE` est accepté comme les autres secrets (voir
+    // [`env_secret`]) : c'est le mot de passe le plus important de
+    // l'installation, il n'a pas à figurer dans `docker inspect`.
+    let password = env_secret("EASY3D_ADMIN_PASSWORD");
 
     match (email, password) {
         (None, None) => Ok(None),
@@ -916,9 +1145,10 @@ pub fn bootstrap_admin(auth: &Auth, seed: Option<AdminSeed>) -> Result<(), Strin
         return Ok(());
     }
 
-    if let Err(code) = password::check_length(&seed.password) {
+    if let Err(code) = password::policy(&seed.password, &seed.username, &seed.email) {
         return Err(format!(
-            "EASY3D_ADMIN_PASSWORD refusé ({code}) : entre {} et {} caractères.",
+            "EASY3D_ADMIN_PASSWORD refusé ({code}) : entre {} et {} caractères, ni une adresse \
+             ni un mot de passe évident.",
             password::MIN_LEN,
             password::MAX_LEN
         ));
@@ -951,6 +1181,64 @@ pub(crate) fn new_token() -> String {
     )
 }
 
+/// Empreinte d'un **secret au repos** : jeton de session, jeton d'API.
+///
+/// BLAKE2s-256, un hachage **rapide** — ce n'est pas un mot de passe (32 octets
+/// tirés au hasard, aucun dictionnaire à craindre) mais il est relu à **chaque
+/// requête authentifiée**, là où Argon2 coûterait ses quelques dizaines de
+/// millisecondes. Rien n'est stocké en clair : lire la base ne permet donc ni de
+/// rejouer une session en cours, ni d'utiliser un jeton d'API.
+pub fn hash_secret(secret: &str) -> String {
+    use blake2::{Blake2s256, Digest};
+    Blake2s256::digest(secret.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Valeur d'une variable d'environnement, ou du **fichier** qu'elle désigne.
+///
+/// `EASY3D_OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc` (convention Docker
+/// *secrets*, Kubernetes, systemd `LoadCredential`) est lu si la variable
+/// directe est absente : un secret passé par l'environnement est visible dans
+/// `docker inspect`, `ps e` et l'historique du shell, ce qui n'est pas le cas
+/// d'un fichier monté.
+///
+/// Le contenu est `trim()`é : un secret écrit par `echo` traîne un saut de ligne
+/// qui le rendrait faux.
+pub fn env_secret(name: &str) -> Option<String> {
+    if let Some(value) = non_empty_env(name) {
+        return Some(value);
+    }
+    let path = std::env::var(format!("{name}_FILE")).ok()?;
+    secret_from_file(name, path.trim())
+}
+
+/// Contenu d'un fichier de secret, ou `None` s'il est vide ou illisible.
+///
+/// Séparé de [`env_secret`] pour être testable **sans toucher à
+/// l'environnement** : celui-ci est global au processus, et un test qui écrit
+/// dedans rend les autres instables (même raison que `oidc::Env`, qui reçoit ses
+/// valeurs au lieu de les lire).
+fn secret_from_file(name: &str, path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(contenu) => {
+            let contenu = contenu.trim().to_string();
+            (!contenu.is_empty()).then_some(contenu)
+        }
+        Err(e) => {
+            // Un `_FILE` posé mais illisible doit **se voir** : sans ce
+            // avertissement, le secret serait simplement « absent » et l'erreur
+            // apparaîtrait plus loin (« EASY3D_OIDC_CLIENT_SECRET est vide »).
+            eprintln!("⚠️  {name}_FILE : {path} illisible ({e})");
+            None
+        }
+    }
+}
+
 /// Empreinte factice, calculée une seule fois.
 ///
 /// Elle ne doit jamais correspondre à un compte : elle sert uniquement à faire
@@ -978,7 +1266,10 @@ fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// Valeur d'un en-tête, tronquée (les en-têtes sont stockés en base).
-fn header_value(headers: &HeaderMap, name: &str, max: usize) -> String {
+///
+/// `pub(crate)` : le middleware d'en-têtes de sécurité de `api` s'en sert aussi
+/// pour reconnaître une requête arrivée en HTTPS.
+pub(crate) fn header_value(headers: &HeaderMap, name: &str, max: usize) -> String {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
@@ -1114,11 +1405,18 @@ mod tests {
     fn un_ticket_ouvre_l_acces_pour_son_compte_et_expire() {
         let (_dir, mut auth) = base();
         let user = compte(&auth, "remi", "remi@exemple.fr", "motdepasse");
-        let ticket = auth.issue_ticket(&user.uuid);
+        let ticket = auth.issue_ticket(&user.uuid, Some("session-1"));
         assert_eq!(ticket.len(), 64);
         assert_eq!(
-            auth.resolve_ticket(&ticket).map(|u| u.uuid),
+            auth.resolve_ticket(&ticket).map(|(user, _)| user.uuid),
             Some(user.uuid.clone())
+        );
+        // La session qui a demandé le ticket voyage avec lui : c'est ce qui
+        // permet à un WebSocket de savoir si c'est la **sienne** qui est tombée.
+        assert_eq!(
+            auth.resolve_ticket(&ticket)
+                .and_then(|(_, session)| session),
+            Some("session-1".to_string())
         );
         assert!(auth.resolve_ticket("inconnu").is_none());
         assert!(auth.resolve_ticket("").is_none());
@@ -1129,7 +1427,7 @@ mod tests {
 
         // …mais ne vaut plus rien une fois **sa** fenêtre passée.
         auth.ticket_seconds = -1;
-        let perime = auth.issue_ticket(&user.uuid);
+        let perime = auth.issue_ticket(&user.uuid, None);
         assert!(auth.resolve_ticket(&perime).is_none());
         // Chaque ticket garde l'échéance fixée à son émission : le changement de
         // durée ne s'applique pas rétroactivement (et le nettoyage n'emporte que
@@ -1143,8 +1441,8 @@ mod tests {
         let remi = compte(&auth, "remi", "remi@exemple.fr", "motdepasse");
         let autre = compte(&auth, "autre", "autre@exemple.fr", "motdepasse");
 
-        let ticket = auth.issue_ticket(&remi.uuid);
-        let ticket_autre = auth.issue_ticket(&autre.uuid);
+        let ticket = auth.issue_ticket(&remi.uuid, None);
+        let ticket_autre = auth.issue_ticket(&autre.uuid, None);
         assert_ne!(ticket, ticket_autre);
 
         auth.db(|conn| {
@@ -1238,6 +1536,10 @@ mod tests {
             auth.resolve(&headers).map(|u| u.uuid),
             Some(user.uuid.clone())
         );
+        assert_eq!(
+            auth.resolve_session(&headers).map(|(_, session)| session),
+            auth.session_uuid_of(&headers)
+        );
 
         auth.end_session(&headers).unwrap();
         assert!(auth.resolve(&headers).is_none());
@@ -1245,6 +1547,131 @@ mod tests {
         // Un cookie forgé ne vaut rien : le jeton doit être en base.
         headers.insert(header::COOKIE, "easy3d_session=forgé".parse().unwrap());
         assert!(auth.resolve(&headers).is_none());
+    }
+
+    /// Le point du schéma v4 : la base ne permet plus de **rejouer** une session.
+    ///
+    /// Avant, `sessions.token` contenait le jeton du cookie lui-même : une copie
+    /// de la base (sauvegarde, montage, `docker cp`) suffisait à ouvrir toutes
+    /// les sessions en cours, administrateur compris. Les jetons d'API étaient
+    /// déjà hachés, pas ceux-là.
+    #[test]
+    fn le_jeton_de_session_n_est_jamais_ecrit_en_clair() {
+        let (_dir, auth) = base();
+        let user = compte(&auth, "remi", "remi@exemple.fr", "motdepasse");
+        let token = auth.start_session(&user.uuid, &HeaderMap::new()).unwrap();
+
+        let en_base: String = auth
+            .db(|conn| {
+                conn.query_row("SELECT token_hash FROM sessions", [], |row| row.get(0))
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        assert_ne!(en_base, token, "le jeton en clair ne doit pas être en base");
+        assert_eq!(en_base, hash_secret(&token), "seule l'empreinte est écrite");
+        // Et la base ne contient nulle part la valeur du cookie.
+        assert!(!en_base.contains(&token));
+
+        // La session reste utilisable, évidemment : c'est le cookie qui porte le
+        // jeton, pas la base.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            format!("{COOKIE_NAME}={token}").parse().unwrap(),
+        );
+        let session = auth.session_uuid_of(&headers).unwrap();
+        assert!(auth.session_alive(&session));
+        assert_eq!(
+            auth.resolve(&headers).map(|u| u.uuid),
+            Some(user.uuid.clone())
+        );
+
+        // `session_alive` distingue « ma session » de « une autre » : c'est ce
+        // qui permet à un WebSocket de survivre à la fermeture de la session d'un
+        // autre appareil du même compte.
+        auth.end_session(&headers).unwrap();
+        assert!(!auth.session_alive(&session));
+        // Une session inconnue n'existe pas non plus : c'est cette réponse que
+        // les WebSocket lisent à la réception d'un signal de coupure.
+        assert!(!auth.session_alive("jamais-vue"));
+    }
+
+    /// `Secure` doit suivre le **transport réel**, pas seulement une variable.
+    #[test]
+    fn le_cookie_exige_secure_des_que_le_relais_annonce_https() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = Auth::open(&dir.path().join("easy3d.db"), false).unwrap();
+
+        let mut https = HeaderMap::new();
+        https.insert("x-forwarded-proto", "https".parse().unwrap());
+        // Une chaîne de relais (`https, http`) : c'est le **premier** maillon qui
+        // décrit le client.
+        let mut chaine = HeaderMap::new();
+        chaine.insert("x-forwarded-proto", "https, http".parse().unwrap());
+
+        assert!(!auth.secure_for(&HeaderMap::new()));
+        assert!(auth.secure_for(&https));
+        assert!(auth.secure_for(&chaine));
+        assert!(auth.session_cookie("jeton", &https).contains("Secure"));
+        assert!(
+            !auth
+                .session_cookie("jeton", &HeaderMap::new())
+                .contains("Secure")
+        );
+
+        // La valeur explicite (`EASY3D_COOKIE_SECURE`) gagne sur le relais, dans
+        // les deux sens : c'est ce qu'on demande quand le relais ment (ou ne
+        // transmet rien).
+        let force = Auth::open(&dir.path().join("force.db"), true)
+            .unwrap()
+            .with_forced_secure(true);
+        assert!(force.secure_for(&HeaderMap::new()));
+        let jamais = Auth::open(&dir.path().join("jamais.db"), false)
+            .unwrap()
+            .with_forced_secure(true);
+        assert!(!jamais.secure_for(&https));
+    }
+
+    /// Un secret se lit dans un fichier (`_FILE`) : c'est la convention des
+    /// *secrets* Docker, et le seul moyen de ne pas exposer la valeur dans
+    /// `docker inspect` / `ps e`.
+    #[test]
+    fn un_secret_se_lit_aussi_dans_un_fichier() {
+        let dir = tempfile::tempdir().unwrap();
+        let fichier = dir.path().join("secret");
+        std::fs::write(&fichier, "valeur-du-fichier\n").unwrap();
+
+        // Rogné : un secret écrit par `echo` traîne un saut de ligne qui le
+        // rendrait faux (et l'erreur serait incompréhensible).
+        assert_eq!(
+            secret_from_file("EASY3D_TEST", fichier.to_str().unwrap()).as_deref(),
+            Some("valeur-du-fichier")
+        );
+        // Fichier absent, vide, ou chemin vide : rien — et surtout pas une
+        // valeur inventée.
+        assert_eq!(
+            secret_from_file("EASY3D_TEST", dir.path().join("absent").to_str().unwrap()),
+            None
+        );
+        assert_eq!(secret_from_file("EASY3D_TEST", ""), None);
+        let vide = dir.path().join("vide");
+        std::fs::write(&vide, "\n  \n").unwrap();
+        assert_eq!(
+            secret_from_file("EASY3D_TEST", vide.to_str().unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn l_empreinte_d_un_secret_est_stable_et_ne_dit_rien_du_secret() {
+        let jeton = "e3d_0123456789abcdef";
+        assert_eq!(hash_secret(jeton), hash_secret(jeton));
+        assert_eq!(hash_secret(jeton).len(), 64, "BLAKE2s-256 en hexadécimal");
+        assert!(!hash_secret(jeton).contains(jeton));
+        assert_ne!(hash_secret(jeton), hash_secret("e3d_0123456789abcdee"));
+        // Le préfixe fait partie de la chaîne hachée : l'empreinte d'un jeton
+        // d'API ne peut pas coïncider avec celle d'un jeton de session.
+        assert_ne!(tokens::hash(jeton), hash_secret("0123456789abcdef"));
     }
 
     #[test]
@@ -1266,7 +1693,7 @@ mod tests {
         assert!(!auth.is_locked("remi"));
         for _ in 0..MAX_ATTEMPTS {
             assert!(!auth.is_locked("remi"));
-            auth.record_failure("remi");
+            auth.record_failure("remi", "");
         }
         assert!(auth.is_locked("remi"));
 
@@ -1276,6 +1703,44 @@ mod tests {
         // Une connexion réussie remet le compteur à zéro.
         auth.clear_failures("remi");
         assert!(!auth.is_locked("remi"));
+    }
+
+    #[test]
+    fn le_plafond_de_suivi_n_empeche_jamais_de_compter_une_tentative() {
+        let (_dir, auth) = base();
+        // Table pleine : chaque clé distincte occupe une place. C'est le cas
+        // d'un balayage d'identifiants, exactement la situation où le
+        // verrouillage doit continuer de fonctionner — la version précédente
+        // refusait alors d'enregistrer l'échec du compte visé, ce qui suffisait à
+        // le rendre indéfiniment essayable.
+        for index in 0..MAX_TRACKED {
+            auth.record_failure(&format!("inconnu-{index}"), "");
+        }
+        for _ in 0..MAX_ATTEMPTS {
+            auth.record_failure("remi", "");
+        }
+        assert!(auth.is_locked("remi"));
+        // La table n'a pas grossi au-delà du plafond.
+        assert!(auth.attempts.lock().unwrap().len() <= MAX_TRACKED);
+    }
+
+    #[test]
+    fn une_adresse_de_client_est_bloquee_apres_trop_d_echecs() {
+        let (_dir, auth) = base();
+        assert!(!auth.is_ip_locked("192.168.1.10"));
+        for _ in 0..MAX_ATTEMPTS_PER_IP {
+            auth.record_failure("un-compte", "192.168.1.10");
+        }
+        assert!(auth.is_ip_locked("192.168.1.10"));
+        // Une autre adresse n'est pas concernée, et une adresse **vide** (appel
+        // direct, sans relais qui l'annonce) ne bloque jamais personne : elle
+        // serait la clé de tout le monde à la fois.
+        assert!(!auth.is_ip_locked("192.168.1.11"));
+        assert!(!auth.is_ip_locked(""));
+        for _ in 0..MAX_ATTEMPTS_PER_IP {
+            auth.record_failure("un-compte", "");
+        }
+        assert!(!auth.is_ip_locked(""));
     }
 
     #[test]

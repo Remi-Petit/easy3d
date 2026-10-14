@@ -208,8 +208,11 @@ mod tests {
 
     #[test]
     fn chaque_outil_mcp_exige_un_droit_connu() {
-        // Liste recopiée de `mcp.rs` : le test échoue si un outil est ajouté là
-        // sans être classé ici (il s'ouvrirait à tous les comptes connectés).
+        // Liste recopiée de `mcp.rs` : elle sert de **garde-fou redondant** au
+        // test `mcp::tests::chaque_outil_mcp_exige_le_droit_correspondant`, qui
+        // énumère les outils du routeur. Ici, on vérifie la même chose depuis le
+        // registre des droits, sans dépendre du serveur MCP : un outil classé
+        // vers un droit qui n'existe pas (faute de frappe) se voit tout de suite.
         for outil in [
             "list_formats",
             "list_models",
@@ -231,6 +234,8 @@ mod tests {
             assert!(is_known(droit), "droit inconnu pour {outil} : {droit}");
         }
 
+        // Un outil inconnu n'a **pas** de droit : c'est `require_for` qui refuse
+        // (voir `mcp.rs`), et le routeur qui répond « outil inconnu ».
         assert_eq!(for_tool("outil_invente"), None);
     }
 

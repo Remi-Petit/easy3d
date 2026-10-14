@@ -40,7 +40,7 @@ pub const ADMIN_ROLE: &str = "0199e3d0-0000-7000-8000-000000000001";
 pub const READER_ROLE: &str = "0199e3d0-0000-7000-8000-000000000002";
 
 /// Version du schéma. À incrémenter en ajoutant une table ou une colonne.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Schéma initial (v1).
 const SCHEMA_V1: &str = r#"
@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS user_permissions (
 
 -- Sessions ouvertes : le cookie porte `token` (opaque, 32 octets aléatoires),
 -- jamais l'UUID du compte — révoquer une session ne touche pas au compte.
+-- ⚠️ Cette forme n'est plus la forme courante : le schéma v4 (`SCHEMA_V4`)
+-- recrée la table avec le jeton **haché** et l'identifiant de session. La
+-- définition reste ici parce qu'une base neuve passe par v1 → v4 dans l'ordre.
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
     user_uuid  TEXT NOT NULL REFERENCES users(uuid) ON DELETE CASCADE,
@@ -159,6 +162,47 @@ const SCHEMA_V3: &str = r#"
 ALTER TABLE api_tokens ADD COLUMN permissions TEXT;
 "#;
 
+/// Schéma v4 : sessions **hachées**, identifiables, et revalidables.
+///
+/// Trois manques de la version précédente :
+///
+/// 1. `sessions.token` contenait le jeton **en clair** — le jeton du cookie
+///    lui-même. Lire la base (copie, montage, sauvegarde) permettait donc de
+///    rejouer n'importe quelle session en cours ; les jetons d'API, eux,
+///    étaient déjà hachés. C'est désormais `token_hash` (BLAKE2s).
+/// 2. Aucun identifiant propre : `GET /sessions` ne pouvait pas désigner une
+///    ligne sans exposer l'empreinte qui sert à la retrouver.
+/// 3. Aucun `refresh_token` : impossible de redemander au fournisseur d'identité
+///    si le compte y est encore ouvert (voir `oidc::revalidate_sessions`).
+///
+/// La table est **recréée** plutôt que modifiée : les sessions sont des données
+/// éphémères, et `ALTER TABLE` n'est pas rejouable. Conséquence assumée : les
+/// sessions ouvertes par une version antérieure sont perdues (tout le monde se
+/// reconnecte une fois).
+const SCHEMA_V4: &str = r#"
+DROP TABLE IF EXISTS sessions;
+CREATE TABLE sessions (
+    token_hash     TEXT PRIMARY KEY,
+    uuid           TEXT NOT NULL,
+    user_uuid      TEXT NOT NULL REFERENCES users(uuid) ON DELETE CASCADE,
+    -- Renseigné uniquement pour une session ouverte par le fournisseur
+    -- d'identité : c'est la marque du SSO, et le moyen de revalider l'accès.
+    refresh_token  TEXT,
+    -- Dernière vérification auprès du fournisseur (epoch). `NULL` = jamais
+    -- vérifiée depuis l'ouverture.
+    sso_checked_at INTEGER,
+    created_at     INTEGER NOT NULL,
+    expires_at     INTEGER NOT NULL,
+    user_agent     TEXT NOT NULL DEFAULT '',
+    ip             TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_uuid);
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_uuid ON sessions(uuid);
+CREATE INDEX IF NOT EXISTS sessions_sso ON sessions(sso_checked_at);
+"#;
+
 /// Horodatage courant, en secondes depuis l'époque.
 ///
 /// Les dates sont stockées en entier (et non en texte ISO) : les comparaisons
@@ -193,6 +237,7 @@ pub fn open(path: &Path) -> Result<Connection, String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(err)?;
     migrate(&conn)?;
+    crate::restrict_permissions(path);
     Ok(conn)
 }
 
@@ -236,6 +281,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         {
             return Err(err(erreur));
         }
+    }
+    if version < 4 {
+        // Ré-exécutable telle quelle : la table est recréée à l'identique.
+        conn.execute_batch(SCHEMA_V4).map_err(err)?;
     }
 
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -293,6 +342,13 @@ impl NewUser {
 
 const USER_COLUMNS: &str =
     "uuid, username, email, password_hash, oidc_subject, disabled, created_at";
+
+/// Nombre de colonnes de [`USER_COLUMNS`].
+///
+/// Sert aux requêtes qui **ajoutent** une colonne à la suite (la session d'un
+/// compte, par exemple) : l'index de la colonne suivante en dépend, et le
+/// calculer ici évite de le recopier en dur.
+const USER_COLUMN_COUNT: usize = 7;
 
 fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
@@ -497,52 +553,111 @@ pub fn count_admins(conn: &Connection) -> Result<i64, String> {
     .map_err(err)
 }
 
-/// Enregistre une session ouverte.
-pub fn create_session(
-    conn: &Connection,
-    token: &str,
-    user_uuid: &str,
-    expires_at: i64,
-    user_agent: &str,
-    ip: &str,
-) -> Result<(), String> {
+/// Une session ouverte, telle que « Mon compte » la montre.
+///
+/// ⚠️ Ni le jeton ni son empreinte n'y sont : l'empreinte est la clé de
+/// recherche, elle n'a rien à faire dans une réponse HTTP (elle vaut un mot de
+/// passe si la base fuit).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Session {
+    /// Identifiant public de la session (celui que l'interface révoque).
+    pub uuid: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub user_agent: String,
+    pub ip: String,
+    /// `true` pour une session ouverte par le fournisseur d'identité.
+    pub sso: bool,
+}
+
+/// Une session à enregistrer.
+///
+/// Une structure plutôt que sept paramètres : ils vont toujours ensemble, et un
+/// appel qui intervertirait `expires_at` et `created_at` ne se verrait pas.
+pub struct NewSession<'a> {
+    /// Empreinte du jeton (jamais le jeton : voir `auth::hash_secret`).
+    pub token_hash: &'a str,
+    /// Identifiant public de la session (celui que l'interface révoque).
+    pub uuid: &'a str,
+    pub user_uuid: &'a str,
+    pub expires_at: i64,
+    pub user_agent: &'a str,
+    pub ip: &'a str,
+    /// Renseigné pour une session ouverte par le fournisseur d'identité.
+    pub refresh_token: Option<&'a str>,
+}
+
+/// Enregistre une session ouverte. Seule l'**empreinte** du jeton est écrite.
+pub fn create_session(conn: &Connection, session: &NewSession<'_>) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO sessions (token, user_uuid, created_at, expires_at, user_agent, ip)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![token, user_uuid, now(), expires_at, user_agent, ip],
+        "INSERT INTO sessions
+            (token_hash, uuid, user_uuid, refresh_token, created_at, expires_at, user_agent, ip)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            session.token_hash,
+            session.uuid,
+            session.user_uuid,
+            session.refresh_token,
+            now(),
+            session.expires_at,
+            session.user_agent,
+            session.ip
+        ],
     )
     .map(|_| ())
     .map_err(err)
 }
 
-/// Compte d'une session valide (non expirée, compte toujours actif).
+/// Compte **et identifiant de session** d'une session valide (non expirée,
+/// compte toujours actif).
 ///
 /// Le compte désactivé est filtré **ici** : couper l'accès à quelqu'un prend
 /// effet à la requête suivante, sans avoir à retrouver ses sessions.
-pub fn session_user(conn: &Connection, token: &str, at: i64) -> Result<Option<User>, String> {
+pub fn session_of(
+    conn: &Connection,
+    token_hash: &str,
+    at: i64,
+) -> Result<Option<(User, String)>, String> {
     conn.query_row(
         &format!(
-            "SELECT {} FROM sessions s
+            "SELECT {}, s.uuid FROM sessions s
              JOIN users u ON u.uuid = s.user_uuid
-             WHERE s.token = ?1 AND s.expires_at > ?2 AND u.disabled = 0",
+             WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled = 0",
             USER_COLUMNS
                 .split(", ")
                 .map(|c| format!("u.{c}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        params![token, at],
-        row_to_user,
+        params![token_hash, at],
+        |row| Ok((row_to_user(row)?, row.get::<_, String>(USER_COLUMN_COUNT)?)),
     )
     .optional()
     .map_err(err)
 }
 
-/// Ferme une session (déconnexion). Sans effet si le jeton est inconnu.
-pub fn delete_session(conn: &Connection, token: &str) -> Result<(), String> {
-    conn.execute("DELETE FROM sessions WHERE token = ?1", params![token])
-        .map(|_| ())
-        .map_err(err)
+/// `true` si cette session (identifiée par son UUID) existe encore.
+///
+/// Sert aux WebSocket : ils doivent tomber quand **leur** session est fermée,
+/// pas quand une autre du même compte l'est.
+pub fn session_exists(conn: &Connection, uuid: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sessions WHERE uuid = ?1",
+        params![uuid],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .map_err(err)
+}
+
+/// Ferme une session (déconnexion, révocation). Sans effet si elle est inconnue.
+pub fn delete_session(conn: &Connection, token_hash: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM sessions WHERE token_hash = ?1",
+        params![token_hash],
+    )
+    .map(|_| ())
+    .map_err(err)
 }
 
 /// Retire les sessions expirées. Renvoie le nombre de lignes supprimées.
@@ -561,6 +676,102 @@ pub fn delete_sessions_of(conn: &Connection, user_uuid: &str) -> Result<usize, S
         "DELETE FROM sessions WHERE user_uuid = ?1",
         params![user_uuid],
     )
+    .map_err(err)
+}
+
+/// Sessions **valides** d'un compte, la plus récente d'abord.
+pub fn list_sessions(conn: &Connection, user_uuid: &str, at: i64) -> Result<Vec<Session>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT uuid, created_at, expires_at, user_agent, ip, refresh_token
+             FROM sessions
+             WHERE user_uuid = ?1 AND expires_at > ?2
+             ORDER BY created_at DESC",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![user_uuid, at], |row| {
+            Ok(Session {
+                uuid: row.get(0)?,
+                created_at: row.get(1)?,
+                expires_at: row.get(2)?,
+                user_agent: row.get(3)?,
+                ip: row.get(4)?,
+                sso: row.get::<_, Option<String>>(5)?.is_some(),
+            })
+        })
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
+}
+
+/// Ferme **une** session d'un compte (et pas celle d'un autre).
+///
+/// `true` quand une ligne a été supprimée : une session inconnue, expirée ou
+/// appartenant à quelqu'un d'autre n'est **pas** distinguée (404 dans les deux
+/// cas, comme pour les jetons d'API).
+pub fn revoke_session(conn: &Connection, user_uuid: &str, uuid: &str) -> Result<bool, String> {
+    conn.execute(
+        "DELETE FROM sessions WHERE uuid = ?1 AND user_uuid = ?2",
+        params![uuid, user_uuid],
+    )
+    .map(|n| n > 0)
+    .map_err(err)
+}
+
+/// Sessions ouvertes par le fournisseur d'identité, jamais revérifiées depuis
+/// `before` : `(uuid, user_uuid, refresh_token)`.
+///
+/// La borne est `sso_checked_at` **ou** la date d'ouverture quand la session
+/// n'a jamais été vérifiée : une session née il y a cinq minutes n'a pas à
+/// interroger le fournisseur tout de suite.
+pub fn sso_sessions_to_check(
+    conn: &Connection,
+    before: i64,
+) -> Result<Vec<(String, String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT uuid, user_uuid, refresh_token FROM sessions
+             WHERE refresh_token IS NOT NULL
+               AND expires_at > ?1
+               AND COALESCE(sso_checked_at, created_at) <= ?2",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![now(), before], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
+}
+
+/// Note qu'une session vient d'être revérifiée auprès du fournisseur.
+///
+/// `refresh_token` remplace celui enregistré quand le fournisseur en a émis un
+/// nouveau (rotation) : garder l'ancien ferait refuser la vérification suivante.
+pub fn mark_sso_checked(
+    conn: &Connection,
+    uuid: &str,
+    at: i64,
+    refresh_token: Option<&str>,
+) -> Result<(), String> {
+    match refresh_token {
+        Some(refresh) => conn
+            .execute(
+                "UPDATE sessions SET sso_checked_at = ?2, refresh_token = ?3 WHERE uuid = ?1",
+                params![uuid, at, refresh],
+            )
+            .map(|_| ()),
+        None => conn
+            .execute(
+                "UPDATE sessions SET sso_checked_at = ?2 WHERE uuid = ?1",
+                params![uuid, at],
+            )
+            .map(|_| ()),
+    }
     .map_err(err)
 }
 
@@ -1286,6 +1497,31 @@ mod tests {
         assert!(insert_user(&conn, &NewUser::new("autre", "a@exemple.fr", None)).is_err());
     }
 
+    /// Session de test : l'empreinte est le premier argument (c'est elle qui
+    /// ouvre la session, et elle est le seul secret stocké).
+    fn session(
+        conn: &Connection,
+        hash: &str,
+        uuid: &str,
+        user_uuid: &str,
+        expires_at: i64,
+        refresh: Option<&str>,
+    ) {
+        create_session(
+            conn,
+            &NewSession {
+                token_hash: hash,
+                uuid,
+                user_uuid,
+                expires_at,
+                user_agent: "",
+                ip: "",
+                refresh_token: refresh,
+            },
+        )
+        .unwrap();
+    }
+
     #[test]
     fn une_session_expiree_ou_un_compte_desactive_ne_donnent_plus_acces() {
         let (_dir, conn) = base();
@@ -1293,12 +1529,23 @@ mod tests {
         insert_user(&conn, &user).unwrap();
 
         let maintenant = now();
-        create_session(&conn, "jeton", &user.uuid, maintenant + 60, "", "").unwrap();
-        assert!(session_user(&conn, "jeton", maintenant).unwrap().is_some());
+        session(
+            &conn,
+            "empreinte",
+            "session-1",
+            &user.uuid,
+            maintenant + 60,
+            None,
+        );
+        assert!(
+            session_of(&conn, "empreinte", maintenant)
+                .unwrap()
+                .is_some()
+        );
 
         // Expirée.
         assert!(
-            session_user(&conn, "jeton", maintenant + 61)
+            session_of(&conn, "empreinte", maintenant + 61)
                 .unwrap()
                 .is_none()
         );
@@ -1309,7 +1556,11 @@ mod tests {
             params![user.uuid],
         )
         .unwrap();
-        assert!(session_user(&conn, "jeton", maintenant).unwrap().is_none());
+        assert!(
+            session_of(&conn, "empreinte", maintenant)
+                .unwrap()
+                .is_none()
+        );
 
         // Le ménage emporte les sessions expirées, pas les autres.
         conn.execute(
@@ -1317,9 +1568,20 @@ mod tests {
             params![user.uuid],
         )
         .unwrap();
-        create_session(&conn, "perime", &user.uuid, maintenant - 1, "", "").unwrap();
+        session(
+            &conn,
+            "perime",
+            "session-2",
+            &user.uuid,
+            maintenant - 1,
+            None,
+        );
         assert_eq!(purge_expired_sessions(&conn).unwrap(), 1);
-        assert!(session_user(&conn, "jeton", maintenant).unwrap().is_some());
+        assert!(
+            session_of(&conn, "empreinte", maintenant)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1350,10 +1612,87 @@ mod tests {
         insert_user(&conn, &user).unwrap();
 
         let now = now();
-        create_session(&conn, "a", &user.uuid, now + 60, "", "").unwrap();
-        create_session(&conn, "b", &user.uuid, now + 60, "", "").unwrap();
+        for (hash, uuid) in [("a", "session-a"), ("b", "session-b")] {
+            session(&conn, hash, uuid, &user.uuid, now + 60, None);
+        }
         assert_eq!(delete_sessions_of(&conn, &user.uuid).unwrap(), 2);
-        assert!(session_user(&conn, "a", now).unwrap().is_none());
+        assert!(session_of(&conn, "a", now).unwrap().is_none());
+    }
+
+    #[test]
+    fn une_session_se_revoque_une_par_une_et_pas_celle_d_un_autre() {
+        let (_dir, conn) = base();
+        let remi = NewUser::new("remi", "remi@exemple.fr", None);
+        let autre = NewUser::new("autre", "autre@exemple.fr", None);
+        insert_user(&conn, &remi).unwrap();
+        insert_user(&conn, &autre).unwrap();
+
+        let now = now();
+        session(&conn, "a", "s-a", &remi.uuid, now + 60, None);
+        session(&conn, "b", "s-b", &remi.uuid, now + 60, None);
+        session(&conn, "c", "s-c", &autre.uuid, now + 60, None);
+
+        // La session d'un autre compte n'est **pas** touchée par la révocation…
+        assert!(!revoke_session(&conn, &remi.uuid, "s-c").unwrap());
+        // Une session inconnue non plus (même réponse : rien n'a été supprimé).
+        assert!(!revoke_session(&conn, &remi.uuid, "s-inconnue").unwrap());
+        // Celle du compte visé, oui, et elle seule.
+        assert!(revoke_session(&conn, &remi.uuid, "s-a").unwrap());
+        assert!(session_of(&conn, "a", now).unwrap().is_none());
+        assert!(session_of(&conn, "b", now).unwrap().is_some());
+        assert!(session_of(&conn, "c", now).unwrap().is_some());
+    }
+
+    #[test]
+    fn les_sessions_sso_se_reconnaissent_et_se_listent() {
+        let (_dir, conn) = base();
+        let user = NewUser::new("remi", "remi@exemple.fr", None);
+        insert_user(&conn, &user).unwrap();
+
+        let now = now();
+        session(&conn, "locale", "s-locale", &user.uuid, now + 60, None);
+        session(
+            &conn,
+            "sso",
+            "s-sso",
+            &user.uuid,
+            now + 60,
+            Some("refresh-1"),
+        );
+
+        // Vieillies d'une heure : les dates sont en **secondes**, et l'horloge
+        // peut changer d'unité entre l'insertion et la lecture — sans ce
+        // décalage, l'échéance de revérification dépendrait du hasard.
+        conn.execute("UPDATE sessions SET created_at = created_at - 3600", [])
+            .unwrap();
+
+        let sessions = list_sessions(&conn, &user.uuid, now).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.sso && s.uuid == "s-sso"));
+        assert!(sessions.iter().any(|s| !s.sso && s.uuid == "s-locale"));
+
+        // Seules les sessions du fournisseur sont revérifiées, et seulement
+        // quand leur échéance est passée.
+        assert!(sso_sessions_to_check(&conn, now - 7200).unwrap().is_empty());
+        let a_verifier = sso_sessions_to_check(&conn, now).unwrap();
+        assert_eq!(a_verifier.len(), 1);
+        assert_eq!(a_verifier[0].0, "s-sso");
+        assert_eq!(a_verifier[0].2, "refresh-1");
+
+        // Une vérification réussie repousse l'échéance… et peut **remplacer** le
+        // jeton de rafraîchissement (le fournisseur en a émis un nouveau).
+        mark_sso_checked(&conn, "s-sso", now, Some("refresh-2")).unwrap();
+        // La borne est inclusive : c'est `now - 1` qui dit « rien de nouveau à
+        // vérifier » juste après une vérification datée de `now`.
+        assert!(sso_sessions_to_check(&conn, now - 1).unwrap().is_empty());
+        assert_eq!(sso_sessions_to_check(&conn, now).unwrap()[0].2, "refresh-2");
+
+        // Sans nouveau jeton, l'ancien reste en place.
+        mark_sso_checked(&conn, "s-sso", now + 5, None).unwrap();
+        assert_eq!(
+            sso_sessions_to_check(&conn, now + 6).unwrap()[0].2,
+            "refresh-2"
+        );
     }
 
     #[test]

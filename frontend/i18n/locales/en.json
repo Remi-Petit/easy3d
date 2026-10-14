@@ -339,6 +339,7 @@
   "account": {
     "tabAccount": "Account",
     "tabApi": "API",
+    "tabSessions": "Sessions",
     "identity": "Identity",
     "userName": "Username",
     "email": "E-mail address",
@@ -354,6 +355,15 @@
     "passwordHint": "8 characters minimum. Changing it closes the other sessions: devices left open will have to sign in again.",
     "passwordSso": "Your account signs in through the identity provider (SSO): it manages your password, and a local password would not let you in here.",
     "tokens": "API tokens",
+    "sessions": "Open sessions",
+    "sessionsHint": "One session per device signed in from a browser, with the date it was opened and its address. Closing one leaves the others alone — and your API tokens too. That is what to do from a shared computer.",
+    "noSession": "No open session.",
+    "closeSession": "Close",
+    "sessionCurrent": "this device",
+    "sessionSso": "SSO",
+    "sessionSince": "opened on",
+    "sessionExpires": "expires on",
+    "sessionUnknown": "Unknown device",
     "tokenOnce": "Copy this token now: it will not be shown again.",
     "limitRights": "Limit permissions",
     "limitRightsHint": "The token gets only the permissions you tick, and never more than yours. A restricted token does not get the bypass reserved for administrators — that is precisely the point.",
@@ -401,6 +411,8 @@
       "permission_required": "Pick at least one permission.",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
+      "password_too_common": "Password too common, or too simple: pick another one.",
+      "password_matches_identity": "The password cannot be your username or your e-mail address.",
       "invalid_credentials": "Wrong current password.",
       "password_sso": "This account signs in through the identity provider: its password is managed there."
     }
@@ -431,7 +443,8 @@
       "refusals": "Refusals",
       "tokens": "Tokens",
       "accounts": "Accounts",
-      "roles": "Roles"
+      "roles": "Roles",
+      "audit": "Audit"
     },
     "count": "{count} events",
     "filtered": "{count} of {total}",
@@ -449,6 +462,9 @@
       "sso_login": "SSO sign-in",
       "sso_refused": "SSO refused",
       "sso_detached": "Detached from SSO",
+      "sso_revoked": "SSO access revoked",
+      "session_revoked": "Session closed",
+      "audit_read": "Audit log read",
       "token_created": "Token created",
       "token_revoked": "Token revoked",
       "account_created": "Account created",
@@ -560,6 +576,8 @@
       "name_taken": "This name is already used.",
       "password_too_short": "Password too short (8 characters minimum).",
       "password_too_long": "Password too long (256 characters maximum).",
+      "password_too_common": "Password too common, or too simple: pick another one.",
+      "password_matches_identity": "The password cannot be your username or your e-mail address.",
       "invalid_credentials": "Wrong current password.",
       "password_required": "Set a password: without one, this account could no longer sign in at all.",
       "not_attached": "This account is not attached to the identity provider."
