@@ -361,9 +361,13 @@ impl Config {
              # les commentaires d'origine sont remplacés par cet en-tête.\n\
              # Relu à chaud par le serveur, qui surveille ce fichier.\n\n{body}"
         );
-        std::fs::write(path, yaml)
+        std::fs::write(path, yaml)?;
+        // Le fichier porte la clé d'API du fournisseur de modèles et le secret
+        // client du SSO : il n'a rien à faire lisible par un autre compte de la
+        // machine (voir `crate::restrict_permissions`).
+        crate::restrict_permissions(path);
+        Ok(())
     }
-
     /// Chemin **résolu** du dossier des modèles.
     ///
     /// Priorité : `models_root` (absolu, ou relatif à `backend/`), sinon la

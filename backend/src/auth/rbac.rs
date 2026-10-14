@@ -199,10 +199,11 @@ pub async fn create_user(
     }
 
     // Le mot de passe, s'il est fourni, est vérifié **avant** toute écriture :
-    // un refus ne doit pas laisser un compte à moitié créé.
+    // un refus ne doit pas laisser un compte à moitié créé. La politique porte
+    // aussi sur l'identité (« admin » comme mot de passe de « admin »).
     let hash = match request.password.as_deref().filter(|p| !p.is_empty()) {
         Some(password) => {
-            if let Err(code) = password::check_length(password) {
+            if let Err(code) = password::policy(password, &username, &email) {
                 return auth::error(StatusCode::BAD_REQUEST, code);
             }
             match password::hash(password) {
@@ -322,7 +323,10 @@ pub async fn update_user(
         None => MotDePasse::Inchange,
         Some("") => MotDePasse::Retire,
         Some(password) => {
-            if let Err(code) = password::check_length(password) {
+            // La politique est appliquée ici aussi : l'administrateur qui
+            // répare un compte ne doit pas pouvoir lui poser un mot de passe que
+            // le compte n'aurait pas eu le droit de choisir lui-même.
+            if let Err(code) = password::policy(password, &target.username, &target.email) {
                 return auth::error(StatusCode::BAD_REQUEST, code);
             }
             match password::hash(password) {
@@ -390,6 +394,10 @@ pub async fn update_user(
                 changes.push("password");
             }
         }
+        // Le compte désactivé emporte ses sessions : le WebSocket qui les
+        // portait doit tomber aussi, et c'est `coupe` qui le dit à l'appelant
+        // (un WebSocket ne revérifie rien trame par trame).
+        let mut coupe = false;
         if let Some(disabled) = request.disabled {
             db::set_disabled(conn, &uuid, disabled)?;
             // C'est l' information la plus intéressante du journal : couper
@@ -397,9 +405,10 @@ pub async fn update_user(
             changes.push(if disabled { "disabled" } else { "enabled" });
             if disabled {
                 // Un compte désactivé ne doit plus rien pouvoir : ses sessions
-                // ouvertes cessent immédiatement d'être valables (`session_user`
+                // ouvertes cessent immédiatement d'être valables (`session_of`
                 // filtre les comptes désactivés), mais autant les retirer.
                 db::delete_sessions_of(conn, &uuid)?;
+                coupe = true;
             }
         }
         if let Some(roles) = &roles {
@@ -411,12 +420,13 @@ pub async fn update_user(
             changes.push("permissions");
         }
         // Le nom et le détail sortent **de la fermeture** : c'est là que les
-        // changements sont connus, et le journal s'écrit après.
-        Ok((target.username.clone(), changes.join(",")))
+        // changements sont connus, et le journal s'écrit après. Le troisième
+        // membre dit si l'accès vient d'être coupé (voir la réponse, plus bas).
+        Ok((target.username.clone(), changes.join(","), coupe))
     });
 
     match result {
-        Ok((nom, detail)) => {
+        Ok((nom, detail, coupe)) => {
             state.auth.log(
                 &headers,
                 "account_updated",
@@ -424,6 +434,13 @@ pub async fn update_user(
                 &nom,
                 &detail,
             );
+            // Le compte vient d'être désactivé : les WebSocket ouverts ne se
+            // ferment pas tout seuls (ils ne revérifient rien à chaque trame),
+            // c'est donc ce signal qui les coupe — sinon un onglet resté ouvert
+            // continuerait de recevoir le catalogue après la coupure.
+            if coupe {
+                state.kick_user(&uuid);
+            }
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Err(e) if is_client_error(&e) => auth::error(StatusCode::BAD_REQUEST, &e),
@@ -470,6 +487,9 @@ pub async fn delete_user(
                 &nom,
                 &uuid,
             );
+            // Le compte n'existe plus : ses sessions sont parties avec lui
+            // (clé étrangère), et ses WebSocket doivent tomber tout de suite.
+            state.kick_user(&uuid);
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Ok(None) => auth::error(StatusCode::NOT_FOUND, "not_found"),
@@ -529,7 +549,7 @@ pub async fn detach_oidc(
     };
     let hash = match demande.password.as_deref().filter(|p| !p.is_empty()) {
         Some(password) => {
-            if let Err(code) = password::check_length(password) {
+            if let Err(code) = password::policy(password, &target.username, &target.email) {
                 return auth::error(StatusCode::BAD_REQUEST, code);
             }
             match password::hash(password) {
@@ -564,6 +584,9 @@ pub async fn detach_oidc(
                 &target.username,
                 "",
             );
+            // Les sessions viennent d'être fermées : les WebSocket qui les
+            // portaient doivent tomber.
+            state.kick_user(&uuid);
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Err(e) => auth::internal(&e),
@@ -855,7 +878,7 @@ pub async fn change_password(
         return auth::error(StatusCode::UNAUTHORIZED, "invalid_credentials");
     }
 
-    if let Err(code) = password::check_length(&request.new) {
+    if let Err(code) = password::policy(&request.new, &caller.0.username, &caller.0.email) {
         return auth::error(StatusCode::BAD_REQUEST, code);
     }
     let hash = match password::hash(&request.new) {
@@ -884,15 +907,101 @@ pub async fn change_password(
         Err(e) => return auth::internal(&e),
     };
 
+    // Toutes les autres sessions du compte viennent d'être fermées : on coupe
+    // leurs WebSocket. Celle qu'on ouvre juste après n'en a pas encore.
+    state.kick_user(&uuid);
+
     (
         StatusCode::OK,
         [(
             axum::http::header::SET_COOKIE,
-            state.auth.session_cookie(&token),
+            state.auth.session_cookie(&token, &headers),
         )],
         Json(serde_json::json!({ "ok": true })),
     )
         .into_response()
+}
+
+// ── Sessions du compte (page « Mon compte ») ────────────────────────────
+
+/// Une session, telle que l'interface la montre.
+///
+/// ⚠️ Ni le jeton ni son empreinte : l'empreinte **est** la clé qui ouvre la
+/// session, elle n'a rien à faire dans une réponse HTTP.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionView {
+    pub uuid: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub user_agent: String,
+    pub ip: String,
+    /// `true` pour une session ouverte par le fournisseur d'identité.
+    pub sso: bool,
+    /// `true` pour la session qui fait la demande (« c'est cet appareil »).
+    pub current: bool,
+}
+
+/// `GET /sessions` — les sessions **du compte connecté**.
+///
+/// Comme les jetons d'API, il n'y a pas de droit à exiger : chacun voit les
+/// siennes. Un administrateur ne voit pas celles des autres (il peut fermer le
+/// compte, ce qui les emporte toutes).
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
+) -> Response {
+    let courante = state.auth.session_uuid_of(&headers);
+    match state
+        .auth
+        .db(|conn| db::list_sessions(conn, &caller.0.uuid, db::now()))
+    {
+        Ok(sessions) => {
+            let vues: Vec<SessionView> = sessions
+                .into_iter()
+                .map(|session| SessionView {
+                    current: courante.as_deref() == Some(session.uuid.as_str()),
+                    uuid: session.uuid,
+                    created_at: session.created_at,
+                    expires_at: session.expires_at,
+                    user_agent: session.user_agent,
+                    ip: session.ip,
+                    sso: session.sso,
+                })
+                .collect();
+            Json(serde_json::json!({ "sessions": vues })).into_response()
+        }
+        Err(e) => auth::internal(&e),
+    }
+}
+
+/// `DELETE /sessions/{uuid}` — ferme **une** session du compte connecté.
+///
+/// Fermer la sienne (celle qui fait la demande) est permis : c'est une
+/// déconnexion comme une autre, et la refuser obligerait à un cas particulier
+/// dans l'interface.
+pub async fn revoke_session(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    caller: AuthUser,
+    Path(uuid): Path<String>,
+) -> Response {
+    match state.auth.db(|conn| {
+        let fermee = db::revoke_session(conn, &caller.0.uuid, &uuid)?;
+        Ok(fermee)
+    }) {
+        Ok(false) => auth::error(StatusCode::NOT_FOUND, "not_found"),
+        Ok(true) => {
+            state
+                .auth
+                .log(&headers, "session_revoked", Some(&caller.0.uuid), "", &uuid);
+            // Le WebSocket de cette session tombe ; ceux d'une **autre** session
+            // du même compte s'en aperçoivent (`session_alive`) et restent.
+            state.kick_user(&caller.0.uuid);
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(e) => auth::internal(&e),
+    }
 }
 
 /// Rôle attribué par défaut aux nouveaux comptes, s'il est encore valide.

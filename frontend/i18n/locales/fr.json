@@ -339,6 +339,7 @@
   "account": {
     "tabAccount": "Compte",
     "tabApi": "API",
+    "tabSessions": "Sessions",
     "identity": "Identité",
     "userName": "Nom d’utilisateur",
     "email": "Adresse e-mail",
@@ -354,6 +355,15 @@
     "passwordHint": "8 caractères minimum. Le changement ferme les autres sessions : les appareils restés ouverts devront se reconnecter.",
     "passwordSso": "Votre compte entre par le fournisseur d’identité (SSO) : c’est lui qui gère votre mot de passe, et un mot de passe local ne vous ferait pas entrer ici.",
     "tokens": "Jetons d’API",
+    "sessions": "Sessions ouvertes",
+    "sessionsHint": "Une session par appareil connecté par navigateur, avec sa date d’ouverture et son adresse. En fermer une ne touche ni les autres, ni vos jetons d’API — c’est le geste à faire depuis un poste partagé.",
+    "noSession": "Aucune session ouverte.",
+    "closeSession": "Fermer",
+    "sessionCurrent": "cet appareil",
+    "sessionSso": "SSO",
+    "sessionSince": "ouverte le",
+    "sessionExpires": "expire le",
+    "sessionUnknown": "Appareil inconnu",
     "tokenOnce": "Copiez ce jeton maintenant : il ne sera plus affiché.",
     "limitRights": "Limiter les droits",
     "limitRightsHint": "Le jeton n’aura que les droits cochés, et jamais plus que les vôtres. Un jeton restreint ne bénéficie pas du contournement réservé aux administrateurs — c’est justement là son intérêt.",
@@ -401,6 +411,8 @@
       "permission_required": "Choisissez au moins un droit.",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
+      "password_too_common": "Mot de passe trop courant, ou trop simple : choisissez-en un autre.",
+      "password_matches_identity": "Le mot de passe ne peut pas être votre identifiant ni votre adresse.",
       "invalid_credentials": "Mot de passe actuel incorrect.",
       "password_sso": "Ce compte se connecte par le fournisseur d’identité : son mot de passe se gère là-bas."
     }
@@ -431,7 +443,8 @@
       "refusals": "Refus",
       "tokens": "Jetons",
       "accounts": "Comptes",
-      "roles": "Rôles"
+      "roles": "Rôles",
+      "audit": "Journal"
     },
     "count": "{count} événements",
     "filtered": "{count} sur {total}",
@@ -449,6 +462,9 @@
       "sso_login": "Connexion SSO",
       "sso_refused": "SSO refusé",
       "sso_detached": "Détaché du SSO",
+      "sso_revoked": "Accès SSO révoqué",
+      "session_revoked": "Session fermée",
+      "audit_read": "Journal consulté",
       "token_created": "Jeton créé",
       "token_revoked": "Jeton révoqué",
       "account_created": "Compte créé",
@@ -562,6 +578,8 @@
       "name_taken": "Ce nom est déjà utilisé.",
       "password_too_short": "Mot de passe trop court (8 caractères minimum).",
       "password_too_long": "Mot de passe trop long (256 caractères maximum).",
+      "password_too_common": "Mot de passe trop courant, ou trop simple : choisissez-en un autre.",
+      "password_matches_identity": "Le mot de passe ne peut pas être votre identifiant ni votre adresse.",
       "invalid_credentials": "Mot de passe actuel incorrect.",
       "password_required": "Posez un mot de passe : sans lui, ce compte ne pourrait plus entrer du tout.",
       "not_attached": "Ce compte n’est pas rattaché au fournisseur d’identité."

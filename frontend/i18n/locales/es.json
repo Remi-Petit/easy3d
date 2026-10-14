@@ -339,6 +339,7 @@
   "account": {
     "tabAccount": "Cuenta",
     "tabApi": "API",
+    "tabSessions": "Sesiones",
     "identity": "Identidad",
     "userName": "Usuario",
     "email": "Correo electrónico",
@@ -354,6 +355,15 @@
     "passwordHint": "Mínimo 8 caracteres. El cambio cierra las demás sesiones: los dispositivos abiertos tendrán que volver a entrar.",
     "passwordSso": "Tu cuenta entra por el proveedor de identidad (SSO): es él quien gestiona tu contraseña, y una contraseña local no te dejaría entrar aquí.",
     "tokens": "Claves de API",
+    "sessions": "Sesiones abiertas",
+    "sessionsHint": "Una sesión por dispositivo conectado desde el navegador, con su fecha de apertura y su dirección. Cerrar una no afecta a las demás ni a sus claves de API: es lo que hay que hacer desde un equipo compartido.",
+    "noSession": "Ninguna sesión abierta.",
+    "closeSession": "Cerrar",
+    "sessionCurrent": "este dispositivo",
+    "sessionSso": "SSO",
+    "sessionSince": "abierta el",
+    "sessionExpires": "caduca el",
+    "sessionUnknown": "Dispositivo desconocido",
     "tokenOnce": "Copia esta clave ahora: no volverá a mostrarse.",
     "limitRights": "Limitar los permisos",
     "limitRightsHint": "La clave solo tendrá los permisos marcados, y nunca más que los tuyos. Una clave restringida no se beneficia de la excepción reservada a los administradores: ese es justo el interés.",
@@ -399,6 +409,8 @@
       "unknown_permission": "Permiso desconocido, o que no tienes.",
       "permission_required": "Elige al menos un permiso.",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
+      "password_too_common": "Contraseña demasiado común o demasiado simple: elija otra.",
+      "password_matches_identity": "La contraseña no puede ser su identificador ni su dirección.",
       "invalid_credentials": "La contraseña actual es incorrecta.",
       "password_sso": "Esta cuenta inicia sesión con el proveedor de identidad: la contraseña se gestiona allí."
     }
@@ -429,7 +441,8 @@
       "refusals": "Rechazos",
       "tokens": "Claves",
       "accounts": "Cuentas",
-      "roles": "Roles"
+      "roles": "Roles",
+      "audit": "Registro"
     },
     "count": "{count} eventos",
     "filtered": "{count} de {total}",
@@ -447,6 +460,9 @@
       "sso_login": "Conexión SSO",
       "sso_refused": "SSO rechazado",
       "sso_detached": "Desvinculado del SSO",
+      "sso_revoked": "Acceso SSO revocado",
+      "session_revoked": "Sesión cerrada",
+      "audit_read": "Registro consultado",
       "token_created": "Clave creada",
       "token_revoked": "Clave revocada",
       "account_created": "Cuenta creada",
@@ -560,6 +576,8 @@
       "name_taken": "Ese nombre ya está en uso.",
       "password_too_short": "Contraseña demasiado corta (mínimo 8 caracteres).",
       "password_too_long": "Contraseña demasiado larga (máximo 256 caracteres).",
+      "password_too_common": "Contraseña demasiado común o demasiado simple: elija otra.",
+      "password_matches_identity": "La contraseña no puede ser su identificador ni su dirección.",
       "invalid_credentials": "La contraseña actual es incorrecta.",
       "password_required": "Asigna una contraseña: sin ella, esta cuenta ya no podría entrar.",
       "not_attached": "Esta cuenta no está vinculada al proveedor de identidad."

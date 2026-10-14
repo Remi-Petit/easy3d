@@ -20,9 +20,10 @@
 //! l'adresse et le client HTTP de la requête au passage.
 
 use crate::api::AppState;
-use crate::auth::{self, db};
+use crate::auth::{self, AuthUser, db};
 use axum::Json;
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,9 +73,28 @@ pub struct EventView {
 ///
 /// Réservé à qui peut **voir les comptes** (`users.read`) : c'est un journal de
 /// sécurité, il n'a pas à être lisible par un simple lecteur du catalogue.
-pub async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> Response {
+///
+/// La **lecture elle-même est journalisée** (`audit_read`) : consulter qui s'est
+/// connecté et qui a été refusé est un acte qui mérite de laisser une trace —
+/// sans quoi le journal ne pourrait pas répondre à « qui a fouillé le
+/// journal ? ».
+pub async fn list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    caller: AuthUser,
+    Query(query): Query<ListQuery>,
+) -> Response {
     match recent(&state, limit_of(&query)) {
-        Ok(vues) => Json(vues).into_response(),
+        Ok(vues) => {
+            state.auth.log(
+                &headers,
+                "audit_read",
+                Some(&caller.0.uuid),
+                "",
+                &vues.len().to_string(),
+            );
+            Json(vues).into_response()
+        }
         Err(e) => auth::internal(&e),
     }
 }

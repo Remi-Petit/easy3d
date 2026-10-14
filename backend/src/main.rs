@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if auth.cookie_secure() {
                 "Secure"
             } else {
-                "sans Secure — interface servie en HTTP"
+                "sans Secure par défaut — il le sera si le relais annonce https"
             }
         );
     } else {
@@ -144,6 +144,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_presets(presets)
         .with_auth(auth)
         .with_oidc(oidc_env);
+
+    // Revalidation des sessions ouvertes par le fournisseur d'identité : un
+    // compte fermé chez lui doit cesser d'être valable **ici**, au lieu
+    // d'attendre l'expiration de la session (trente jours). Le balayage passe
+    // régulièrement et ne revérifie chaque session qu'une fois par
+    // `SSO_CHECK_SECONDS` (voir `auth::oidc::revalidate_sessions`).
+    //
+    // Aucune session à vérifier quand le SSO est éteint (et la tâche n'existe
+    // alors même pas) : c'est un appel sortant par quart d'heure et par session
+    // SSO ouverte, pas une boucle de sondage.
+    if auth::oidc::is_enabled(&state) {
+        tokio::spawn({
+            let state = state.clone();
+            async move {
+                let mut tick =
+                    tokio::time::interval(Duration::from_secs(auth::oidc::SSO_SWEEP_SECONDS));
+                // Un tour en retard n'est pas rattrapé en rafale : le prochain
+                // part de maintenant, sinon une machine sortie de veille
+                // déclencherait une salve d'appels au fournisseur.
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tick.tick().await;
+                    match auth::oidc::revalidate_sessions(&state).await {
+                        Ok(sweep) if sweep.due > 0 => println!(
+                            "SSO (revalidation) : {} vérifiée(s) — {} confirmée(s), \
+                             {} refusée(s), {} injoignable(s)",
+                            sweep.due, sweep.confirmed, sweep.revoked, sweep.unreachable
+                        ),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("⚠️  SSO (revalidation) : {e}"),
+                    }
+                }
+            }
+        });
+    }
 
     // API → tâche async sur le pool Tokio (multi-thread).
     let server = tokio::spawn({

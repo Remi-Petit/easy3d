@@ -45,7 +45,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   un raccourci vers les services qui parlent le même protocole, tenu dans
   `ai-presets.yml` — et la clé se règlent dans l'administration ; tant que rien
   n'est configuré, le bouton reste grisé.
-<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 481 clés, traduites à 100 %.<!-- langues:end -->
+<!-- langues:start -->**4 langues** : Français, English, Deutsch, Español — 499 clés, traduites à 100 %.<!-- langues:end -->
 - **Testé** : tests Rust (analyse des formats, CRDT, outils et transport MCP),
   tests unitaires du frontend, tests de bout en bout Playwright et une CI qui
   refuse le moindre avertissement du compilateur.
@@ -225,11 +225,28 @@ plus être écrasé en redémarrant le conteneur (il se change dans l'interface)
 | `EASY3D_AUTH` | *(éteint)* | active la gestion des comptes |
 | `EASY3D_DB` | `config/easy3d.db` | base des comptes (SQLite) |
 | `EASY3D_ADMIN_EMAIL` / `EASY3D_ADMIN_PASSWORD` | — | premier administrateur |
-| `EASY3D_COOKIE_SECURE` | automatique | attribut `Secure` du cookie (posé d'office en HTTPS) |
+| `EASY3D_ADMIN_PASSWORD_FILE` | — | le même mot de passe, lu dans un **fichier** |
+| `EASY3D_COOKIE_SECURE` | automatique | attribut `Secure` du cookie |
 | `EASY3D_PUBLIC_URL` | — | adresse publique de l'interface (adresse de retour du SSO) |
 | `EASY3D_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | — | connexion par SSO (voir plus bas) |
+| `EASY3D_OIDC_CLIENT_SECRET_FILE` | — | le même secret, lu dans un **fichier** |
 | `EASY3D_OIDC_SCOPES` | `openid email profile` | portées demandées |
 | `EASY3D_OIDC_PROVISIONING` | `auto` | `auto`, `manual` ou `approval` |
+
+Les deux réglages qui portent un secret (`EASY3D_ADMIN_PASSWORD`,
+`EASY3D_OIDC_CLIENT_SECRET`) acceptent aussi une variante `_FILE`
+(`EASY3D_ADMIN_PASSWORD_FILE=/run/secrets/admin`) : un secret passé par
+l'environnement se lit dans `docker inspect`, `ps e` et l'historique du shell, ce
+qui n'est pas le cas d'un fichier monté. Les deux fichiers de l'installation —
+`config/easy3d.db` et `config/config.yml` (qui contient la clé d'API du
+fournisseur de modèles) — sont écrits en `0600` lorsque le système le permet.
+
+Le mot de passe d'un compte fait **8 caractères minimum**, ne peut être ni son
+identifiant, ni son adresse e-mail, ni une chaîne évidente (`12345678`,
+`password`, `azertyui`…) : des contraintes courtes, mais qui écartent les
+premiers essais de n'importe qui. Le cookie de session porte `Secure` dès que
+l'interface est servie en HTTPS — déduit d'`EASY3D_PUBLIC_URL` **ou** de ce que le
+relais annonce (`x-forwarded-proto`), et `EASY3D_COOKIE_SECURE` tranche si besoin.
 
 Les comptes vivent dans `config/easy3d.db`, **hors** du dossier des modèles — le
 watcher le verrait comme un modèle. C'est de la **donnée** que l'application gère
@@ -335,6 +352,17 @@ l'effacer vraiment. **Seule exception : un administrateur rattaché**, dont le m
 de passe continue d'ouvrir une session — c'est la porte de secours de
 l'installation si le fournisseur est en panne.
 
+La session ouverte par le fournisseur n'est pas un laissez-passer définitif :
+le serveur conserve le **jeton de rafraîchissement** obtenu au login et revient
+demander au fournisseur, environ toutes les **cinq minutes**, si l'accès existe
+encore. Un refus (`invalid_grant`) ferme les sessions du compte et le
+**désactive** localement — c'est l'exigence « fermé chez l'annuaire, fermé
+ici ». Un administrateur fait exception : ses sessions tombent, mais son compte
+reste ouvert (sa porte de secours). Si le fournisseur est **injoignable**, rien
+n'est fermé : une panne n'est pas une décision, et on réessaiera au tour
+suivant. Le rafraîchissement tourne aussi souvent que le fournisseur l'exige,
+car la plupart en émettent un nouveau à chaque fois.
+
 #### Éprouver le SSO sans annuaire : le fournisseur fictif
 
 Essayer cette fonctionnalité demanderait sinon un compte chez un vrai
@@ -365,6 +393,11 @@ pas d'avance — le provisionnement automatique le crée. `EASY3D_ADMIN_*`
 n'agissant qu'à la **première** création, repartir de ces comptes demande de
 supprimer `config/easy3d.db`.
 
+Pour éprouver ce dernier chemin (un accès fermé chez le fournisseur), le
+fournisseur fictif honore `REVOKED_EMAILS=adresse@exemple.fr` : l'échange et le
+rafraîchissement répondent alors `invalid_grant`, comme le ferait un annuaire
+dont le compte est désactivé.
+
 ```bash
 docker compose logs -f fake-oidc        # le flux : autorisation, jeton, userinfo
 
@@ -385,7 +418,8 @@ passe, refus, SSO complet et provisionnement automatique du compte.
 
 **Administration → Journal** garde trace des actions sensibles : connexions
 (par mot de passe ou par le fournisseur d'identité) et **tentatives refusées**,
-déconnexions, changements de mot de passe, jetons créés ou révoqués, et
+déconnexions, sessions fermées ou révoquées par le fournisseur, changements de
+mot de passe, jetons créés ou révoqués, **consultations du journal lui-même**, et
 modifications de comptes, de rôles et de droits. Chaque ligne porte la date,
 l'auteur, la cible, le **motif** (mot de passe faux, trop de tentatives, compte
 en attente de validation, pas d'adresse e-mail chez le fournisseur…), l'adresse
@@ -399,10 +433,10 @@ Table) : ce qui est écrit à la main ici, c'est ce que ce journal a de
 particulier, pas la mécanique du tableau.
 
 Trois filtres s'y combinent : une **période** (24 h, 7 jours, 30 jours), des
-**familles** d'événements — sessions, refus, jetons, comptes, rôles, chacune avec
-son nombre — et un champ de **recherche** qui couvre tout ce qui est affiché :
-compte, sujet, détail traduit, adresse. Les refus portent un trait rouge, pour se
-repérer sans lire.
+**familles** d'événements — sessions, refus, jetons, comptes, rôles et journal,
+chacune avec son nombre — et un champ de **recherche** qui couvre tout ce qui est
+affiché : compte, sujet, détail traduit, adresse. Les refus portent un trait
+rouge, pour se repérer sans lire.
 
 Deux principes : **aucun secret n'y entre** — ni mot de passe, ni jeton (seul son
 nom et sa durée apparaissent) — et la liste est **bornée** aux 5000 derniers
@@ -424,7 +458,30 @@ Un cookie `HttpOnly` + `SameSite=Lax` (et `Secure` en HTTPS) porte un jeton
 opaque ; se déconnecter ferme la session **côté serveur**, et changer de mot de
 passe ferme toutes les autres. Cinq tentatives ratées bloquent un identifiant une
 minute, et « identifiant inconnu » et « mot de passe faux » donnent le même
-message — savoir lesquels existent est déjà une information.
+message — savoir lesquels existent est déjà une information. Trente échecs en une
+minute depuis la même adresse bloquent aussi les suivants : c'est le balayage
+d'identifiants, pas la devinette d'un mot de passe, qui est visé.
+
+Seule l'**empreinte** du jeton de session est écrite en base (jamais le jeton) :
+lire `config/easy3d.db` ne permet donc pas de rejouer la session de quelqu'un.
+C'est le même traitement que les jetons d'API, et cela vaut aussi pour
+`config.yml` : les deux fichiers sont écrits en `0600`.
+
+**Mon compte → Sessions** liste les appareils connectés (date d'ouverture,
+échéance, navigateur, adresse) et permet d'en fermer **un seul** : c'est le geste
+à faire depuis un poste partagé, et il ne touche ni les autres appareils, ni les
+jetons d'API. Fermer la sienne est une déconnexion.
+
+Un compte qu'on désactive, dont on ferme une session, ou qui est refusé par le
+fournisseur d'identité voit ses connexions temps réel **coupées dans la seconde**
+— un onglet ouvert ne refait aucune requête, donc le serveur le lui dit plutôt
+que d'attendre le prochain rechargement.
+
+Les réponses de l'interface et de l'API portent enfin les en-têtes de sécurité
+courants (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, HSTS en
+HTTPS, et une CSP `frame-ancestors`/`object-src` — volontairement limitée au
+structurel, une politique `default-src` stricte demandant sa propre vérification
+avec l'application réelle).
 
 Le catalogue et les notes circulent en WebSocket : le relais du frontend demande
 alors au backend un **ticket court** au nom de la session, et ouvre la connexion

@@ -339,6 +339,7 @@
   "account": {
     "tabAccount": "Konto",
     "tabApi": "API",
+    "tabSessions": "Sitzungen",
     "identity": "Identität",
     "userName": "Benutzername",
     "email": "E-Mail-Adresse",
@@ -354,6 +355,15 @@
     "passwordHint": "Mindestens 8 Zeichen. Die Änderung schließt die anderen Sitzungen: offen gelassene Geräte müssen sich neu anmelden.",
     "passwordSso": "Dein Konto meldet sich über den Identitätsanbieter (SSO) an: Er verwaltet dein Passwort, und ein lokales Passwort würde dich hier nicht hineinlassen.",
     "tokens": "API-Token",
+    "sessions": "Offene Sitzungen",
+    "sessionsHint": "Eine Sitzung pro im Browser angemeldetem Gerät, mit Datum und Adresse. Eine zu schließen lässt die anderen unberührt — und Ihre API-Token ebenso. Genau das tut man an einem geteilten Rechner.",
+    "noSession": "Keine offene Sitzung.",
+    "closeSession": "Schließen",
+    "sessionCurrent": "dieses Gerät",
+    "sessionSso": "SSO",
+    "sessionSince": "geöffnet am",
+    "sessionExpires": "läuft ab am",
+    "sessionUnknown": "Unbekanntes Gerät",
     "tokenOnce": "Kopiere dieses Token jetzt: es wird nicht wieder angezeigt.",
     "limitRights": "Rechte einschränken",
     "limitRightsHint": "Das Token erhält nur die angekreuzten Rechte, und nie mehr als du. Ein eingeschränktes Token profitiert nicht von der Ausnahme für Administratoren — genau das ist der Sinn.",
@@ -399,6 +409,8 @@
       "unknown_permission": "Unbekanntes Recht, oder eines, das du nicht hast.",
       "permission_required": "Wähle mindestens ein Recht.",
       "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
+      "password_too_common": "Passwort zu verbreitet oder zu einfach: wählen Sie ein anderes.",
+      "password_matches_identity": "Das Passwort darf weder Ihr Benutzername noch Ihre E-Mail-Adresse sein.",
       "invalid_credentials": "Aktuelles Passwort ist falsch.",
       "password_sso": "Dieses Konto meldet sich über den Identitätsanbieter an: Das Passwort wird dort verwaltet."
     }
@@ -429,7 +441,8 @@
       "refusals": "Ablehnungen",
       "tokens": "Token",
       "accounts": "Konten",
-      "roles": "Rollen"
+      "roles": "Rollen",
+      "audit": "Journal"
     },
     "count": "{count} Ereignisse",
     "filtered": "{count} von {total}",
@@ -447,6 +460,9 @@
       "sso_login": "SSO-Anmeldung",
       "sso_refused": "SSO abgelehnt",
       "sso_detached": "Vom SSO getrennt",
+      "sso_revoked": "SSO-Zugang entzogen",
+      "session_revoked": "Sitzung geschlossen",
+      "audit_read": "Journal gelesen",
       "token_created": "Token erstellt",
       "token_revoked": "Token widerrufen",
       "account_created": "Konto erstellt",
@@ -559,6 +575,8 @@
       "name_taken": "Dieser Name wird bereits verwendet.",
       "password_too_short": "Passwort zu kurz (mindestens 8 Zeichen).",
       "password_too_long": "Passwort zu lang (höchstens 256 Zeichen).",
+      "password_too_common": "Passwort zu verbreitet oder zu einfach: wählen Sie ein anderes.",
+      "password_matches_identity": "Das Passwort darf weder Ihr Benutzername noch Ihre E-Mail-Adresse sein.",
       "invalid_credentials": "Aktuelles Passwort ist falsch.",
       "password_required": "Setze ein Passwort: ohne eines könnte dieses Konto gar nicht mehr anmelden.",
       "not_attached": "Dieses Konto ist nicht am Identitätsanbieter angebunden."

@@ -20,6 +20,11 @@ export const EVENT_KINDS = [
   'sso_login',
   'sso_refused',
   'sso_detached',
+  // Le fournisseur d'identité a refusé l'accès : les sessions du compte ont été
+  // fermées (et le compte désactivé, sauf pour un administrateur).
+  'sso_revoked',
+  'session_revoked',
+  'audit_read',
   'token_created',
   'token_revoked',
   'account_created',
@@ -119,8 +124,8 @@ export function describeDetail(kind: string, detail: string): DetailShape {
  * illisible, et personne ne filtre sur `login_blocked` tout seul.
  */
 export const EVENT_FAMILIES = {
-  sessions: ['login_ok', 'sso_login', 'logout'],
-  refusals: ['login_failed', 'login_blocked', 'sso_refused'],
+  sessions: ['login_ok', 'sso_login', 'logout', 'session_revoked'],
+  refusals: ['login_failed', 'login_blocked', 'sso_refused', 'sso_revoked'],
   tokens: ['token_created', 'token_revoked'],
   accounts: [
     'account_created',
@@ -130,6 +135,9 @@ export const EVENT_FAMILIES = {
     'sso_detached',
   ],
   roles: ['role_created', 'role_updated', 'role_deleted'],
+  // Consulter le journal est un acte : il se trace comme les autres, et se
+  // filtre à part (c'est le seul événement qui parle du journal lui-même).
+  audit: ['audit_read'],
 } as const satisfies Record<string, readonly string[]>
 
 export type EventFamily = keyof typeof EVENT_FAMILIES
@@ -151,6 +159,7 @@ export const EVENT_ICONS: Record<EventFamily, string> = {
   tokens: 'i-lucide-key-round',
   accounts: 'i-lucide-user-round',
   roles: 'i-lucide-shield-check',
+  audit: 'i-lucide-scroll-text',
 }
 
 /**

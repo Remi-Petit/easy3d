@@ -68,6 +68,23 @@ const DISCOVERY_SECONDS: i64 = 600;
 /// Délai maximal d'un appel au fournisseur.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Délai entre deux vérifications d'une **même** session SSO, en secondes.
+///
+/// Cinq minutes : c'est le prix à payer pour qu'une désactivation chez le
+/// fournisseur se voie ici, au lieu d'attendre l'expiration de la session
+/// (trente jours). Plus court, chaque requête d'un utilisateur connecté par SSO
+/// déclencherait un appel sortant ; plus long, une personne désactivée garderait
+/// l'accès d'autant.
+pub const SSO_CHECK_SECONDS: i64 = 300;
+
+/// Période du balayage de fond, en secondes (voir `main`).
+///
+/// Indépendante de [`SSO_CHECK_SECONDS`] : le balayage passe souvent, mais ne
+/// revérifie chaque session qu'une fois par `SSO_CHECK_SECONDS`. C'est ce qui
+/// fait tomber une session **sans trafic** — un onglet ouvert ne fait pas de
+/// requête, et il ne doit pas rester ouvert indéfiniment.
+pub const SSO_SWEEP_SECONDS: u64 = 30;
+
 // ── Réglages : environnement par-dessus `config.yml` ─────────────────────
 
 /// Réglages OIDC venus de l'**environnement**.
@@ -113,7 +130,10 @@ impl Env {
         Ok(Self {
             issuer: non_empty("EASY3D_OIDC_ISSUER"),
             client_id: non_empty("EASY3D_OIDC_CLIENT_ID"),
-            client_secret: non_empty("EASY3D_OIDC_CLIENT_SECRET"),
+            // `EASY3D_OIDC_CLIENT_SECRET_FILE` est accepté aussi : un secret
+            // passé par l'environnement se lit dans `docker inspect`, `ps e` et
+            // l'historique du shell, ce qui n'est pas le cas d'un fichier monté.
+            client_secret: auth::env_secret("EASY3D_OIDC_CLIENT_SECRET"),
             scopes: non_empty("EASY3D_OIDC_SCOPES").map(|value| {
                 value
                     .split_whitespace()
@@ -351,6 +371,9 @@ impl Flow {
 /// Adresses utiles du fournisseur, telles qu'il les annonce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovery {
+    /// Émetteur **annoncé par le document**, comparé à celui de la
+    /// configuration (voir [`discover`]).
+    pub issuer: String,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub userinfo_endpoint: String,
@@ -378,10 +401,23 @@ pub fn parse_discovery(body: &str) -> Result<Discovery, String> {
             .ok_or_else(|| format!("découverte OIDC : « {name} » absent"))
     };
     Ok(Discovery {
+        issuer: field("issuer")?,
         authorization_endpoint: field("authorization_endpoint")?,
         token_endpoint: field("token_endpoint")?,
         userinfo_endpoint: field("userinfo_endpoint")?,
     })
+}
+
+/// `true` si l'émetteur annoncé est celui que l'on a configuré.
+///
+/// La comparaison ignore une barre oblique finale (les fournisseurs ne sont pas
+/// tous d'accord sur sa présence) mais rien d'autre : `issuer` est une chaîne
+/// **exacte** au sens de la spécification, et la normaliser davantage (casse,
+/// ordre des segments) ferait accepter un document qui ne vient pas du bon
+/// endroit.
+pub fn same_issuer(annonce: &str, configure: &str) -> bool {
+    let nettoyer = |value: &str| value.trim().trim_end_matches('/').to_string();
+    !annonce.trim().is_empty() && nettoyer(annonce) == nettoyer(configure)
 }
 
 /// Adresse de connexion chez le fournisseur.
@@ -421,16 +457,50 @@ pub fn token_form(settings: &Settings, redirect_uri: &str, code: &str) -> String
     ])
 }
 
-/// Jeton d'accès extrait de la réponse du fournisseur.
-pub fn parse_token(body: &str) -> Result<String, String> {
+/// Corps du `POST` de rafraîchissement (voir [`revalidate_sessions`]).
+pub fn refresh_form(settings: &Settings, refresh_token: &str) -> String {
+    form(&[
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", &settings.client_id),
+        ("client_secret", &settings.client_secret),
+    ])
+}
+
+/// Jetons rendus par le fournisseur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tokens {
+    pub access_token: String,
+    /// Absent chez certains fournisseurs, et pas systématiquement renvoyé lors
+    /// d'un rafraîchissement : garder l'ancien est alors la bonne réponse.
+    pub refresh_token: Option<String>,
+}
+
+/// Jetons extraits de la réponse du fournisseur.
+pub fn parse_token_response(body: &str) -> Result<Tokens, String> {
     let value: Value =
         serde_json::from_str(body).map_err(|e| format!("réponse du jeton illisible : {e}"))?;
-    value
+    let access_token = value
         .get("access_token")
         .and_then(Value::as_str)
         .map(str::to_string)
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| "réponse du jeton sans « access_token »".to_string())
+        .ok_or_else(|| "réponse du jeton sans « access_token »".to_string())?;
+    let refresh_token = value
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string);
+    Ok(Tokens {
+        access_token,
+        refresh_token,
+    })
+}
+
+/// Jeton d'accès seul (le rafraîchissement n'intéresse pas l'appelant).
+pub fn parse_token(body: &str) -> Result<String, String> {
+    parse_token_response(body).map(|tokens| tokens.access_token)
 }
 
 /// Identité d'un utilisateur, telle que le fournisseur la décrit.
@@ -693,6 +763,16 @@ where
         return Err(format!("découverte OIDC refusée ({status}) : {body}"));
     }
     let discovery = parse_discovery(&body)?;
+    // L'émetteur annoncé doit être celui qu'on a configuré : sans ce contrôle,
+    // une redirection de la découverte (DNS, proxy, fournisseur mal recopié)
+    // enverrait le secret client et les jetons à quelqu'un d'autre sans que rien
+    // ne le dise.
+    if !same_issuer(&discovery.issuer, &settings.issuer) {
+        return Err(format!(
+            "découverte OIDC : l'émetteur annoncé (« {} ») n'est pas celui configuré (« {} »)",
+            discovery.issuer, settings.issuer
+        ));
+    }
     auth.oidc.remember_discovery(&settings.issuer, &discovery);
     Ok(discovery)
 }
@@ -846,14 +926,14 @@ where
     if status >= 400 {
         return auth::internal(&format!("échange du code refusé ({status}) : {body}"));
     }
-    let token = match parse_token(&body) {
-        Ok(token) => token,
+    let tokens = match parse_token_response(&body) {
+        Ok(tokens) => tokens,
         Err(e) => return auth::internal(&e),
     };
 
     let (status, body) = match transport(Request::Get {
         url: discovery.userinfo_endpoint.clone(),
-        bearer: Some(token),
+        bearer: Some(tokens.access_token),
     })
     .await
     {
@@ -873,6 +953,17 @@ where
 
     // Provisionnement puis session : à partir d'ici, tout échec est un refus
     // (code) ou une panne (500), jamais une session à moitié ouverte.
+    //
+    // Le rattachement **ferme les sessions** du compte (sauf celles d'un
+    // administrateur) : on note donc si le compte était déjà connu, pour couper
+    // aussi ses WebSocket le cas échéant — la fermeture des sessions ne les
+    // atteint pas d'elle-même.
+    let deja_rattache = state
+        .auth
+        .db(|conn| db::find_by_subject(conn, &identite.subject))
+        .ok()
+        .flatten()
+        .is_some();
     let user = match provision(&state.auth, &settings, &identite) {
         Ok(user) => user,
         Err(code) => {
@@ -885,10 +976,19 @@ where
             return login_error(&code);
         }
     };
-    let token = match state.auth.start_session(&user.uuid, headers) {
-        Ok(token) => token,
-        Err(e) => return auth::internal(&e),
-    };
+    if !deja_rattache {
+        // Premier login (création ou rattachement) : les sessions antérieures du
+        // compte ont pu être fermées par le rattachement.
+        state.kick_user(&user.uuid);
+    }
+    let token =
+        match state
+            .auth
+            .start_sso_session(&user.uuid, headers, tokens.refresh_token.as_deref())
+        {
+            Ok(token) => token,
+            Err(e) => return auth::internal(&e),
+        };
     state.auth.log(
         headers,
         "sso_login",
@@ -907,7 +1007,10 @@ where
         StatusCode::FOUND,
         [
             (header::LOCATION, pending.return_to.clone()),
-            (header::SET_COOKIE, state.auth.session_cookie(&token)),
+            (
+                header::SET_COOKIE,
+                state.auth.session_cookie(&token, headers),
+            ),
         ],
     )
         .into_response()
@@ -916,6 +1019,230 @@ where
 /// Redirection vers une page de l'interface.
 fn redirect_to(url: &str) -> Response {
     (StatusCode::FOUND, [(header::LOCATION, url.to_string())]).into_response()
+}
+
+// ── Revalidation des sessions ouvertes par le fournisseur ────────────────
+
+/// Résultat d'un balayage, en **chiffres** (le journal et la console les
+/// affichent ; personne n'a besoin d'une phrase construite ici).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Sweep {
+    /// Sessions dont l'échéance de vérification était passée.
+    pub due: usize,
+    /// Sessions confirmées par le fournisseur (et rafraîchies).
+    pub confirmed: usize,
+    /// Sessions refusées : compte fermé localement.
+    pub revoked: usize,
+    /// Fournisseur injoignable : on n'a **rien** touché (voir plus bas).
+    pub unreachable: usize,
+}
+
+/// Revérifie auprès du fournisseur les sessions ouvertes par le SSO.
+///
+/// C'est ce qui manquait à l'exigence « désactivé chez le fournisseur ⇒ compte
+/// fermé ici » : sans elle, une session locale survivait jusqu'à **trente
+/// jours**, quelle que soit la décision de l'annuaire. Chaque session vérifiée
+/// porte son `refresh_token`, obtenu au login avec le secret client — le
+/// fournisseur ne répond donc que si l'accès existe encore.
+///
+/// **Fail-open** dès qu'on ne sait pas : fournisseur injoignable, réponse 5xx,
+/// corps illisible → la session est laissée en place et l'échéance repoussée
+/// (pour ne pas marteler un fournisseur en panne). Seul un **refus explicite**
+/// (4xx) ferme quelque chose : c'est le fournisseur qui parle, et il dit non.
+///
+/// Un **administrateur** rattaché au SSO n'est pas désactivé : ses sessions
+/// tombent, mais son compte reste ouvert, car son mot de passe local est la
+/// porte de secours de l'installation (voir `auth::login`). Le détail du journal
+/// le dit (`admin`).
+pub async fn revalidate_sessions(state: &AppState) -> Result<Sweep, String> {
+    let client = client()?;
+    let transport = move |request: Request| -> Answer {
+        let client = client.clone();
+        Box::pin(async move { send(&client, request).await })
+    };
+    revalidate_sessions_with(state, transport).await
+}
+
+/// Version testable de [`revalidate_sessions`] (transport fourni).
+pub async fn revalidate_sessions_with<F>(
+    state: &AppState,
+    mut transport: F,
+) -> Result<Sweep, String>
+where
+    F: FnMut(Request) -> Answer,
+{
+    if !state.auth.is_enabled() {
+        return Ok(Sweep::default());
+    }
+    let settings = match settings(state) {
+        Ok(Some(settings)) => settings,
+        // SSO éteint : rien à vérifier, et ce n'est pas une erreur.
+        Ok(None) => return Ok(Sweep::default()),
+        Err(manque) => return Err(describe(manque)),
+    };
+
+    let avant = db::now() - SSO_CHECK_SECONDS;
+    let sessions = state
+        .auth
+        .db(|conn| db::sso_sessions_to_check(conn, avant))?;
+    let mut sweep = Sweep {
+        due: sessions.len(),
+        ..Sweep::default()
+    };
+    if sessions.is_empty() {
+        return Ok(sweep);
+    }
+
+    // La découverte peut échouer (fournisseur en panne) : on rend l'erreur
+    // **sans rien toucher**. Fermer les sessions parce que le fournisseur ne
+    // répond pas mettre tout le monde dehors au premier incident réseau.
+    let discovery = discover(&state.auth, &settings, &mut transport).await?;
+
+    for (session_uuid, user_uuid, refresh) in sessions {
+        let (status, body) = match transport(Request::Form {
+            url: discovery.token_endpoint.clone(),
+            body: refresh_form(&settings, &refresh),
+        })
+        .await
+        {
+            Ok(pair) => pair,
+            Err(e) => {
+                // Réseau injoignable : on ne touche à rien, on réessaiera.
+                sweep.unreachable += 1;
+                println!("SSO (revalidation) : fournisseur injoignable ({e})");
+                let _ = state
+                    .auth
+                    .db(|conn| db::mark_sso_checked(conn, &session_uuid, db::now(), None));
+                continue;
+            }
+        };
+
+        if status >= 500 {
+            // Panne du fournisseur : ce n'est pas une décision, on réessaiera.
+            sweep.unreachable += 1;
+            let _ = state
+                .auth
+                .db(|conn| db::mark_sso_checked(conn, &session_uuid, db::now(), None));
+            continue;
+        }
+        if status >= 400 {
+            // Toutes les erreurs 4xx ne disent pas la même chose. Celles qui
+            // parlent de **nous** (`invalid_client`, `unsupported_grant_type`)
+            // signalent une configuration à corriger, pas un compte à fermer :
+            // désactiver les comptes sur cette base serait une panne que nous
+            // aurions fabriquée. Seul un refus qui vise l'**accès** compte.
+            match refresh_refusal(&body) {
+                Some(code) => {
+                    sweep.revoked += 1;
+                    close_sso_access(state, &user_uuid, &format!("refresh_refused:{code}"), &body);
+                }
+                None => {
+                    sweep.unreachable += 1;
+                    let apercu: String = body.chars().take(120).collect();
+                    println!(
+                        "SSO (revalidation) : réponse {status} sans refus d'accès ({apercu}) \
+                         — aucun compte touché"
+                    );
+                    let _ = state
+                        .auth
+                        .db(|conn| db::mark_sso_checked(conn, &session_uuid, db::now(), None));
+                }
+            }
+            continue;
+        }
+
+        // Le fournisseur peut avoir **fait tourner** le jeton de rafraîchissement :
+        // garder l'ancien ferait refuser la vérification suivante.
+        let nouveau = parse_token_response(&body)
+            .ok()
+            .and_then(|tokens| tokens.refresh_token);
+        state
+            .auth
+            .db(|conn| db::mark_sso_checked(conn, &session_uuid, db::now(), nouveau.as_deref()))?;
+        sweep.confirmed += 1;
+    }
+
+    Ok(sweep)
+}
+
+/// Erreurs d'un rafraîchissement qui veulent dire « cet accès n'existe plus ».
+///
+/// Liste courte et **explicite**, parce que les deux camps ne se mélangent pas :
+/// `invalid_grant` vient du fournisseur (« ce jeton est révoqué, ce compte est
+/// fermé ») ; `invalid_client` ou `unsupported_grant_type` viennent de *notre*
+/// configuration. Ce qui n'est pas dans cette liste est traité comme une panne
+/// (fail-open) et ne ferme aucun compte — un fournisseur tatillon ne doit pas
+/// pouvoir vider l'installation.
+const REVOCATION_CODES: &[&str] = &[
+    "invalid_grant",
+    "invalid_token",
+    "expired_token",
+    "access_denied",
+];
+
+/// Code de refus **d'accès** porté par une réponse d'erreur, s'il y en a un.
+pub fn refresh_refusal(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let code = value.get("error")?.as_str()?.trim().to_string();
+    REVOCATION_CODES.contains(&code.as_str()).then_some(code)
+}
+
+/// Ferme ce qui vient du fournisseur : **toutes** les sessions du compte (et le
+/// compte lui-même, sauf pour un administrateur).
+///
+/// Le compte est désactivé, pas seulement déconnecté : c'est l'exigence —
+/// « fermé chez le fournisseur, fermé ici ». Le laisser actif avec ses sessions
+/// fermées n'y répondrait qu'à moitié : il suffirait d'attendre une nouvelle
+/// connexion SSO… que le fournisseur refuserait, certes, mais le mot de passe
+/// local, lui, reste valable (il est conservé pour le détachement).
+fn close_sso_access(state: &AppState, user_uuid: &str, detail: &str, body: &str) {
+    let admin = state.auth.is_admin_uuid(user_uuid).unwrap_or(false);
+    let nom = state
+        .auth
+        .db(|conn| db::find_by_uuid(conn, user_uuid))
+        .ok()
+        .flatten()
+        .map(|user| user.username)
+        .unwrap_or_default();
+
+    let resultat = state.auth.db(|conn| {
+        db::delete_sessions_of(conn, user_uuid)?;
+        if !admin {
+            db::set_disabled(conn, user_uuid, true)?;
+        }
+        Ok(())
+    });
+    if let Err(e) = resultat {
+        eprintln!("⚠️  SSO (revalidation) : {e}");
+    }
+
+    // Le détail porte la décision du fournisseur, tronquée : un corps d'erreur
+    // OIDC est court (`invalid_grant`), mais rien n'oblige un fournisseur à
+    // rester bref, et le journal n'est pas une archive de réponses HTTP.
+    let corps: String = body.chars().take(120).collect();
+    let detail = if admin {
+        format!("{detail},admin:{corps}")
+    } else {
+        format!("{detail}:{corps}")
+    };
+    state.auth.log(
+        &HeaderMap::new(),
+        "sso_revoked",
+        Some(user_uuid),
+        &nom,
+        &detail,
+    );
+    println!(
+        "SSO (revalidation) : accès refusé par le fournisseur pour {nom} — sessions fermées{}",
+        if admin {
+            " (administrateur : compte laissé actif, porte de secours)"
+        } else {
+            " et compte désactivé"
+        }
+    );
+    // Les WebSocket du compte tombent : leurs sessions n'existent plus (voir
+    // `api::handle_ws`).
+    state.kick_user(user_uuid);
 }
 
 /// Refus **destiné à l'utilisateur** : la page de connexion sait les expliquer.
@@ -1124,6 +1451,7 @@ mod tests {
 
     fn decouverte() -> Discovery {
         Discovery {
+            issuer: "https://sso.exemple.fr".to_string(),
             authorization_endpoint: "https://sso.exemple.fr/auth".to_string(),
             token_endpoint: "https://sso.exemple.fr/token".to_string(),
             userinfo_endpoint: "https://sso.exemple.fr/userinfo".to_string(),
@@ -1532,7 +1860,7 @@ mod tests {
             .unwrap();
 
             let vivante = auth
-                .db(|conn| db::session_user(conn, &jeton, db::now()))
+                .db(|conn| db::session_of(conn, &crate::auth::hash_secret(&jeton), db::now()))
                 .unwrap()
                 .is_some();
             assert_eq!(vivante, admin, "session de {nom} après rattachement");
@@ -1938,5 +2266,395 @@ mod tests {
             check_with(&eteint, faux).await.status(),
             StatusCode::BAD_REQUEST
         );
+    }
+
+    // ── Émetteur de la découverte ────────────────────────────────────────
+
+    /// Sans ce contrôle, une découverte détournée (DNS, proxy, émetteur mal
+    /// recopié) enverrait le **secret client** et les jetons à quelqu'un
+    /// d'autre, sans que rien ne le dise.
+    #[test]
+    fn la_decouverte_doit_annoncer_l_emetteur_configure() {
+        // `issuer` est exigé par la spécification, et c'est ce qu'on compare.
+        assert!(
+            parse_discovery(
+                r#"{"authorization_endpoint":"a","token_endpoint":"b","userinfo_endpoint":"c"}"#
+            )
+            .is_err()
+        );
+        assert_eq!(
+            parse_discovery(&decouverte_json()).unwrap().issuer,
+            "https://sso.exemple.fr"
+        );
+
+        assert!(same_issuer(
+            "https://sso.exemple.fr",
+            "https://sso.exemple.fr"
+        ));
+        // La barre oblique finale n'est pas une différence…
+        assert!(same_issuer(
+            "https://sso.exemple.fr/",
+            "https://sso.exemple.fr"
+        ));
+        // …mais rien d'autre n'est toléré (ni la casse, ni un hôte voisin).
+        assert!(!same_issuer(
+            "https://SSO.exemple.fr",
+            "https://sso.exemple.fr"
+        ));
+        assert!(!same_issuer(
+            "https://sso.autre.fr",
+            "https://sso.exemple.fr"
+        ));
+        assert!(!same_issuer(
+            "https://sso.exemple.fr/autre",
+            "https://sso.exemple.fr"
+        ));
+        assert!(!same_issuer("", "https://sso.exemple.fr"));
+    }
+
+    #[tokio::test]
+    async fn une_decouverte_qui_annonce_un_autre_emetteur_arrete_le_flux() {
+        let state = etat(Provisioning::Auto, false);
+        // La découverte est en cache (voir `etat`) : on force une relecture.
+        state.auth.oidc.forget_discovery();
+
+        let (faux, journal) = transport(vec![Ok((
+            200,
+            r#"{"issuer":"https://attaquant.exemple.fr",
+                "authorization_endpoint":"https://attaquant.exemple.fr/auth",
+                "token_endpoint":"https://attaquant.exemple.fr/token",
+                "userinfo_endpoint":"https://attaquant.exemple.fr/userinfo"}"#
+                .to_string(),
+        ))]);
+        let reponse = start_with(&state, &entetes(), None, faux).await;
+
+        // 500 : c'est une panne de configuration, pas un refus d'utilisateur, et
+        // surtout **aucune redirection** vers l'adresse annoncée.
+        assert_eq!(reponse.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            journal.lock().unwrap().len(),
+            1,
+            "la découverte, et rien d'autre"
+        );
+    }
+
+    // ── Jetons rendus par le fournisseur ─────────────────────────────────
+
+    #[test]
+    fn les_jetons_lus_comprennent_le_rafraichissement_quand_il_est_la() {
+        let sans = parse_token_response(r#"{"access_token":"a"}"#).unwrap();
+        assert_eq!(sans.refresh_token, None);
+        let avec = parse_token_response(r#"{"access_token":"a","refresh_token":"r"}"#).unwrap();
+        assert_eq!(avec.refresh_token.as_deref(), Some("r"));
+        // Un rafraîchissement vide ne vaut pas un rafraîchissement : le garder
+        // tel quel ferait échouer la vérification suivante.
+        let vide = parse_token_response(r#"{"access_token":"a","refresh_token":"  "}"#).unwrap();
+        assert_eq!(vide.refresh_token, None);
+        assert!(parse_token_response(r#"{"refresh_token":"r"}"#).is_err());
+
+        let corps = refresh_form(&reglages(Provisioning::Auto), "r-1");
+        assert!(
+            corps.contains("grant_type=refresh_token"),
+            "corps : {corps}"
+        );
+        assert!(corps.contains("refresh_token=r-1"), "corps : {corps}");
+        assert!(corps.contains("client_secret=secret"), "corps : {corps}");
+    }
+
+    // ── Revalidation des sessions ouvertes par le fournisseur ────────────
+    //
+    // C'est l'exigence « fermé chez le fournisseur ⇒ fermé ici ». Sans elle, une
+    // session locale vivait **trente jours** quoi qu'il arrive chez l'annuaire.
+
+    /// Compte rattaché au fournisseur, avec une session SSO **à revérifier**.
+    ///
+    /// Le « à revérifier » vient d'un vieillissement de la session : une session
+    /// fraîche n'interroge pas le fournisseur avant [`SSO_CHECK_SECONDS`], et un
+    /// test ne peut pas attendre cinq minutes.
+    fn session_sso(state: &AppState, email: &str, refresh: Option<&str>) -> (db::User, String) {
+        let user = provision(&state.auth, &reglages(Provisioning::Auto), &identite(email)).unwrap();
+        let jeton = state
+            .auth
+            .start_sso_session(&user.uuid, &entetes(), refresh)
+            .unwrap();
+        state
+            .auth
+            .db(|conn| {
+                conn.execute("UPDATE sessions SET created_at = created_at - 10000", [])
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        (user, jeton)
+    }
+
+    /// Le jeton de session est écrit **haché** : la base ne permet pas de rejouer
+    /// une session.
+    fn session_vivante(state: &AppState, jeton: &str) -> bool {
+        state
+            .auth
+            .db(|conn| db::session_of(conn, &crate::auth::hash_secret(jeton), db::now()))
+            .unwrap()
+            .is_some()
+    }
+
+    fn compte_actif(state: &AppState, uuid: &str) -> bool {
+        !state
+            .auth
+            .db(|conn| db::find_by_uuid(conn, uuid))
+            .unwrap()
+            .unwrap()
+            .disabled
+    }
+
+    /// Date de la dernière vérification auprès du fournisseur, telle qu'elle est
+    /// en base (`None` si la session n'a jamais été vérifiée).
+    ///
+    /// On regarde la **date** plutôt que « reste-t-il quelque chose à
+    /// vérifier ? » : les horodatages sont en secondes, donc cette seconde
+    /// question dépendrait du moment précis où le test s'exécute.
+    fn derniere_verification(state: &AppState) -> Option<i64> {
+        state
+            .auth
+            .db(|conn| {
+                conn.query_row("SELECT sso_checked_at FROM sessions LIMIT 1", [], |row| {
+                    row.get::<_, Option<i64>>(0)
+                })
+                .map_err(|e| e.to_string())
+            })
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn un_refus_du_fournisseur_ferme_les_sessions_et_desactive_le_compte() {
+        let state = etat(Provisioning::Auto, false);
+        let (user, jeton) = session_sso(&state, "remi@exemple.fr", Some("refresh-1"));
+
+        let (faux, journal) =
+            transport(vec![Ok((400, r#"{"error":"invalid_grant"}"#.to_string()))]);
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(
+            sweep,
+            Sweep {
+                due: 1,
+                confirmed: 0,
+                revoked: 1,
+                unreachable: 0,
+            }
+        );
+
+        // La requête part en `refresh_token`, avec le secret client : c'est le
+        // seul juge de « ce compte existe encore chez moi ».
+        match &journal.lock().unwrap()[0] {
+            Request::Form { body, .. } => {
+                assert!(body.contains("grant_type=refresh_token"), "corps : {body}");
+                assert!(body.contains("refresh_token=refresh-1"), "corps : {body}");
+                assert!(body.contains("client_secret=secret"), "corps : {body}");
+            }
+            autre => panic!("requête inattendue : {autre:?}"),
+        }
+
+        // Le compte est **désactivé**, pas seulement déconnecté…
+        assert!(!compte_actif(&state, &user.uuid));
+        // …et la session locale ne vaut plus rien, même en présentant son jeton.
+        assert!(!session_vivante(&state, &jeton));
+
+        // Le journal le raconte, avec la décision et le corps tronqué.
+        let evenements = crate::auth::journal::recent(&state, 10).unwrap();
+        let refus = evenements
+            .iter()
+            .find(|e| e.kind == "sso_revoked")
+            .expect("l'événement doit être journalisé");
+        assert_eq!(refus.subject, "remi");
+        assert!(
+            refus.detail.starts_with("refresh_refused:invalid_grant"),
+            "{refus:?}"
+        );
+    }
+
+    /// Panne **n'est pas** décision : on ne met personne dehors parce que le
+    /// fournisseur ne répond pas.
+    #[tokio::test]
+    async fn un_fournisseur_injoignable_ne_ferme_rien() {
+        let state = etat(Provisioning::Auto, false);
+        let (remi, jeton_remi) = session_sso(&state, "remi@exemple.fr", Some("refresh-1"));
+        let (bob, jeton_bob) = session_sso(&state, "bob@exemple.fr", Some("refresh-2"));
+
+        // Deux formes de panne : l'appel ne part pas, puis le fournisseur répond
+        // 5xx. L'ordre des sessions n'est pas garanti, mais les deux mènent au
+        // même résultat.
+        let (faux, _) = transport(vec![
+            Err("échec réseau".to_string()),
+            Ok((503, "indisponible".to_string())),
+        ]);
+        let debut = db::now();
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(sweep.due, 2);
+        assert_eq!(sweep.unreachable, 2);
+        assert_eq!(sweep.revoked, 0);
+        assert_eq!(sweep.confirmed, 0);
+
+        // Rien n'a bougé : sessions valides, comptes actifs.
+        assert!(session_vivante(&state, &jeton_remi));
+        assert!(session_vivante(&state, &jeton_bob));
+        assert!(compte_actif(&state, &remi.uuid));
+        assert!(compte_actif(&state, &bob.uuid));
+
+        // L'échéance a tout de même été repoussée : on ne martèle pas un
+        // fournisseur en panne à chaque tour de balayage.
+        assert!(
+            derniere_verification(&state).is_some_and(|quand| quand >= debut),
+            "la tentative doit être datée"
+        );
+    }
+
+    #[tokio::test]
+    async fn une_revalidation_reussie_repousse_l_echeance_et_garde_le_nouveau_jeton() {
+        let state = etat(Provisioning::Auto, false);
+        let (user, jeton) = session_sso(&state, "remi@exemple.fr", Some("refresh-1"));
+
+        let (faux, journal) = transport(vec![Ok((
+            200,
+            r#"{"access_token":"j2","refresh_token":"refresh-2"}"#.to_string(),
+        ))]);
+        let debut = db::now();
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(sweep.confirmed, 1);
+        assert_eq!(sweep.revoked, 0);
+        assert_eq!(journal.lock().unwrap().len(), 1);
+
+        // Le fournisseur a **fait tourner** le jeton : garder l'ancien ferait
+        // refuser la vérification suivante.
+        let enregistre: String = state
+            .auth
+            .db(|conn| {
+                conn.query_row("SELECT refresh_token FROM sessions", [], |row| row.get(0))
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        assert_eq!(enregistre, "refresh-2");
+
+        // La session locale est **la même** (on ne déconnecte personne), le
+        // compte reste actif, et la vérification est datée.
+        assert!(session_vivante(&state, &jeton));
+        assert!(compte_actif(&state, &user.uuid));
+        assert!(
+            derniere_verification(&state).is_some_and(|quand| quand >= debut),
+            "la vérification doit être datée"
+        );
+    }
+
+    /// Un administrateur rattaché n'est **pas** désactivé : son mot de passe
+    /// local est la porte de secours de l'installation si le fournisseur devient
+    /// inutilisable (même exception que dans `auth::login`).
+    #[tokio::test]
+    async fn un_administrateur_rattache_garde_son_compte_quand_le_fournisseur_le_refuse() {
+        let state = etat(Provisioning::Auto, false);
+        let (user, jeton) = session_sso(&state, "chef@exemple.fr", Some("refresh-1"));
+        state
+            .auth
+            .db(|conn| db::set_user_roles(conn, &user.uuid, &[db::ADMIN_ROLE.to_string()]))
+            .unwrap();
+
+        // Un refus d'**accès** : c'est le code qui le dit, pas le statut (un 401
+        // peut aussi annoncer un `client_secret` périmé, qui n'est pas la faute
+        // de l'utilisateur).
+        let (faux, _) = transport(vec![Ok((401, r#"{"error":"invalid_token"}"#.to_string()))]);
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(sweep.revoked, 1);
+
+        // Ses sessions tombent…
+        assert!(!session_vivante(&state, &jeton));
+        assert!(
+            state
+                .auth
+                .db(|conn| db::list_sessions(conn, &user.uuid, db::now()))
+                .unwrap()
+                .is_empty()
+        );
+        // …mais le compte reste **actif**, et le journal dit pourquoi.
+        assert!(compte_actif(&state, &user.uuid));
+        let evenements = crate::auth::journal::recent(&state, 10).unwrap();
+        let refus = evenements.iter().find(|e| e.kind == "sso_revoked").unwrap();
+        assert!(refus.detail.contains("admin"), "{refus:?}");
+    }
+
+    /// Une revalidation qui n'est pas un refus d'accès ne ferme rien.
+    ///
+    /// `unsupported_grant_type` dit que le fournisseur n'implémente pas le
+    /// rafraîchissement (ou que la configuration l'empêche) : c'est notre
+    /// problème, pas celui de l'utilisateur — et fermer les comptes sur cette
+    /// réponse vide l'installation en un quart d'heure.
+    #[tokio::test]
+    async fn une_erreur_de_configuration_du_fournisseur_ne_ferme_aucun_compte() {
+        let state = etat(Provisioning::Auto, false);
+        let (user, jeton) = session_sso(&state, "remi@exemple.fr", Some("refresh-1"));
+
+        let (faux, _) = transport(vec![Ok((
+            400,
+            r#"{"error":"unsupported_grant_type"}"#.to_string(),
+        ))]);
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(sweep.revoked, 0);
+        assert_eq!(sweep.unreachable, 1);
+
+        assert!(session_vivante(&state, &jeton));
+        assert!(compte_actif(&state, &user.uuid));
+        // Et aucune trace de révocation n'est écrite : le journal ne doit pas
+        // raconter un acte qui n'a pas eu lieu.
+        let evenements = crate::auth::journal::recent(&state, 10).unwrap();
+        assert!(evenements.iter().all(|e| e.kind != "sso_revoked"));
+
+        // Une réponse illisible (pas de JSON) est traitée de la même façon.
+        let (faux, _) = transport(vec![Ok((400, "boum".to_string()))]);
+        assert_eq!(
+            revalidate_sessions_with(&state, faux)
+                .await
+                .unwrap()
+                .revoked,
+            0
+        );
+
+        // Les codes qui, eux, parlent d'un accès, sont reconnus.
+        assert_eq!(
+            refresh_refusal(r#"{"error":"invalid_grant"}"#).as_deref(),
+            Some("invalid_grant")
+        );
+        assert_eq!(
+            refresh_refusal(r#"{"error":"unsupported_grant_type"}"#),
+            None
+        );
+        assert_eq!(refresh_refusal("pas du json"), None);
+        assert_eq!(refresh_refusal(""), None);
+    }
+
+    /// Une session ouverte par mot de passe n'a pas de `refresh_token` : elle
+    /// n'est jamais soumise au fournisseur.
+    #[tokio::test]
+    async fn une_session_locale_n_est_jamais_reverifiee_auprès_du_fournisseur() {
+        let state = etat(Provisioning::Auto, false);
+        let user = provision(
+            &state.auth,
+            &reglages(Provisioning::Auto),
+            &identite("remi@exemple.fr"),
+        )
+        .unwrap();
+        let jeton = state.auth.start_session(&user.uuid, &entetes()).unwrap();
+        state
+            .auth
+            .db(|conn| {
+                conn.execute("UPDATE sessions SET created_at = created_at - 10000", [])
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+
+        // Transport vide : le moindre appel partirait en « requête inattendue »,
+        // et le test échouerait sur `unreachable`.
+        let (faux, journal) = transport(vec![]);
+        let sweep = revalidate_sessions_with(&state, faux).await.unwrap();
+        assert_eq!(sweep, Sweep::default(), "aucune session à revérifier");
+        assert!(journal.lock().unwrap().is_empty(), "aucun appel sortant");
+        assert!(session_vivante(&state, &jeton));
     }
 }

@@ -1,0 +1,54 @@
+# Dépendances surveillées automatiquement.
+#
+# L'interface et le backend embarquent deux écosystèmes (Rust : axum, rusqlite,
+# rmcp, argon2… ; JavaScript : Nuxt, Vue, three.js) plus l'image Docker et les
+# actions GitHub. Sans ce fichier, une faille publiée dans une dépendance ne se
+# voit que le jour où quelqu'un pense à lancer `cargo audit`.
+#
+# Les mises à jour arrivent en **pull request** : rien n'est fusionné tout seul,
+# et un correctif de sécurité se voit dans la liste des PR, ce qui est le seul
+# endroit où on le regarde vraiment.
+
+version: 2
+updates:
+  # Backend Rust (`backend/Cargo.lock` est suivi, la CI le compile).
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    # Une mise à jour majeure change une API : elle se relit, elle ne se fusionne
+    # pas « parce que la CI est verte ».
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Frontend Nuxt (bun, verrou `frontend/bun.lock`).
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Actions des workflows (`actions/checkout`, `oven-sh/setup-bun`…).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Images de base du Dockerfile (rust, node).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(docker)"

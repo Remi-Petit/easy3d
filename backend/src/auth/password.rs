@@ -44,6 +44,92 @@ pub fn check_length(password: &str) -> Result<(), &'static str> {
     }
 }
 
+/// Mots de passe refusés en toutes lettres.
+///
+/// Volontairement **court** : c'est un filet pour les évidences qu'une longueur
+/// minimale de huit caractères laisse passer (`12345678`), pas une liste de
+/// fuites. La comparer, c'est déjà retirer les quelques chaînes qu'un script
+/// essaie en premier — et le contrôle de fuite complet demanderait un appel
+/// réseau, donc une dépendance externe au bon fonctionnement du serveur.
+const COMMON: &[&str] = &[
+    "12345678",
+    "123456789",
+    "1234567890",
+    "11111111",
+    "00000000",
+    "12341234",
+    "87654321",
+    "password",
+    "password1",
+    "password123",
+    "passw0rd",
+    "p@ssword",
+    "qwertyui",
+    "qwerty123",
+    "azertyui",
+    "azerty123",
+    "1q2w3e4r",
+    "iloveyou",
+    "welcome1",
+    "sunshine",
+    "letmein1",
+    "trustno1",
+    "baseball",
+    "football",
+    "superman",
+    "motdepasse1",
+    "admin1234",
+    "rootroot",
+    "changeme",
+];
+
+/// Politique de mot de passe d'un **compte** : longueur, évidences, identité.
+///
+/// Trois choses, dans cet ordre — la longueur d'abord, parce que c'est le refus
+/// le plus facile à comprendre et à corriger :
+///
+/// 1. entre [`MIN_LEN`] et [`MAX_LEN`] caractères (comptés en caractères, donc
+///    une phrase de passe accentuée passe) ;
+/// 2. pas une des chaînes de [`COMMON`], pas une répétition d'un seul caractère
+///    (`aaaaaaaa`) ;
+/// 3. pas l'identifiant, l'adresse, ni la partie locale de l'adresse :
+///    `remi` / `remi@exemple.fr` comme mot de passe, c'est le premier essai de
+///    n'importe qui.
+///
+/// Ce qui n'est **pas** fait : contrôle de fuite en ligne, expiration, longueur
+/// imposée, interdiction des caractères. Ces réglages se discutent ; en attendant
+/// la discussion, poser un mot de passe dans easy3d demande déjà huit caractères
+/// et ne peut plus être `12345678`.
+pub fn policy(password: &str, username: &str, email: &str) -> Result<(), &'static str> {
+    check_length(password)?;
+
+    let bas = password.to_lowercase();
+    if COMMON.contains(&bas.as_str()) {
+        return Err("password_too_common");
+    }
+    // Un seul caractère répété : la liste ci-dessus ne peut pas tout contenir,
+    // et `ssssssss` n'a pas plus de valeur que `12345678`.
+    let mut caracteres = bas.chars();
+    if let Some(premier) = caracteres.next()
+        && caracteres.all(|c| c == premier)
+    {
+        return Err("password_too_common");
+    }
+
+    let identifiant = username.trim().to_lowercase();
+    let adresse = email.trim().to_lowercase();
+    let local = adresse.split('@').next().unwrap_or_default().to_string();
+    let evidents = [identifiant, adresse, local];
+    if evidents
+        .iter()
+        .any(|evident| !evident.is_empty() && *evident == bas)
+    {
+        return Err("password_matches_identity");
+    }
+
+    Ok(())
+}
+
 /// Empreinte PHC d'un mot de passe, **sel aléatoire** compris.
 ///
 /// Deux appels avec le même mot de passe donnent deux empreintes différentes :

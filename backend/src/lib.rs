@@ -23,3 +23,29 @@ pub mod notes;
 pub mod scanner;
 pub mod thumbnail;
 pub mod watcher;
+
+/// Réserve un fichier à son propriétaire (`0600`).
+///
+/// Deux fichiers de l'installation portent des secrets en clair : la base des
+/// comptes (empreintes de mots de passe, sessions, journal) et `config.yml` (clé
+/// d'API du fournisseur de modèles, secret client OIDC). Un `umask` à 022 — le
+/// défaut courant — les crée en `0644`, donc lisibles par tout compte de la
+/// machine. Ce n'est pas une protection contre quelqu'un qui a déjà `root`, mais
+/// cela ferme la lecture « par curiosité » d'un compte voisin.
+///
+/// Sans effet sous Windows, où le modèle de permissions est différent : le
+/// contrôle d'accès y vient de la liste de contrôle du dossier parent.
+pub(crate) fn restrict_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            eprintln!(
+                "⚠️  permissions non restreintes sur {} : {e}",
+                path.display()
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}

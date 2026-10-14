@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /**
- * Mon compte (`/account`) : identité, mot de passe, et **jetons d'API**.
+ * Mon compte (`/account`) : identité, mot de passe, **sessions** et **jetons
+d'API**.
  *
- * Deux URL pour une même page : `/account` montre l'identité et le mot de passe,
- * `/account/api` les jetons (voir la section « Onglets »).
+ * Quatre URL pour une même page : `/account` montre l'identité et le mot de passe,
+ * `/account/sessions` les appareils connectés, `/account/api` les jetons et
+ * `/account/mcp` de quoi brancher un agent (voir la section « Onglets »).
  *
  * Page réservée au compte connecté — la garde `auth.global.ts` a déjà renvoyé
  * vers la connexion qui n'en a pas. Sans gestion des comptes (installation
@@ -13,16 +15,23 @@
  * pas de navigateur : ils présentent le jeton en `Authorization: Bearer`, et il
  * hérite des droits du compte — avec une durée de vie au choix, pour qu'un jeton
  * oublié finisse par mourir tout seul.
+ *
+ * Les sessions sont celles du **navigateur** : une par appareil, chacune
+ * fermable séparément. C'est ce qui permet de couper l'accès d'un poste
+ * partagé sans déconnecter les autres.
  */
 import type { PermissionInfo } from '~/utils/permissions'
 import { TOKEN_DEFAULT_DAYS, TOKEN_DURATIONS, durationKey, expiryKind } from '~/utils/tokens'
+import { deviceName } from '~/composables/useSessions'
 const { t, te } = useI18n()
-const { status, ready, user } = useAuth()
+const { status, ready, user, refresh: rafraichirAuth } = useAuth()
 const route = useRoute()
 const jetons = useTokens()
+const mesSessions = useSessions()
 onMounted(() => {
   if (!status.value.enabled) return
   void jetons.refresh()
+  void mesSessions.refresh()
   // Le catalogue sert au sélecteur de droits ; sans lui, la restriction n'est
   // pas proposée du tout (voir `catalogueMesDroits`), plutôt que d'afficher une
   // liste vide qu'on ne comprendrait pas.
@@ -49,20 +58,22 @@ const error = computed(() => {
 
 // ── Onglets ──────────────────────────────────────────────────────────────
 /**
- * Trois vues, trois URL : `/account` (identité, mot de passe), `/account/api`
- * (jetons) et `/account/mcp` (brancher un agent). L'onglet **découle de l'URL** :
- * un lien vers `/account/mcp` ouvre directement la bonne vue, et le bouton
- * « retour » du navigateur refait le trajet inverse. Le contenu des onglets
- * masqués n'est pas monté (`v-if`/`v-else`).
+ * Quatre vues, quatre URL : `/account` (identité, mot de passe),
+ * `/account/sessions` (appareils connectés), `/account/api` (jetons) et
+ * `/account/mcp` (brancher un agent). L'onglet **découle de l'URL** : un lien
+ * vers `/account/mcp` ouvre directement la bonne vue, et le bouton « retour » du
+ * navigateur refait le trajet inverse. Le contenu des onglets masqués n'est pas
+ * monté (`v-if`/`v-else`).
  */
-type Onglet = 'compte' | 'api' | 'mcp'
+type Onglet = 'compte' | 'sessions' | 'api' | 'mcp'
 
 /** Onglets, dans l'ordre d'affichage — sert aussi à la navigation clavier. */
-const ONGLETS: Onglet[] = ['compte', 'api', 'mcp']
+const ONGLETS: Onglet[] = ['compte', 'sessions', 'api', 'mcp']
 
 /** Segment de chaque onglet : « compte » est la racine de la page. */
 const chemins: Record<Onglet, string> = {
   compte: '/account',
+  sessions: '/account/sessions',
   api: '/account/api',
   mcp: '/account/mcp',
 }
@@ -78,6 +89,7 @@ const onglet = computed<Onglet>(
  */
 const onglets = computed(() => [
   { id: 'compte', label: t('account.tabAccount') },
+  { id: 'sessions', label: t('account.tabSessions') },
   { id: 'api', label: t('account.tabApi') },
   { id: 'mcp', label: t('account.mcp') },
 ])
@@ -286,6 +298,42 @@ async function copyToken() {
 
 /** Révocation en deux temps : le second clic confirme. */
 const aRevoquer = ref<string | null>(null)
+
+// ── Sessions ─────────────────────────────────────────────────────────────
+
+/** Session en attente de confirmation de fermeture (deux temps, comme les jetons). */
+const aFermer = ref<string | null>(null)
+
+/** Message d'erreur de la dernière action sur les sessions. */
+const sessionsError = computed(() => {
+  const code = mesSessions.errorCode.value
+  if (!code) return ''
+  const key = `account.errors.${code}`
+  return te(key) ? t(key) : t('account.errors.unknown')
+})
+
+/** Nom de l'appareil d'une session, ou le libellé générique. */
+function appareil(agent: string): string {
+  return deviceName(agent) || t('account.sessionUnknown')
+}
+
+/**
+ * Ferme une session du compte.
+ *
+ * Si c'est **la sienne**, on rafraîchit l'état d'authentification puis on repart
+ * à la connexion : sans ce rafraîchissement, la garde globale continuerait de
+ * croire l'onglet connecté (elle lit un état en mémoire) et afficherait le
+ * catalogue avec un cookie mort.
+ */
+async function fermerSession(uuid: string) {
+  const etaitLaMienne = mesSessions.sessions.value.some((s) => s.uuid === uuid && s.current)
+  aFermer.value = null
+  if (!(await mesSessions.revoke(uuid))) return
+  if (etaitLaMienne) {
+    await rafraichirAuth()
+    await navigateTo('/login')
+  }
+}
 
 const quand = (valeur: number | null) =>
   valeur ? new Date(valeur * 1000).toLocaleDateString() : t('account.neverUsed')
@@ -526,6 +574,64 @@ const quand = (valeur: number | null) =>
         </div>
 
         <p v-if="error" class="admin__status admin__status--err">{{ error }}</p>
+      </section>
+    </div>
+
+    <!-- Sessions : les appareils connectés au compte, fermables un par un. -->
+    <div
+      v-else-if="onglet === 'sessions'"
+      id="panneau-sessions"
+      role="tabpanel"
+      aria-labelledby="onglet-sessions"
+      class="admin__col"
+    >
+      <section class="admin__card">
+        <h2 class="admin__title">
+          {{ t('account.sessions') }}
+          <span class="admin__count">{{ mesSessions.sessions.value.length }}</span>
+        </h2>
+        <p class="admin__hint">{{ t('account.sessionsHint') }}</p>
+
+        <ul v-if="mesSessions.sessions.value.length" class="admin__list">
+          <li v-for="s in mesSessions.sessions.value" :key="s.uuid" class="admin__item">
+            <span class="admin__item-label">
+              {{ appareil(s.user_agent) }}
+              <span v-if="s.current" class="accounts__tag accounts__tag--on">
+                {{ t('account.sessionCurrent') }}
+              </span>
+              <span v-if="s.sso" class="accounts__tag">{{ t('account.sessionSso') }}</span>
+            </span>
+            <span class="admin__item-where">
+              {{ t('account.sessionSince') }} {{ quand(s.created_at) }} ·
+              {{ t('account.sessionExpires') }} {{ quand(s.expires_at) }}
+              <template v-if="s.ip"> · {{ s.ip }}</template>
+            </span>
+            <div class="admin__field--actions">
+              <button
+                type="button"
+                class="admin__action"
+                :disabled="mesSessions.busy.value"
+                @click="aFermer = aFermer === s.uuid ? null : s.uuid"
+              >
+                {{ aFermer === s.uuid ? t('account.confirm') : t('account.closeSession') }}
+              </button>
+              <button
+                v-if="aFermer === s.uuid"
+                type="button"
+                class="admin__action admin__action--danger"
+                :disabled="mesSessions.busy.value"
+                @click="fermerSession(s.uuid)"
+              >
+                {{ t('account.closeSession') }}
+              </button>
+            </div>
+          </li>
+        </ul>
+        <p v-else class="admin__empty">{{ t('account.noSession') }}</p>
+
+        <p v-if="sessionsError" class="admin__status admin__status--err">
+          {{ sessionsError }}
+        </p>
       </section>
     </div>
 

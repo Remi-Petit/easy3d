@@ -10,7 +10,7 @@ use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::middleware;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post, put};
 use axum::{Json, Router};
@@ -70,6 +70,14 @@ pub struct AppState {
     pub mcp: Arc<
         Mutex<HashMap<String, StreamableHttpService<crate::mcp::Easy3dMcp, LocalSessionManager>>>,
     >,
+    /// Signal de coupure des WebSocket, par **compte** ([`AppState::kick_user`]).
+    ///
+    /// Une connexion WebSocket ne revérifie rien trame par trame : sans ce
+    /// signal, un onglet resté ouvert continuerait de recevoir le catalogue (et
+    /// d'écrire des notes) après une déconnexion, une désactivation ou la
+    /// fermeture de sa session. Chaque socket ne tombe que si **sa** session a
+    /// disparu (voir [`socket_survives_kick`]).
+    pub kick: broadcast::Sender<String>,
 }
 
 impl AppState {
@@ -88,7 +96,21 @@ impl AppState {
             auth: Arc::new(auth::Auth::disabled()),
             oidc: Arc::new(auth::oidc::Env::empty()),
             mcp: Arc::new(Mutex::new(HashMap::new())),
+            // Capacité volontairement large au regard du trafic : un signal
+            // n'est émis que sur un acte d'administration ou une déconnexion.
+            kick: broadcast::channel(256).0,
         }
+    }
+
+    /// Coupe les connexions WebSocket d'un compte.
+    ///
+    /// Le signal porte **l'uuid du compte** ; chaque socket décide de tomber en
+    /// regardant si **sa** session existe encore (`auth::SessionRef`). Fermer la
+    /// session du téléphone ne coupe donc pas le direct du bureau.
+    pub fn kick_user(&self, user_uuid: &str) {
+        // Personne à l'écoute ? Ce n'est pas une erreur : l'immense majorité des
+        // comptes n'a aucun WebSocket ouvert.
+        let _ = self.kick.send(user_uuid.to_string());
     }
 
     /// Service MCP d'un compte, créé à sa première utilisation.
@@ -324,6 +346,14 @@ pub fn routes(state: AppState) -> Router {
         .route(
             "/tokens/{uuid}",
             axum::routing::delete(auth::tokens::revoke),
+        )
+        // Les sessions aussi sont personnelles : voir et fermer les **siennes**
+        // ne demande aucun droit (un compte restreint doit pouvoir se
+        // déconnecter d'un appareil perdu).
+        .route("/sessions", get(auth::rbac::list_sessions))
+        .route(
+            "/sessions/{uuid}",
+            axum::routing::delete(auth::rbac::revoke_session),
         );
 
     let accounts_read = gated(
@@ -390,7 +420,59 @@ pub fn routes(state: AppState) -> Router {
             auth::require_auth,
         ));
 
-    public.merge(protected).with_state(state)
+    public
+        .merge(protected)
+        // En-têtes de sécurité posés **sur tout**, y compris les refus (401,
+        // 403) : une réponse d'erreur n'a pas à être moins protégée qu'une
+        // autre.
+        .layer(middleware::from_fn(security_headers))
+        .with_state(state)
+}
+
+/// En-têtes de sécurité communs à toutes les réponses de l'API.
+///
+/// L'interface est servie par Nitro (voir `frontend/server/middleware/`), qui
+/// pose les mêmes de son côté. Ici, on protège ce que le backend sert lui-même :
+/// du JSON, des aperçus, des fichiers de modèles.
+///
+/// - `X-Content-Type-Options: nosniff` : un `.stl` servi en `text/plain` ne doit
+///   pas être interprété comme du HTML par un navigateur qui devine ;
+/// - `X-Frame-Options: DENY` + `frame-ancestors 'none'` : rien de tout cela ne
+///   s'affiche dans un cadre, donc aucune page tierce ne peut nous encadrer
+///   (clickjacking) ;
+/// - `Content-Security-Policy: default-src 'none'` : ces réponses ne chargent
+///   **rien** (ni script, ni style, ni image) — inutile de laisser la porte
+///   ouverte sur un contenu qu'on ne produit pas ;
+/// - `Referrer-Policy: no-referrer` : une URL de catalogue n'a rien à dire à un
+///   site tiers ;
+/// - `Strict-Transport-Security`, **uniquement si la requête est arrivée en
+///   HTTPS** : l'annoncer depuis un serveur qui n'écoute qu'en HTTP n'aurait
+///   aucun effet, et le faire depuis un déploiement local obligerait le
+///   navigateur à ne plus jamais revenir en clair sur cette adresse.
+async fn security_headers(request: Request, next: Next) -> Response {
+    let https = auth::header_value(request.headers(), "x-forwarded-proto", 16)
+        .split(',')
+        .next()
+        .is_some_and(|proto| proto.trim().eq_ignore_ascii_case("https"));
+
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    headers.insert(header::X_FRAME_OPTIONS, "DENY".parse().unwrap());
+    headers.insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            .parse()
+            .unwrap(),
+    );
+    if https {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            "max-age=31536000; includeSubDomains".parse().unwrap(),
+        );
+    }
+    response
 }
 
 /// Clé du service MCP en cache : le compte, puis la portée du jeton.
@@ -832,15 +914,29 @@ async fn ws_collab(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     axum::extract::Path(rel): axum::extract::Path<String>,
+    auth: Option<auth::AuthUser>,
+    session: Option<auth::SessionRef>,
 ) -> Response {
-    ws.on_upgrade(move |socket| collab::handle_socket(socket, state, rel))
+    // Identité relevée **maintenant** : `require_auth` a déjà résolu le cookie
+    // ou le ticket, et la connexion doit savoir à qui elle appartient pour
+    // tomber si ce compte est coupé (voir `AppState::kick_user`).
+    let user = auth.map(|auth::AuthUser(user)| user.uuid);
+    let session = session.and_then(|auth::SessionRef(session)| session);
+    ws.on_upgrade(move |socket| collab::handle_socket(socket, state, rel, user, session))
 }
 
 /// WebSocket : connexion persistante qui pousse la liste des modèles à chaque
 /// changement détecté par le watcher (via le canal broadcast), y compris les
 /// rechargements de configuration.
-async fn ws_models(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_ws(socket, state))
+async fn ws_models(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    auth: Option<auth::AuthUser>,
+    session: Option<auth::SessionRef>,
+) -> Response {
+    let user = auth.map(|auth::AuthUser(user)| user.uuid);
+    let session = session.and_then(|auth::SessionRef(session)| session);
+    ws.on_upgrade(move |socket| handle_ws(socket, state, user, session))
 }
 
 /// Snapshot complet de la liste des modèles, sérialisé en JSON.
@@ -856,11 +952,32 @@ fn snapshot(state: &AppState) -> String {
     .unwrap_or_else(|_| "{}".to_string())
 }
 
+/// `true` si ce socket doit **survivre** à un signal de coupure.
+///
+/// Un signal porte l'uuid d'un compte : tous ses WebSocket l'entendent, mais
+/// seul celui dont la session a réellement disparu doit tomber. Sans session
+/// (jeton d'API, ou installation sans comptes), on ne peut rien vérifier — et
+/// ne rien couper laisserait passer précisément ce qu'on veut empêcher.
+pub(crate) fn socket_survives_kick(state: &AppState, session: Option<&str>) -> bool {
+    match session {
+        Some(session) => state.auth.session_alive(session),
+        None => false,
+    }
+}
+
 /// Boucle d'une connexion WS : snapshot initial, puis diffusion en continu.
 ///
 /// Si le client est en retard (`Lagged`), on renvoie un snapshot complet plutôt
 /// que des MAJ partielles perdues. Fermeture / erreur → on sort de la boucle.
-async fn handle_ws(socket: WebSocket, state: AppState) {
+///
+/// `user` / `session` sont ceux qui ont été résolus par `require_auth` : ils
+/// permettent de tomber quand le compte est coupé (voir [`AppState::kick_user`]).
+async fn handle_ws(
+    socket: WebSocket,
+    state: AppState,
+    user: Option<String>,
+    session: Option<String>,
+) {
     let (mut sink, mut stream) = socket.split();
 
     if sink.send(Message::text(snapshot(&state))).await.is_err() {
@@ -868,6 +985,7 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     }
 
     let mut rx = state.ws.subscribe();
+    let mut kick = state.kick.subscribe();
 
     loop {
         tokio::select! {
@@ -892,6 +1010,25 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                     break;
                 }
             }
+            // Coupure d'un compte (désactivation, suppression, déconnexion,
+            // session révoquée, refus du fournisseur d'identité).
+            coupe = kick.recv() => match coupe {
+                Ok(uuid) => {
+                    let moi = user.as_deref() == Some(uuid.as_str());
+                    if moi && !socket_survives_kick(&state, session.as_deref()) {
+                        // Fermeture **propre** : le navigateur voit un code de
+                        // fermeture normal (et non une connexion coupée net), ce
+                        // qui lui permet de décider de se reconnecter ou non.
+                        let _ = sink.send(Message::Close(None)).await;
+                        break;
+                    }
+                }
+                // En retard sur le canal : un signal a pu être manqué, et on ne
+                // sait pas lequel. Fermer est le sens sûr — un client qui se
+                // reconnecte ne perd rien.
+                Err(broadcast::error::RecvError::Lagged(_)) => break,
+                Err(_) => {}
+            },
         }
     }
 }
@@ -975,6 +1112,12 @@ async fn get_file(
 }
 
 /// Construit un chemin sous `root`, en rejetant toute traversée.
+///
+/// Deux contrôles : **syntaxique** (pas d'absolu, pas de `..`, pas de préfixe
+/// d'emplacement Windows) puis **réel** — le chemin existant est canonicalisé et
+/// doit rester sous la racine canonicalisée. Le second attrape ce que le premier
+/// ne peut pas voir : un lien symbolique posé dans le catalogue (`ln -s /etc
+/// /models/etc`) traverse les deux `..` sans en contenir.
 fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
     let rel = Path::new(rel);
     if rel.is_absolute() {
@@ -989,7 +1132,27 @@ fn safe_join(root: &Path, rel: &str) -> Option<PathBuf> {
     }) {
         return None;
     }
-    Some(root.join(rel))
+    let joined = root.join(rel);
+    let racine = root.canonicalize().ok()?;
+
+    // On remonte jusqu'au premier composant qui **existe** : la destination
+    // peut ne pas encore exister (c'est le cas d'un envoi), et un chemin qui
+    // n'existe pas ne peut pas être un lien.
+    let mut courant = joined.as_path();
+    loop {
+        if let Ok(reel) = courant.canonicalize() {
+            return reel.starts_with(&racine).then_some(joined);
+        }
+        if courant == root {
+            // La racine elle-même n'a pas pu être canonicalisée : elle a été
+            // vérifiée juste au-dessus, on s'arrête là.
+            return Some(joined);
+        }
+        courant = courant.parent()?;
+        if !courant.starts_with(root) {
+            return None;
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -3832,7 +3995,7 @@ mod tests {
                 .unwrap();
             let token = auth.start_session(&user.uuid, &HeaderMap::new()).unwrap();
             *session.lock().unwrap() = auth
-                .session_cookie(&token)
+                .session_cookie(&token, &HeaderMap::new())
                 .split(';')
                 .next()
                 .unwrap()
@@ -4383,6 +4546,272 @@ mod tests {
                 .status(),
             StatusCode::NOT_FOUND
         );
+    }
+
+    /// Une session se révoque **une par une**, et seulement la sienne.
+    ///
+    /// C'est la réponse à « je me suis connecté sur un poste partagé » : couper
+    /// cette session-là ne touche ni les autres appareils du compte, ni ses
+    /// jetons d'API.
+    #[tokio::test]
+    async fn les_sessions_du_compte_se_listent_et_se_revoquent_une_par_une() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let portable = connecte(&app, "remi", "motdepasse").await;
+        let bureau = connecte(&app, "remi", "motdepasse").await;
+
+        let v = body_json(get_with(&app, "/sessions", Some(&portable)).await).await;
+        let sessions = v["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        // La session qui demande est désignée : c'est ce que l'interface affiche
+        // (« cet appareil »), et ce qui évite de se couper soi-même par erreur.
+        assert_eq!(sessions.iter().filter(|s| s["current"] == true).count(), 1);
+        assert!(sessions.iter().all(|s| s["sso"] == false));
+        // Ni jeton ni empreinte ne sortent d'ici : « Mon compte » n'en a pas
+        // besoin, et une empreinte vaut un mot de passe.
+        assert!(!v.to_string().contains("token_hash"));
+
+        let cible = sessions.iter().find(|s| s["current"] == false).unwrap()["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // La session de l'autre appareil tombe…
+        assert_eq!(
+            delete_with(&app, &format!("/sessions/{cible}"), Some(&portable))
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            get_with(&app, "/models", Some(&bureau)).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // …et celle qui a demandé la révocation reste ouverte.
+        assert_eq!(
+            get_with(&app, "/models", Some(&portable)).await.status(),
+            StatusCode::OK
+        );
+        // Une session inconnue n'est pas distinguée d'une session à quelqu'un
+        // d'autre : même réponse, et rien n'a été supprimé.
+        assert_eq!(
+            delete_with(
+                &app,
+                "/sessions/0199e3d0-0000-7000-8000-0000000000ff",
+                Some(&portable)
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// Un administrateur ne voit **pas** les sessions des autres, et ne peut pas
+    /// les fermer : il a la désactivation de compte pour ça.
+    #[tokio::test]
+    async fn les_sessions_d_un_autre_compte_sont_invisibles() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "bob", vec![lecteur]).await;
+        let bob = connecte(&app, "bob", "motdepasse").await;
+
+        let v = body_json(get_with(&app, "/sessions", Some(&bob)).await).await;
+        let sienne = v["sessions"][0]["uuid"].as_str().unwrap().to_string();
+
+        let vu = body_json(get_with(&app, "/sessions", Some(&admin)).await).await;
+        assert_eq!(vu["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            delete_with(&app, &format!("/sessions/{sienne}"), Some(&admin))
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        // La session de bob est intacte.
+        assert_eq!(
+            get_with(&app, "/models", Some(&bob)).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Les en-têtes de sécurité sont posés **partout**, et `Secure` suit le
+    /// transport réel (celui que le relais annonce), pas seulement une variable.
+    #[tokio::test]
+    async fn les_reponses_portent_les_en_tetes_de_securite() {
+        let (app, _dir) = app_avec_comptes(|_| {});
+
+        let res = get_with(&app, "/auth/me", None).await;
+        let entetes = res.headers();
+        assert_eq!(entetes.get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(entetes.get("x-frame-options").unwrap(), "DENY");
+        assert_eq!(entetes.get("referrer-policy").unwrap(), "no-referrer");
+        assert!(
+            entetes
+                .get("content-security-policy")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("frame-ancestors 'none'")
+        );
+        // Pas de HSTS en HTTP : l'annonce n'aurait aucun effet, et sur un
+        // déploiement local elle forcerait le navigateur à ne plus jamais
+        // revenir en clair sur cette adresse.
+        assert!(entetes.get("strict-transport-security").is_none());
+
+        // …mais HSTS dès que la requête arrive en HTTPS.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/me")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.headers().get("strict-transport-security").is_some());
+
+        // Et le cookie de connexion aussi : c'est lui que le navigateur
+        // transmet, donc celui qui compte.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::from(
+                        serde_json::json!({ "login": "remi", "password": "motdepasse" })
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(cookie.contains("Secure"), "cookie : {cookie}");
+        assert!(cookie.contains("HttpOnly"), "cookie : {cookie}");
+        assert!(cookie.contains("SameSite=Lax"), "cookie : {cookie}");
+    }
+
+    /// Couper un compte coupe ses WebSocket **tout de suite**.
+    ///
+    /// Un onglet ouvert ne refait aucune requête : c'est exactement ce que le
+    /// HTTP ne pouvait pas rattraper, et pourquoi la désactivation laissait le
+    /// direct (catalogue, éditeur de note) ouvert jusqu'au rechargement.
+    #[tokio::test]
+    async fn desactiver_un_compte_coupe_ses_websocket() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let (app, _dir) = app_avec_comptes(|_| {});
+        let admin = connecte(&app, "remi", "motdepasse").await;
+        let lecteur = role_uuid(&app, &admin, "lecteur").await;
+        cree_compte(&app, &admin, "bob", vec![lecteur]).await;
+        let bob = connecte(&app, "bob", "motdepasse").await;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn({
+            let app = app.clone();
+            async move {
+                axum::serve(listener, app).await.unwrap();
+            }
+        });
+
+        // Le WebSocket du compte, ouvert avec **son cookie** — c'est ce que le
+        // relais Nitro transmet au nom du navigateur.
+        let mut requete = format!("ws://{addr}/ws").into_client_request().unwrap();
+        requete.headers_mut().insert(
+            tokio_tungstenite::tungstenite::http::header::COOKIE,
+            bob.parse().unwrap(),
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(requete).await.unwrap();
+        assert!(
+            socket.next().await.unwrap().unwrap().is_text(),
+            "snapshot initial"
+        );
+
+        // L'administrateur désactive le compte.
+        let uuid = body_json(get_with(&app, "/auth/me", Some(&bob)).await).await["user"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/users/{uuid}"))
+                    .header("content-type", "application/json")
+                    .header("cookie", &admin)
+                    .body(Body::from(
+                        serde_json::json!({ "disabled": true }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // La connexion tombe d'elle-même, sans attendre un rechargement de page :
+        // soit le serveur a fermé (trame `Close`), soit le flux s'est terminé.
+        let issue = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match socket.next().await {
+                    Some(Ok(message)) if message.is_text() || message.is_binary() => continue,
+                    autre => return autre,
+                }
+            }
+        })
+        .await
+        .expect("le WebSocket devait être coupé à la désactivation");
+        assert!(
+            issue.is_none()
+                || matches!(
+                    issue,
+                    Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)))
+                ),
+            "attendu : fin de flux ou trame de fermeture, reçu {issue:?}"
+        );
+    }
+
+    /// `safe_join` refuse aussi ce qui passe **par** un lien symbolique.
+    ///
+    /// Le contrôle syntaxique (pas de `..`, pas d'absolu) ne voit pas un lien
+    /// posé dans le catalogue : `ln -s /etc /models/etc` traverse alors les `..`
+    /// sans en contenir.
+    #[cfg(unix)]
+    #[test]
+    fn un_lien_symbolique_ne_sort_pas_du_catalogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("models");
+        std::fs::create_dir_all(&root).unwrap();
+        let dehors = dir.path().join("dehors");
+        std::fs::create_dir_all(&dehors).unwrap();
+        std::fs::write(dehors.join("secret.txt"), "secret").unwrap();
+
+        std::os::unix::fs::symlink(&dehors, root.join("lien")).unwrap();
+        std::os::unix::fs::symlink(dehors.join("secret.txt"), root.join("fichier-lien")).unwrap();
+
+        // Le catalogue normal passe, y compris un sous-dossier qui n'existe pas
+        // encore (c'est le cas d'un envoi).
+        assert!(safe_join(&root, "modele.stl").is_some());
+        assert!(safe_join(&root, "sous/dossier.stl").is_some());
+        // Les liens, non : ni celui qui mène à un fichier, ni celui qui mène à
+        // un dossier.
+        assert!(safe_join(&root, "fichier-lien").is_none());
+        assert!(safe_join(&root, "lien/secret.txt").is_none());
+        // Les refus syntaxiques sont inchangés.
+        assert!(safe_join(&root, "../dehors/secret.txt").is_none());
+        assert!(safe_join(&root, "/etc/passwd").is_none());
     }
 
     /// Désactiver un compte arrête aussi ses agents, sans qu'on ait à retrouver

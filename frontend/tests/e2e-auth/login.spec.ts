@@ -123,7 +123,10 @@ test('l’administration liste les comptes et le journal garde la connexion', as
   await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
 
   // Les puces de famille filtrent le journal ; le compte se cherche au clavier.
-  await expect(page.locator('.audit .types__item')).toHaveCount(5)
+  // Six familles : les cinq du métier, plus « Journal » (consulter le journal
+  // est un acte, il se trace comme les autres).
+  await expect(page.locator('.audit .types__item')).toHaveCount(6)
+  await expect(page.locator('.audit .types__item', { hasText: 'Journal' })).toBeVisible()
   await page.locator('.audit .types__item', { hasText: 'Sessions' }).click()
   await expect(page.locator('.audit__table tbody tr').first()).toContainText('Connexion')
   // L'en-tête du tableau est collant (`sticky` de Nuxt UI) : la page se lit en
@@ -180,6 +183,34 @@ test('les comptes ont deux onglets, et un rôle s’y crée', async ({ page }) =
   )
 })
 
+/**
+ * Les sessions du navigateur se voient et se ferment **une par une**.
+ *
+ * C'est le geste à faire depuis un poste partagé : fermer la sienne est une
+ * déconnexion (la seule qui envoie vers `/login`), les autres appareils ne sont
+ * pas touchés — c'est ce que la liste montre, « cet appareil » compris.
+ */
+test('« mon compte » liste les sessions et sait en fermer une', async ({ page }) => {
+  await seConnecter(page)
+
+  await page.goto('/account/sessions')
+  await expect(page.locator('h1')).toHaveText('Mon compte')
+  // Les tests précédents de la campagne se sont connectés eux aussi : le compte
+  // peut donc avoir plusieurs sessions. Ce qui compte, c'est qu'**une seule**
+  // soit désignée comme « cet appareil » — l'onglet qui pose la question.
+  const lignes = page.locator('.admin__item')
+  await expect(lignes.filter({ hasText: 'cet appareil' })).toHaveCount(1)
+  expect(await lignes.count()).toBeGreaterThanOrEqual(1)
+
+  // Fermeture en deux temps : le premier clic demande confirmation.
+  const mienne = lignes.filter({ hasText: 'cet appareil' })
+  await mienne.locator('button', { hasText: 'Fermer' }).first().click()
+  await mienne.locator('button', { hasText: 'Fermer' }).last().click()
+
+  // Sa propre session fermée, l'onglet n'a plus rien : retour à la connexion.
+  await expect(page).toHaveURL((url) => url.pathname === '/login', { timeout: 30_000 })
+})
+
 test('la barre du catalogue ne suit pas sur « mon compte »', async ({ page }) => {
   await seConnecter(page)
 
@@ -190,7 +221,7 @@ test('la barre du catalogue ne suit pas sur « mon compte »', async ({ page }) 
   // « Mon compte » ne filtre pas des modèles : ni recherche, ni tri, ni envoi de
   // fichiers, ni puces de formats. Sans garde, sa route héritait de la barre
   // entière — branchée sur le catalogue, donc sans effet ici.
-  for (const onglet of ['/account', '/account/api', '/account/mcp']) {
+  for (const onglet of ['/account', '/account/sessions', '/account/api', '/account/mcp']) {
     await page.goto(onglet)
     await expect(page.locator('.panel-tabs')).toBeVisible()
     await expect(page.locator('.topbar')).toHaveCount(0)
@@ -209,7 +240,7 @@ test('les onglets de « mon compte » occupent toute la largeur', async ({ page 
   // n'ont pas le même contenu (identité et mot de passe d'un côté, la liste des
   // jetons de l'autre), et un panneau qui suit son contenu — ou qui se centre —
   // fait sauter la page au changement d'onglet.
-  for (const onglet of ['/account', '/account/api', '/account/mcp']) {
+  for (const onglet of ['/account', '/account/sessions', '/account/api', '/account/mcp']) {
     await page.goto(onglet)
     await expect(page.locator('[role="tabpanel"]')).toBeVisible()
 
