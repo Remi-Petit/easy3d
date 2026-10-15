@@ -25,7 +25,7 @@ rmcp = { version = "3.4.0", features = ["transport-streamable-http-server"] }
 schemars = "1.2.2"
 # Client HTTP des fournisseurs de modèle : TLS en Rust (pas d'OpenSSL dans
 # l'image), JSON intégré.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-tls"] }
 argon2 = "0.6.0"
 uuid = { version = "1.26.1", features = ["v4", "v7"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
