@@ -32,7 +32,9 @@
   },
   "language": {
     "label": "Langue",
-    "choose": "Choisir la langue"
+    "choose": "Choisir la langue",
+    "search": "Rechercher une langue",
+    "none": "Aucune langue ne correspond"
   },
   "auth": {
     "title": "Connexion",

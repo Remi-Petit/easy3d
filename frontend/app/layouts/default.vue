@@ -12,7 +12,7 @@ import { PERM } from '~/utils/permissions'
 const route = useRoute()
 const router = useRouter()
 const header = usePageHeaderState()
-const { t, locale, locales, setLocale } = useI18n()
+const { t } = useI18n()
 
 /**
  * Version du projet, injectée par `nuxt.config.ts` depuis `package.json` :
@@ -277,22 +277,6 @@ const navItems = computed<NavigationMenuItem[]>(() => {
   return items
 })
 
-/** Langues du sélecteur : nom affiché + code (`locales` peut être mixte). */
-const languageItems = computed(() =>
-  locales.value.map((l) =>
-    typeof l === 'string' ? { code: l, name: l } : { code: l.code, name: l.name ?? l.code },
-  ),
-)
-
-/** Le changement passe par `setLocale` : lui seul écrit le cookie relu au SSR. */
-function onLanguageChange(event: Event) {
-  // Les `<option>` sont construites à partir de `locales` : la valeur est donc
-  // toujours un code connu. Le cast ne fait que rétablir ce que le DOM efface
-  // (la valeur d'un `<select>` est un `string` quelconque), et il est pris sur
-  // `setLocale` lui-même pour suivre la liste de langues du i18n.
-  setLocale((event.target as HTMLSelectElement).value as Parameters<typeof setLocale>[0])
-}
-
 /**
  * Habillage de la navigation : entrées bien détachées (pastille arrondie sur
  * l'entrée active) et intitulé de section en petites capitales.
@@ -338,25 +322,15 @@ const navUi = {
            libellé blanc sur pastille grise pour l'entrée active. -->
       <UNavigationMenu :items="navItems" orientation="vertical" color="neutral" :ui="navUi" />
 
-      <!-- Pied de sidebar : le sélecteur de langue, puis le compte connecté —
+      <!-- Pied de sidebar : le choix de la langue, puis le compte connecté —
            c'est l'action qu'on vient y chercher — et **tout en bas** l'état du
            backend avec la version, qui ferment la colonne. -->
       <template #footer>
         <div class="foot">
 
-          <label class="lang">
-            <span class="lang__label">{{ $t('language.label') }}</span>
-            <select
-              class="lang__select"
-              :value="locale"
-              :aria-label="$t('language.choose')"
-              @change="onLanguageChange"
-            >
-              <option v-for="item in languageItems" :key="item.code" :value="item.code">
-                {{ item.name }}
-              </option>
-            </select>
-          </label>
+          <!-- La langue se choisit dans un popup, avec sa recherche (voir
+               `LanguagePicker.vue`) : le bouton ne fait que l'ouvrir. -->
+          <LanguagePicker />
 
           <!-- Compte connecté (`EASY3D_AUTH`), sous la langue. Absent d'une
                installation sans comptes : le pied de sidebar est alors celui

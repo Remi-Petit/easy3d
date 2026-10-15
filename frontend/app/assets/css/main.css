@@ -237,8 +237,8 @@ body {
   width: 100%;
 }
 
-/* Sélecteur de langue : le `<select>` natif est remis à plat pour s'aligner
-   sur la pastille d'état. */
+/* Ligne de langue : l'intitulé reste **à gauche** (même colonne que l'état du
+   backend et le compte), le contrôle **à droite**. */
 .lang {
   display: flex;
   align-items: center;
@@ -251,8 +251,14 @@ body {
   color: var(--muted);
 }
 
-.lang__select {
-  appearance: none;
+/* Sélecteur de langue : un bouton qui ouvre le popup de choix (voir
+   `LanguagePicker.vue`). Il reprend la pastille du `<select>` qu'il remplace,
+   donc la ligne garde sa hauteur et le pied ne bouge pas. */
+.lang__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 62%;
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -264,13 +270,96 @@ body {
   transition: border-color 0.15s;
 }
 
-.lang__select:hover {
+.lang__btn:hover {
   border-color: var(--accent);
 }
 
-.lang__select:focus-visible {
+.lang__btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* C'est le nom qui cède, jamais le chevron : « Español » est le plus long des
+   quatre, et une langue cliente le sera davantage. */
+.lang__current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lang__caret {
+  flex: none;
+  color: var(--muted);
+}
+
+/* ── Popup de choix ──────────────────────────────────────────────────────
+   Le champ et la liste sont des éléments simples, stylés ici comme le reste de
+   l'application : `UModal` ne fournit que la fenêtre. */
+.lang__search {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.lang__search::placeholder {
+  color: var(--muted);
+}
+
+.lang__search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.lang__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lang__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* L'entrée sous le curseur **et** celle des flèches se ressemblent : le clavier
+   et la souris désignent la même chose, sans deux vocabulaires visuels. */
+.lang__item--over {
+  background: var(--surface-2);
+}
+
+.lang__item--on {
+  color: var(--accent);
+}
+
+.lang__check {
+  flex: none;
+  color: var(--accent);
+}
+
+.lang__empty {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
 }
 
 /* État du backend : le voyant et son libellé, **sans cadre** — c'était une

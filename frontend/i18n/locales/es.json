@@ -32,7 +32,9 @@
   },
   "language": {
     "label": "Idioma",
-    "choose": "Elegir idioma"
+    "choose": "Elegir idioma",
+    "search": "Buscar un idioma",
+    "none": "Ningún idioma coincide"
   },
   "auth": {
     "title": "Iniciar sesión",

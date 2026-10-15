@@ -32,7 +32,9 @@
   },
   "language": {
     "label": "Sprache",
-    "choose": "Sprache wählen"
+    "choose": "Sprache wählen",
+    "search": "Sprache suchen",
+    "none": "Keine Sprache passt"
   },
   "auth": {
     "title": "Anmeldung",

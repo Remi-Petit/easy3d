@@ -32,7 +32,9 @@
   },
   "language": {
     "label": "Language",
-    "choose": "Choose language"
+    "choose": "Choose language",
+    "search": "Search a language",
+    "none": "No language matches"
   },
   "auth": {
     "title": "Sign in",
