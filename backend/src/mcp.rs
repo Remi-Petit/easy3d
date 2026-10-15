@@ -23,7 +23,7 @@ use crate::auth::journal;
 use crate::auth::permissions;
 use crate::collab;
 use crate::config::{Config, DisplayMode};
-use crate::formats::{self, Viewer};
+use crate::formats::{self, PrintInfo, Viewer};
 use crate::notes;
 use crate::scanner::{self, FileInfo};
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -467,6 +467,16 @@ struct ModelDetail {
     /// si le fichier n'est pas un G-code) : matière, hauteur de couche, temps
     /// d'impression, températures...
     gcode_metadata: BTreeMap<String, String>,
+    /// La fiche d'impression **normalisée** : durée, matière, poids de filament,
+    /// hauteur de couche, encombrement... C'est la même lecture que la carte de
+    /// la page du modèle, donc un agent n'a pas à réinterpréter les clés de
+    /// chaque slicer.
+    ///
+    /// Elle vaut aussi pour un **3MF de projet**, que `gcode_metadata` ignore
+    /// (il ne lit que les en-têtes de G-code) ; vide (`{}`) pour un maillage
+    /// jamais tranché, et aucun champ n'est déduit : ce que le fichier ne dit
+    /// pas reste absent.
+    print_info: PrintInfo,
 }
 
 /// Sortie des outils de note.
@@ -726,7 +736,9 @@ impl Easy3dMcp {
     #[tool(
         description = "Get the details of one catalogue entry: relative path, format and \
                        viewer, preview image, whether it has a note, size, dates, slicer \
-                       metadata (G-code) and the absolute path on disk."
+                       metadata (G-code), the normalised print sheet (print duration, \
+                       material, filament weight, layer height, bounding box — for G-code \
+                       and sliced 3MF projects) and the absolute path on disk."
     )]
     fn get_model(
         &self,
@@ -742,21 +754,23 @@ impl Easy3dMcp {
                 ErrorData::invalid_params(format!("« {} » n'existe pas", args.rel), None)
             })?;
 
-        let metadata = std::fs::metadata(root.join(&args.rel)).ok();
+        let chemin = root.join(&args.rel);
+        let metadata = std::fs::metadata(&chemin).ok();
         let size_bytes = metadata
             .as_ref()
             .and_then(|m| m.is_file().then_some(m.len()));
 
         Ok(Json(ModelDetail {
             format_has_preview: formats::can_have_preview(&file.rel),
-            abs_path: root.join(&args.rel).display().to_string(),
+            abs_path: chemin.display().to_string(),
             has_note: file.note.is_some(),
             image: file.image,
             viewer: formats::viewer_of(&file.rel),
             ext: formats::ext_of(&file.rel),
             created: file.created,
             modified: file.modified,
-            gcode_metadata: formats::gcode_metadata(&file.rel, &root.join(&file.rel)),
+            gcode_metadata: formats::gcode_metadata(&file.rel, &chemin),
+            print_info: formats::print_info(&file.rel, &chemin),
             folder,
             rel: args.rel,
             size_bytes,
@@ -1667,8 +1681,10 @@ mod tests {
         assert!(detail.format_has_preview);
         assert!(!detail.has_note);
         assert!(detail.size_bytes.is_some());
-        // Un STL n'annonce pas de réglages de découpe.
+        // Un STL n'annonce pas de réglages de découpe, donc pas de fiche
+        // d'impression : la carte reste vide plutôt que d'inventer des valeurs.
         assert!(detail.gcode_metadata.is_empty());
+        assert!(detail.print_info.is_empty());
 
         // Un élément inconnu est refusé, pas inventé.
         let missing = server.get_model(Parameters(ElementArgs {
@@ -1705,6 +1721,37 @@ mod tests {
             Some("0.2")
         );
         assert!(detail.gcode_metadata["generated_by"].contains("OrcaSlicer"));
+    }
+
+    /// La même lecture que la carte de la page du modèle accompagne le détail :
+    /// le vocabulaire du slicer est déjà ramené au commun (matière, hauteur de
+    /// couche...), et rien n'est complété au-delà de ce que le fichier annonce.
+    #[test]
+    fn le_detail_d_un_gcode_expose_la_fiche_d_impression() {
+        let (_dir, server) = test_server(false);
+        let detail = server
+            .get_model(Parameters(ElementArgs {
+                rel: "DemaAuto/boitier.gcode".into(),
+            }))
+            .unwrap()
+            .0;
+
+        assert_eq!(detail.print_info.material.as_deref(), Some("PETG"));
+        assert_eq!(detail.print_info.layer_height.as_deref(), Some("0.2"));
+        assert!(detail.print_info.bytes.is_some());
+        assert!(
+            detail
+                .print_info
+                .slicer
+                .as_deref()
+                .unwrap_or_default()
+                .contains("OrcaSlicer")
+        );
+
+        // Ce que ce fichier n'annonce pas reste absent : ni durée (aucun `M73`)
+        // ni encombrement (aucun déplacement avec extrusion).
+        assert_eq!(detail.print_info.duration_seconds, None);
+        assert_eq!(detail.print_info.size_mm, None);
     }
 
     /// `find_models` va là où `list_models` ne regarde pas : notes et

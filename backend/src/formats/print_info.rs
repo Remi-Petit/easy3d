@@ -16,6 +16,7 @@
 //! traduit et que les agents peuvent décrire. Rien n'est inventé : un champ que
 //! le fichier ne porte pas reste `None`.
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -23,7 +24,7 @@ use std::collections::BTreeMap;
 ///
 /// Tous les champs sont facultatifs : un fichier jamais tranché (STL, OBJ) n'en
 /// a aucun, et aucun slicer n'annonce tout.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, JsonSchema)]
 pub struct PrintInfo {
     /// Durée d'impression estimée, en secondes.
     #[serde(skip_serializing_if = "Option::is_none")]
