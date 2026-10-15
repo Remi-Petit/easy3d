@@ -53,6 +53,8 @@
   --accent-soft: rgba(99, 102, 241, 0.16);
   --ok: #34d399;
   --err: #f87171;
+  /* État intermédiaire (repli périodique) : ni vert, ni rouge. */
+  --warn: #fbbf24;
   --radius: 14px;
   --radius-sm: 9px;
   /* Largeur de la sidebar (colonne fixe à gauche). */
@@ -203,23 +205,36 @@ body {
   text-overflow: ellipsis;
 }
 
-/* État du backend **et** version du projet sur une même ligne : la version se
-   pose à droite (`space-between`) quelle que soit la longueur du libellé d'état
-   (« temps réel », « repli polling », « hors ligne »). */
+/* État du backend **et** version du projet sur une même ligne : le libellé reste
+   **à gauche** (même colonne que « Langue » et le nom du compte), la version
+   **ferme la ligne à droite** (`space-between`). Elle arrive ainsi exactement au
+   bord du bouton de déconnexion et du sélecteur de langue — ce qui n'était pas
+   le cas tant que `.foot` restait dimensionné par son contenu (voir `.foot`).
+   `nowrap` est voulu — les libellés d'état sont plus longs que « temps réel »
+   (« repli polling », « polling fallback », « respaldo por sondeo ») : c'est le
+   libellé qui se replie dans sa case (`min-width: 0` côté `.status`), jamais la
+   version qui part à la ligne. */
 .stats {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-/* Pied de sidebar : état du backend (la version sur la même ligne), sélecteur de
-   langue, puis le compte connecté, empilés — le compte ferme la colonne. */
+/* Pied de sidebar : sélecteur de langue, compte connecté, puis l'état du backend
+   avec la version — empilés, la ligne d'état ferme la colonne.
+   `width: 100%` est indispensable : le pied vit dans la rangée flex de la
+   sidebar, où il prenait la largeur de son **contenu** — mesuré 137 px pour
+   176 disponibles (sidebar de 208 px), donc **toutes** les lignes s'arrêtaient
+   39 px avant le bord droit : sélecteur de langue, bouton de déconnexion et
+   version flottaient au milieu. Chaque ligne répartit ensuite ses deux extrémités
+   (`space-between`) : le libellé d'état reste à gauche, la version à droite. */
 .foot {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
 }
 
 /* Sélecteur de langue : le `<select>` natif est remis à plat pour s'aligner
@@ -258,24 +273,22 @@ body {
   outline-offset: 2px;
 }
 
-.pill {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 13px;
+/* État du backend : le voyant et son libellé, **sans cadre** — c'était une
+   pastille, dont le fond, le contour et le rembourrage décalaient le texte de
+   13 px par rapport aux autres lignes du pied (langue, compte). */
+.status {
   font-size: 13px;
   color: var(--muted);
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  /* La case peut se réduire : c'est le libellé qui se replie, jamais la ligne
+     qui déborde (voir `.stats`). */
+  min-width: 0;
 }
 
-.pill b {
-  color: var(--text);
-}
-
-/* Version du projet (voir `nuxt.config.ts`), à droite de la pastille d'état :
-   discrète, mais c'est le repère qu'on cherche quand on doute du build déployé. */
+/* Version du projet (voir `nuxt.config.ts`), à droite de l'état : discrète,
+   mais c'est le repère qu'on cherche quand on doute du build déployé. */
 .version {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -292,9 +305,15 @@ body {
   box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
 }
 
-.dot.err {
+.dot.offline {
   background: var(--err);
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18);
+}
+
+/* Repli périodique : le backend répond encore, mais plus en temps réel. */
+.dot.polling {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18);
 }
 
 .dot.live {
@@ -505,7 +524,7 @@ body {
   color: var(--muted);
 }
 
-/* Puces de filtre par type : même vocabulaire que les `.pill` de l'en-tête. */
+/* Puces de filtre par type, dans l'en-tête du catalogue. */
 .types {
   display: flex;
   align-items: center;

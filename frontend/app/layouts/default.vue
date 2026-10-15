@@ -192,11 +192,17 @@ const displayTitle = computed(() => {
   return `${title.value}  (${header.value.count})`
 })
 
-// "connecté" = WS live (temps réel) OU données qui remontent (polling sans erreur).
-const connected = computed(() => header.value.live || !header.value.offline)
-const statusLabel = computed(() =>
-  header.value.live ? t('status.live') : header.value.offline ? t('status.offline') : t('status.polling'),
+/**
+ * État du backend, décidé **en un seul endroit** : `live` (WebSocket),
+ * `polling` (repli périodique : ni temps réel, ni en panne) ou `offline` (plus
+ * rien ne remonte). Le libellé et le voyant du pied en dérivent tous les deux,
+ * donc ils ne peuvent pas se contredire — et le voyant dit la même chose en
+ * couleur : vert, orange, rouge.
+ */
+const backendState = computed<'live' | 'polling' | 'offline'>(() =>
+  header.value.live ? 'live' : header.value.offline ? 'offline' : 'polling',
 )
+const statusLabel = computed(() => t(`status.${backendState.value}`))
 
 /** Routes rattachées à une section dont l'URL ne porte pas le préfixe. */
 const SECTION_ROUTES: Record<string, string[]> = {
@@ -332,20 +338,11 @@ const navUi = {
            libellé blanc sur pastille grise pour l'entrée active. -->
       <UNavigationMenu :items="navItems" orientation="vertical" color="neutral" :ui="navUi" />
 
-      <!-- Pied de sidebar : état du backend, version et langue, puis le compte
-           connecté — **tout en bas**, sous le sélecteur : c'est la dernière
-           ligne de la colonne, celle qu'on vient chercher pour se déconnecter. -->
+      <!-- Pied de sidebar : le sélecteur de langue, puis le compte connecté —
+           c'est l'action qu'on vient y chercher — et **tout en bas** l'état du
+           backend avec la version, qui ferment la colonne. -->
       <template #footer>
         <div class="foot">
-
-          <!-- État du backend et version du projet sur la **même ligne** : la
-               version ferme la ligne, à droite de la colonne. -->
-          <div class="stats">
-            <span class="pill">
-              <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
-            </span>
-            <span class="version">v{{ version }}</span>
-          </div>
 
           <label class="lang">
             <span class="lang__label">{{ $t('language.label') }}</span>
@@ -375,6 +372,17 @@ const navUi = {
             >
               <UIcon name="i-lucide-log-out" />
             </button>
+          </div>
+
+          <!-- État du backend et version du projet sur la **même ligne**, sous le
+               compte : la version ferme la ligne, à droite de la colonne. Absent
+               d'une installation sans comptes, c'est le compte qui manque
+               au-dessus — l'ordre des deux autres ne bouge pas. -->
+          <div class="stats">
+            <span class="status">
+              <span class="dot" :class="backendState" /> {{ statusLabel }}
+            </span>
+            <span class="version">v{{ version }}</span>
           </div>
         </div>
       </template>
