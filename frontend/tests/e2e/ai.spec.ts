@@ -36,7 +36,8 @@ const boutonTester = (page: Page) => carteIA(page).getByRole('button', { name: '
 
 /** Carte « Recherche assistée » de l'administration. */
 async function ouvrirCarteIA(page: Page) {
-  await page.goto('/admin')
+  // La carte a son propre onglet (`/admin` ne montre que les réglages).
+  await page.goto('/admin/ai')
   // `/admin` compilée à la première visite du serveur de dev : délai large,
   // comme dans `admin.spec.ts`.
   await expect(champFournisseur(page)).toBeVisible({ timeout: 30_000 })

@@ -995,13 +995,13 @@ body {
   height: 360px;
 }
 
-/* Dans l'administration, la note se contente de moins de hauteur : elle n'est
-   qu'un aperçu au-dessus duquel on travaille, pas la page principale. */
-.admin .note .md-editor {
+/* Dans l'onglet « Notes » de l'administration, la note se contente de moins de
+   hauteur : la liste des éléments est juste au-dessus, et c'est elle qui mène. */
+.admin__notes .note .md-editor {
   height: 260px;
 }
 
-.admin .note__preview {
+.admin__notes .note__preview {
   max-height: 260px;
   overflow-y: auto;
 }

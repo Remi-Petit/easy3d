@@ -15,7 +15,8 @@ import {
 } from '~/utils/oidc'
 
 // Page d'administration : réglages de l'application (écrits dans `config.yml`
-// via `PUT /api/config`) et gestion des notes.
+// via `PUT /api/config`), recherche assistée, connexion par fournisseur
+// d'identité et gestion des notes — **un onglet par carte** (voir « Onglets »).
 //
 // Les notes passent par le **même** éditeur que les pages de détail
 // (`NotePanel`, CRDT Yjs) : on n'écrit jamais un `.md` directement, sinon on
@@ -26,11 +27,83 @@ import {
 definePageMeta({ middleware: 'admin' })
 const { data, error, live } = useModels()
 const { t } = useI18n()
+const route = useRoute()
 
 // Comptes utilisateurs : la carte du fournisseur d'identité n'a de sens que
 // s'ils existent (`EASY3D_AUTH`) — l'état est déjà connu, la garde globale
 // `auth.global.ts` l'a interrogé avant d'afficher la page.
 const { enabled: authEnabled } = useAuth()
+
+// ── Onglets ───────────────────────────────────────────────────────────────
+/**
+ * Quatre vues, quatre URL : `/admin` (réglages), `/admin/ai` (recherche
+ * assistée), `/admin/sso` (fournisseur d'identité) et `/admin/notes` (notes).
+ *
+ * Les cartes étaient empilées sur deux colonnes ; chacune a maintenant la
+ * largeur de la page, ce que réclamaient les champs de formulaire comme
+ * l'éditeur de note. Même système que « Mon compte » (voir `PanelTabs`) :
+ * l'onglet **découle de l'URL** — un lien vers `/admin/notes` ouvre directement
+ * la bonne vue, le bouton « retour » refait le trajet inverse — et le contenu
+ * des onglets masqués n'est pas monté.
+ */
+type Onglet = 'settings' | 'ai' | 'sso' | 'notes'
+
+/** Onglets, dans l'ordre d'affichage — sert aussi à la navigation clavier. */
+const ONGLETS: Onglet[] = ['settings', 'ai', 'sso', 'notes']
+
+/** Segment de chaque onglet : « settings » est la racine de la page. */
+const chemins: Record<Onglet, string> = {
+  settings: '/admin',
+  ai: '/admin/ai',
+  sso: '/admin/sso',
+  notes: '/admin/notes',
+}
+
+/**
+ * Réglages, recherche assistée et notes existent toujours ; le fournisseur
+ * d'identité, non : il sert à **ouvrir une session**, et le backend ignore
+ * `EASY3D_OIDC_*` quand les comptes sont éteints (il l'annonce au démarrage).
+ * L'onglet disparaît donc avec eux, comme l'entrée « Comptes » de la barre
+ * latérale.
+ */
+const ongletsDisponibles = computed<Onglet[]>(() =>
+  ONGLETS.filter((nom) => nom !== 'sso' || authEnabled.value),
+)
+
+/** L'onglet porté par l'URL, ou « settings » si le segment manque ou est refusé. */
+const onglet = computed<Onglet>(
+  () => ongletsDisponibles.value.find((nom) => nom === route.params.tab) ?? 'settings',
+)
+
+/** Libellés des onglets : les titres des cartes, repris tels quels. */
+const libelles: Record<Onglet, string> = {
+  settings: 'admin.settings',
+  ai: 'ai.settings',
+  sso: 'admin.sso',
+  notes: 'admin.notes',
+}
+
+const onglets = computed(() =>
+  ongletsDisponibles.value.map((nom) => ({ id: nom, label: t(libelles[nom]) })),
+)
+
+/** Changer d'onglet, c'est changer d'URL : c'est elle qui fait foi. */
+function ouvreOnglet(id: string) {
+  const cible = ongletsDisponibles.value.find((nom) => nom === id)
+  if (cible && cible !== onglet.value) void navigateTo(chemins[cible])
+}
+
+/**
+ * Un segment inconnu (`/admin/xyz`), ou un onglet qui n'existe pas dans ce mode
+ * (`/admin/sso` quand les comptes sont éteints), n'est pas une vue : retour aux
+ * réglages, sans laisser l'adresse fautive dans l'historique.
+ */
+watchEffect(() => {
+  const segment = route.params.tab
+  if (segment !== undefined && segment !== '' && onglet.value !== segment) {
+    void navigateTo(chemins.settings, { replace: true })
+  }
+})
 
 // ── Réglages ────────────────────────────────────────────────────────────────
 // Un seul réglage exposé : le mode d'affichage. Il est écrit **dès le clic**
@@ -642,15 +715,23 @@ usePageHeader(() => ({
 
   <div v-if="!data" class="empty">{{ $t('common.loading') }}</div>
 
-  <div v-else class="admin">
+  <div v-else class="tabbed-page">
     <!--
-      Deux colonnes : les réglages puis la recherche assistée à gauche, les notes
-      à droite. L'éditeur de note se place **sous la liste**, dans la même
-      colonne : en pleine largeur sous les deux colonnes, il n'apparaîtrait
-      qu'après la plus haute des deux, donc tout en bas de la page.
+      Une carte par onglet, chacune sur toute la largeur — c'est ce que
+      réclamaient les champs de formulaire (une colonne étroite les serrait) et
+      l'éditeur de note. Même système que « Mon compte » (voir `PanelTabs`) :
+      c'est l'URL qui décide de l'onglet, et une vue masquée n'est pas montée.
     -->
-    <div class="admin__col">
-      <!-- Réglages : écrits dans config.yml, appliqués à chaud par le backend. -->
+    <PanelTabs :tabs="onglets" :active="onglet" :label="t('nav.admin')" @select="ouvreOnglet" />
+
+    <!-- Réglages : écrits dans config.yml, appliqués à chaud par le backend. -->
+    <div
+      v-if="onglet === 'settings'"
+      id="panneau-settings"
+      role="tabpanel"
+      aria-labelledby="onglet-settings"
+      class="admin__col"
+    >
       <section class="admin__card">
         <h2 class="admin__title">{{ $t('admin.settings') }}</h2>
 
@@ -734,10 +815,18 @@ usePageHeader(() => ({
           </div>
         </dl>
       </section>
+    </div>
 
-      <!-- Recherche assistée : le fournisseur de modèle et sa clé d'API. Tant
-           qu'aucun fournisseur n'est choisi, le bouton ✦ de la barre de
-           recherche reste grisé. -->
+    <!-- Recherche assistée : le fournisseur de modèle et sa clé d'API. Tant
+         qu'aucun fournisseur n'est choisi, le bouton ✦ de la barre de
+         recherche reste grisé. -->
+    <div
+      v-else-if="onglet === 'ai'"
+      id="panneau-ai"
+      role="tabpanel"
+      aria-labelledby="onglet-ai"
+      class="admin__col"
+    >
       <section class="admin__card">
         <h2 class="admin__title">{{ $t('ai.settings') }}</h2>
 
@@ -878,19 +967,28 @@ usePageHeader(() => ({
           </span>
         </div>
       </section>
+    </div>
 
-      <!--
-        Fournisseur d'identité (SSO) : une **seconde** façon de se connecter,
-        qui ne remplace pas le mot de passe — un compte local continue de
-        fonctionner. Les réglages passent par `config.yml`… sauf ceux que
-        l'environnement impose (`EASY3D_OIDC_*`), qui sont alors grisés.
+    <!--
+      Fournisseur d'identité (SSO) : une **seconde** façon de se connecter,
+      qui ne remplace pas le mot de passe — un compte local continue de
+      fonctionner. Les réglages passent par `config.yml`… sauf ceux que
+      l'environnement impose (`EASY3D_OIDC_*`), qui sont alors grisés.
 
-        La carte disparaît sans comptes (`EASY3D_AUTH`) : un fournisseur
-        d'identité sert à **ouvrir une session**, et le backend ignore alors
-        `EASY3D_OIDC_*` (il l'annonce au démarrage). La laisser reviendrait à
-        proposer de régler ce qui ne sera pas lu.
-      -->
-      <section v-if="authEnabled" class="admin__card">
+      L'onglet **n'existe pas** sans comptes (`EASY3D_AUTH`) : un fournisseur
+      d'identité sert à ouvrir une session, et le backend ignore alors
+      `EASY3D_OIDC_*` (il l'annonce au démarrage). Le proposer reviendrait à
+      laisser régler ce qui ne sera pas lu — et l'adresse `/admin/sso` revient
+      aux réglages (voir `ongletsDisponibles`).
+    -->
+    <div
+      v-else-if="onglet === 'sso'"
+      id="panneau-sso"
+      role="tabpanel"
+      aria-labelledby="onglet-sso"
+      class="admin__col"
+    >
+      <section class="admin__card">
         <h2 class="admin__title">{{ $t('admin.sso') }}</h2>
 
         <div class="admin__field">
@@ -1047,8 +1145,14 @@ usePageHeader(() => ({
       </section>
     </div>
 
-    <div class="admin__col">
-      <!-- Notes : liste des éléments, avec accès à l'éditeur collaboratif. -->
+    <!-- Notes : la liste des éléments, puis l'éditeur de la note choisie. -->
+    <div
+      v-else
+      id="panneau-notes"
+      role="tabpanel"
+      aria-labelledby="onglet-notes"
+      class="admin__col admin__notes"
+    >
       <section class="admin__card">
         <h2 class="admin__title">
           {{ $t('admin.notes') }} <span class="admin__count">{{ noteCount }}</span>
@@ -1079,7 +1183,7 @@ usePageHeader(() => ({
       </section>
 
       <!-- Édition de la note sélectionnée (temps réel, plusieurs personnes OK).
-           Elle reste dans la colonne des notes : c'est là qu'on vient de cliquer. -->
+           Elle est juste **sous la liste** : c'est là qu'on vient de cliquer. -->
       <section v-if="selected" ref="editeurNote" class="admin__card">
         <h2 class="admin__title">{{ selected }}</h2>
         <NotePanel :key="selected" :rel="selected" :note="selectedNote" />
