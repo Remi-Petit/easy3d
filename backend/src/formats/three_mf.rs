@@ -8,6 +8,8 @@
 use super::Format;
 use super::Viewer;
 use super::mesh::{self, Mesh};
+use super::print_info::{self, PrintInfo};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -43,6 +45,12 @@ impl Format for ThreeMf {
         try_extract_thumbnail(path, out)
             // Le 3MF est Z-up (comme le STL) : rotation de rattrapage en Y-up.
             .or_else(|| load_mesh(path).and_then(|m| mesh::write(&m, out, true)))
+    }
+
+    fn print_info(&self, _model_rel: &str, path: &Path) -> PrintInfo {
+        let mut info = PrintInfo::from_metadata(&metadata_of(path));
+        info.bytes = fs::metadata(path).ok().map(|m| m.len());
+        info
     }
 }
 
@@ -161,4 +169,157 @@ fn load_mesh(path: &Path) -> Option<Mesh> {
     }
 
     if mesh.is_empty() { None } else { Some(mesh) }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Profil du slicer
+// ─────────────────────────────────────────────────────────────
+
+/// Profil de slicer embarqué dans un 3MF de **projet**.
+///
+/// Deux familles, deux écritures :
+///
+/// - **PrusaSlicer / SuperSlicer** : `Metadata/Slic3r_PE.config`, les mêmes
+///   lignes `; clé = valeur` qu'en pied de G-code ;
+/// - **Bambu Studio / OrcaSlicer** : `Metadata/slice_info.config`, un XML qui
+///   annonce la durée (`prediction`, en **secondes**) et le poids (`weight`, en
+///   grammes), et nomme la matière dans `<filament type="PLA">`.
+///
+/// Un 3MF exporté sans tranchage (« modèle seul ») n'a ni l'un ni l'autre : le
+/// résultat est alors vide, et c'est une réponse — pas une panne.
+fn metadata_of(path: &Path) -> BTreeMap<String, String> {
+    let mut meta = BTreeMap::new();
+    let Ok(file) = fs::File::open(path) else {
+        return meta;
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return meta;
+    };
+
+    for index in 0..archive.len() {
+        let name = archive
+            .name_for_index(index)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !name.starts_with("metadata/") || !name.ends_with(".config") {
+            continue;
+        }
+        let mut text = String::new();
+        let Ok(mut entry) = archive.by_index(index) else {
+            continue;
+        };
+        if entry.read_to_string(&mut text).is_err() {
+            continue;
+        }
+        drop(entry);
+
+        // Les deux lectures coexistent : un fichier PrusaSlicer n'a pas de
+        // balises `<metadata>`, un fichier Bambu n'a pas de commentaires `;`.
+        // Le filtre des clés connues laisse de côté les réglages fins.
+        print_info::collect_pairs(&text, true, 0, &mut meta);
+        for (cle, valeur) in xml_metadata(&text) {
+            meta.entry(cle).or_insert(valeur);
+        }
+    }
+    meta
+}
+
+/// Couples `clé → valeur` d'un XML de type `slice_info.config`, ramenés au
+/// vocabulaire de [`print_info`].
+fn xml_metadata(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+
+    for fragment in text.split("<metadata").skip(1) {
+        let (Some(cle), Some(valeur)) = (attribute(fragment, "key"), attribute(fragment, "value"))
+        else {
+            continue;
+        };
+        let mapped = match cle.as_str() {
+            "prediction" => "time",
+            "weight" => "filament_used_g",
+            _ => continue,
+        };
+        out.push((mapped.to_string(), valeur));
+    }
+
+    // `<filament id="1" type="PLA" …>` : la matière, écrite en attribut.
+    for fragment in text.split("<filament").skip(1) {
+        if let Some(matiere) = attribute(fragment, "type") {
+            out.push(("filament_type".to_string(), matiere));
+        }
+    }
+    out
+}
+
+/// Valeur d'un attribut XML (`clé="valeur"`).
+fn attribute(fragment: &str, nom: &str) -> Option<String> {
+    let debut = fragment.find(&format!("{nom}=\""))? + nom.len() + 2;
+    let fin = fragment[debut..].find('"')? + debut;
+    Some(fragment[debut..fin].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Écrit un 3MF minimal (une seule entrée) dans un fichier temporaire.
+    fn trois_mf(nom: &str, contenu: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("piece.3mf");
+        let file = fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file(nom, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(contenu.as_bytes()).unwrap();
+        zip.finish().unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn lit_le_profil_prusaslicer() {
+        let (_dir, path) = trois_mf(
+            "Metadata/Slic3r_PE.config",
+            "; avoid_crossing_perimeters = 1\n\
+             ; filament_type = PLA\n\
+             ; layer_height = 0.15\n\
+             ; printer_model = MK3S\n",
+        );
+
+        let info = THREE_MF.print_info("piece.3mf", &path);
+        assert_eq!(info.material.as_deref(), Some("PLA"));
+        assert_eq!(info.layer_height.as_deref(), Some("0.15"));
+        assert_eq!(info.printer.as_deref(), Some("MK3S"));
+        // Le réglage fin est écarté, la taille du fichier vient du disque.
+        assert!(info.bytes.is_some_and(|b| b > 0));
+    }
+
+    #[test]
+    fn lit_le_slice_info_de_bambu() {
+        let (_dir, path) = trois_mf(
+            "Metadata/slice_info.config",
+            // `r##` : le contenu porte un `"#` (la couleur `#FFFFFF`).
+            r##"<?xml version="1.0"?>
+<config>
+  <plate>
+    <metadata key="prediction" value="8100"/>
+    <metadata key="weight" value="12.34"/>
+    <filament id="1" type="PETG" color="#FFFFFF"/>
+  </plate>
+</config>"##,
+        );
+
+        let info = THREE_MF.print_info("piece.3mf", &path);
+        assert_eq!(info.duration_seconds, Some(8100));
+        assert_eq!(info.filament_grams, Some(12.34));
+        assert_eq!(info.material.as_deref(), Some("PETG"));
+    }
+
+    #[test]
+    fn un_3mf_non_tranche_n_annonce_rien() {
+        let (_dir, path) = trois_mf("3D/3dmodel.model", "<model/>");
+        let info = THREE_MF.print_info("piece.3mf", &path);
+        // La taille du fichier seule ne fait pas une information d'impression.
+        assert!(info.material.is_none() && info.duration_seconds.is_none());
+    }
 }

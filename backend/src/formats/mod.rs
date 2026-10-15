@@ -12,6 +12,10 @@
 //!
 //! Les formats maillés (STL, OBJ, 3MF) partagent le rasteriseur de [`mesh`].
 //!
+//! [`print_info`] porte le **vocabulaire commun des profils de slicer** (durée,
+//! matière, poids, hauteur de couche…) : les formats tranchés (`gcode.rs`,
+//! `three_mf.rs`) y ramènent les clés de leur slicer.
+//!
 //! # Ajouter un format
 //!
 //! 1. créer `formats/mon_format.rs` avec sa structure et son `impl Format` ;
@@ -26,11 +30,13 @@ mod gcode;
 mod image;
 mod mesh;
 mod obj;
+mod print_info;
 mod stl;
 mod three_mf;
 mod thumb_style;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
+pub use print_info::PrintInfo;
 
 /// Métadonnées de slicer d'un G-code (voir [`gcode::metadata_for`]).
 pub(crate) use gcode::metadata_for as gcode_metadata;
@@ -102,6 +108,15 @@ pub trait Format: Sync {
     /// illisible ou s'il n'embarque pas de vignette exploitable.
     fn thumbnail(&self, _path: &Path, _out: &Path) -> Option<()> {
         None
+    }
+
+    /// Ce que le slicer annonce sur ce fichier ([`PrintInfo`]).
+    ///
+    /// Par défaut : **rien** — un maillage brut (STL, OBJ) n'a jamais été
+    /// tranché. Les formats qui portent un profil de slicer (G-code, 3MF de
+    /// projet) le lisent.
+    fn print_info(&self, _model_rel: &str, _path: &Path) -> PrintInfo {
+        PrintInfo::default()
     }
 }
 
@@ -205,6 +220,13 @@ pub fn content_type(name: &str) -> &'static str {
         Some(format) => format.content_type(),
         None => image::content_type(&ext_of(name)),
     }
+}
+
+/// Informations d'impression d'un fichier, d'après son format.
+///
+/// Vide (`PrintInfo::default()`) pour un format inconnu ou jamais tranché.
+pub fn print_info(rel: &str, path: &Path) -> PrintInfo {
+    find(rel).map_or_else(PrintInfo::default, |f| f.print_info(rel, path))
 }
 
 #[cfg(test)]

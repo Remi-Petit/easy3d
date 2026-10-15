@@ -26,6 +26,8 @@
     "unknownError": "Unbekannter Fehler",
     "close": "Schließen (Esc)",
     "none": "—",
+    "yes": "Ja",
+    "no": "Nein",
     "cancel": "Abbrechen"
   },
   "language": {
@@ -184,6 +186,21 @@
     "noPreview": "Für diesen Dateityp ist keine 3D-Vorschau verfügbar.",
     "hasNote": "Diese Datei hat eine Notiz",
     "gcodeBadge": "🖨 GCODE"
+  },
+  "print": {
+    "title": "Druck",
+    "duration": "Dauer",
+    "material": "Material",
+    "weight": "Filament",
+    "layerHeight": "Schichthöhe",
+    "firstLayer": "Erste Schicht",
+    "nozzle": "Düse",
+    "size": "Größe",
+    "printer": "Drucker",
+    "fill": "Füllung",
+    "support": "Stützen",
+    "slicer": "Slicer",
+    "fileSize": "Dateigröße"
   },
   "viewer": {
     "loading": "Wird geladen…",

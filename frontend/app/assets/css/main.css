@@ -830,6 +830,15 @@ body {
   white-space: nowrap;
 }
 
+/* Ce que le slicer annonce (page d'un fichier) : les mêmes lignes que les
+   propriétés du fichier, sous un titre — les deux se lisent pareil. */
+.print__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
+
 .model-card:hover {
   border-color: var(--accent);
   transform: translateY(-2px);

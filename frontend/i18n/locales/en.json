@@ -26,6 +26,8 @@
     "unknownError": "Unknown error",
     "close": "Close (Esc)",
     "none": "—",
+    "yes": "Yes",
+    "no": "No",
     "cancel": "Cancel"
   },
   "language": {
@@ -184,6 +186,21 @@
     "noPreview": "3D preview is not available for this file type.",
     "hasNote": "This file has a note",
     "gcodeBadge": "🖨 GCODE"
+  },
+  "print": {
+    "title": "Print",
+    "duration": "Duration",
+    "material": "Material",
+    "weight": "Filament",
+    "layerHeight": "Layer height",
+    "firstLayer": "First layer",
+    "nozzle": "Nozzle",
+    "size": "Size",
+    "printer": "Printer",
+    "fill": "Infill",
+    "support": "Supports",
+    "slicer": "Slicer",
+    "fileSize": "File size"
   },
   "viewer": {
     "loading": "loading…",

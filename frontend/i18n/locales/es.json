@@ -26,6 +26,8 @@
     "unknownError": "Error desconocido",
     "close": "Cerrar (Esc)",
     "none": "—",
+    "yes": "Sí",
+    "no": "No",
     "cancel": "Cancelar"
   },
   "language": {
@@ -184,6 +186,21 @@
     "noPreview": "La vista 3D no está disponible para este tipo de archivo.",
     "hasNote": "Este archivo tiene una nota",
     "gcodeBadge": "🖨 GCODE"
+  },
+  "print": {
+    "title": "Impresión",
+    "duration": "Duración",
+    "material": "Material",
+    "weight": "Filamento",
+    "layerHeight": "Altura de capa",
+    "firstLayer": "Primera capa",
+    "nozzle": "Boquilla",
+    "size": "Tamaño",
+    "printer": "Impresora",
+    "fill": "Relleno",
+    "support": "Soportes",
+    "slicer": "Slicer",
+    "fileSize": "Tamaño del archivo"
   },
   "viewer": {
     "loading": "cargando…",

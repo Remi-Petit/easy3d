@@ -16,11 +16,12 @@
 
 use super::Format;
 use super::Viewer;
+use super::print_info::{self, PrintInfo};
 use super::{THUMB_H, THUMB_W};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -53,6 +54,22 @@ impl Format for Gcode {
 
     fn thumbnail(&self, path: &Path, out: &Path) -> Option<()> {
         try_extract_thumbnail(path, out)
+    }
+
+    fn print_info(&self, model_rel: &str, path: &Path) -> PrintInfo {
+        let mut info = PrintInfo::from_metadata(&metadata_for(model_rel, path));
+
+        // La durée n'est **pas** un commentaire chez QIDISlicer (ni chez
+        // PrusaSlicer, qui l'écrit pourtant aussi en clair dans son profil) :
+        // elle est dans les `M73` du programme.
+        if info.duration_seconds.is_none() {
+            info.duration_seconds = first_m73_minutes(path).map(|minutes| minutes * 60);
+        }
+        // L'encombrement, lui, ne s'écrit nulle part : il se mesure sur le
+        // toolpath. La taille du fichier vient du disque.
+        info.size_mm = toolpath_size(path);
+        info.bytes = fs::metadata(path).ok().map(|m| m.len());
+        info
     }
 }
 
@@ -99,21 +116,133 @@ fn read_head(path: &Path, limit: usize) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// Nombre de lignes d'en-tête examinées pour les métadonnées.
+/// Lit au plus `limit` octets à la **fin** d'un fichier.
 ///
-/// L'en-tête d'un slicer tient en quelques dizaines de lignes ; au-delà, on est
-/// dans le toolpath.
-const META_LINES: usize = 400;
+/// La première ligne est **écartée** : la coupe la tronque en son milieu, et une
+/// paire `clé = valeur` amputée n'est pas une métadonnée.
+fn read_tail(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(limit as u64)))
+        .ok()?;
+    let mut buf = Vec::new();
+    file.take(limit as u64).read_to_end(&mut buf).ok()?;
+    if let Some(fin) = buf.iter().position(|b| *b == b'\n') {
+        buf.drain(..=fin);
+    }
+    Some(buf)
+}
 
-/// Nombre maximal de métadonnées retenues, et longueurs acceptées.
+/// Durée annoncée par le **premier** `M73` du programme, en minutes.
+///
+/// Les slicers émettent `M73 P<avancement> R<minutes restantes>` tout du long :
+/// la première ligne porte donc l'estimation **totale**, les suivantes ne font
+/// que décompter. `M73 Q… S<secondes>` en est la variante « minuteur », traitée
+/// de même (arrondie à la minute).
+fn first_m73_minutes(path: &Path) -> Option<u64> {
+    let head = read_head(path, HEADER_LIMIT)?;
+    let text = String::from_utf8_lossy(&head);
+    for line in text.lines() {
+        let line = line.trim_start();
+        if !line.starts_with("M73") {
+            continue;
+        }
+        for mot in line.split_whitespace().skip(1) {
+            if let Some(minutes) = mot.strip_prefix('R').and_then(|v| v.parse::<f64>().ok()) {
+                return Some(minutes.round().max(0.0) as u64);
+            }
+            if let Some(seconds) = mot.strip_prefix('S').and_then(|v| v.parse::<f64>().ok()) {
+                return Some((seconds / 60.0).round().max(0.0) as u64);
+            }
+        }
+    }
+    None
+}
+
+/// Encombrement de l'objet imprimé, en mm : `[X, Y, Z]`.
+///
+/// Aucun slicer n'écrit cette information : elle se lit sur le toolpath. Seuls
+/// les **mouvements d'extrusion** comptent (`G0`..`G3` portant un `E` en
+/// paramètre) — un déplacement à vide part au coin du plateau ou en Z-hop et
+/// gonflerait la boîte (un `G0 Z50` de mise en chauffe donnerait 50 mm de haut
+/// pour un objet qui en fait 30).
+///
+/// La hauteur se suit **ligne à ligne** : la plupart des slicers séparent la
+/// montée en Z (`G1 Z0.4 F600`) de l'extrusion (`G1 X… Y… E…`), si bien qu'une
+/// extrusion ne porte pas toujours son propre Z. On retient donc la hauteur en
+/// cours à ce moment-là — ce qui écarte au passage la remontée de fin de
+/// programme (la tête qui monte de 30 mm après la dernière extrusion).
+fn toolpath_size(path: &Path) -> Option<[f64; 3]> {
+    let file = fs::File::open(path).ok()?;
+    let mut min = [f64::MAX; 3];
+    let mut max = [f64::MIN; 3];
+    let mut vus = [false; 3];
+    let mut hauteur: Option<f64> = None;
+
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        // Commentaire écarté : il peut raconter n'importe quoi (`; X10`).
+        let code = line.trim_start().split(';').next().unwrap_or_default();
+        if !matches!(
+            code.get(..2),
+            Some("G0") | Some("G1") | Some("G2") | Some("G3")
+        ) {
+            continue;
+        }
+
+        let mut extrusion = false;
+        let mut coordonnees = [None; 3];
+        for mot in code.split_whitespace() {
+            let Some(reste) = mot.get(1..) else {
+                continue;
+            };
+            match mot.as_bytes().first() {
+                Some(b'X') => coordonnees[0] = reste.parse::<f64>().ok(),
+                Some(b'Y') => coordonnees[1] = reste.parse::<f64>().ok(),
+                Some(b'Z') => coordonnees[2] = reste.parse::<f64>().ok(),
+                Some(b'E') => extrusion = reste.parse::<f64>().is_ok(),
+                _ => {}
+            }
+        }
+        if let Some(z) = coordonnees[2] {
+            hauteur = Some(z);
+        }
+        if !extrusion {
+            continue;
+        }
+
+        for axe in 0..3 {
+            let valeur = if axe == 2 { hauteur } else { coordonnees[axe] };
+            let Some(valeur) = valeur else {
+                continue;
+            };
+            min[axe] = min[axe].min(valeur);
+            max[axe] = max[axe].max(valeur);
+            vus[axe] = true;
+        }
+    }
+
+    // Un axe jamais vu (fichier qui n'extrude pas) : pas de dimensions du tout,
+    // plutôt qu'un `null` dans le JSON.
+    vus.iter()
+        .all(|vu| *vu)
+        .then(|| [max[0] - min[0], max[1] - min[1], max[2] - min[2]])
+}
+
+/// Nombre maximal de métadonnées retenues dans l'**en-tête**.
 const META_MAX: usize = 24;
-const META_KEY_MAX: usize = 40;
-const META_VALUE_MAX: usize = 200;
 
-/// Métadonnées lisibles annoncées par un slicer en tête de G-code.
+/// Taille de la **fin** de fichier examinée pour le profil du slicer.
+///
+/// PrusaSlicer, SuperSlicer, OrcaSlicer, Bambu Studio et QIDISlicer écrivent le
+/// profil complet (`; clé = valeur`, plusieurs centaines de lignes) **après** le
+/// toolpath — pas en tête. 256 Ko couvrent très largement ce profil (quelques
+/// dizaines de kilo-octets dans les faits).
+const FOOTER_LIMIT: usize = 256 * 1024;
+
+/// Métadonnées lisibles annoncées par un slicer.
 ///
 /// Renvoie ce qui a été trouvé (`clé → valeur`), vide si le fichier n'est pas un
-/// G-code ou s'il n'annonce rien. Deux écritures sont reconnues :
+/// G-code ou s'il n'annonce rien. Trois écritures sont reconnues :
 ///
 /// ```text
 /// ; generated by PrusaSlicer 2.7.4      → generated_by = PrusaSlicer 2.7.4
@@ -122,6 +251,11 @@ const META_VALUE_MAX: usize = 200;
 /// ;Filament used: 1.24m, 9.5g           → filament_used = 1.24m, 9.5g
 /// ```
 ///
+/// L'**en-tête** est lu sans filtre (quelques dizaines de paires : provenance,
+/// vignette, largeurs d'extrusion) ; le **pied** seulement sur les clés de
+/// [`print_info::KNOWN_KEYS`], parce qu'un profil de slicer en compte des
+/// centaines dont une poignée seulement parle.
+///
 /// Ces valeurs servent à la **recherche assistée** : « une pièce en PETG », « ce
 /// qui s'imprime en moins d'une heure » sont des questions auxquelles le nom du
 /// fichier ne répond pas.
@@ -129,23 +263,14 @@ pub fn metadata_for(model_rel: &str, path: &Path) -> BTreeMap<String, String> {
     if !handles(&super::ext_of(model_rel)) {
         return BTreeMap::new();
     }
-    let Some(head) = read_head(path, HEADER_LIMIT) else {
-        return BTreeMap::new();
-    };
 
-    let text = String::from_utf8_lossy(&head);
     let mut found = BTreeMap::new();
-
-    for line in text.lines().take(META_LINES) {
-        if found.len() >= META_MAX {
-            break;
-        }
-        let Some((key, value)) = comment_pair(line) else {
-            continue;
-        };
-        found.entry(key).or_insert(value);
+    if let Some(head) = read_head(path, HEADER_LIMIT) {
+        print_info::collect_pairs(&String::from_utf8_lossy(&head), false, META_MAX, &mut found);
     }
-
+    if let Some(footer) = read_tail(path, FOOTER_LIMIT) {
+        print_info::collect_pairs(&String::from_utf8_lossy(&footer), true, 0, &mut found);
+    }
     found
 }
 
@@ -155,65 +280,6 @@ pub fn handles(ext: &str) -> bool {
         .extensions()
         .iter()
         .any(|e| e.eq_ignore_ascii_case(ext))
-}
-
-/// Paire `clé → valeur` d'une ligne de commentaire, quelle que soit l'écriture
-/// du slicer (`; clé = valeur`, `;clé:valeur`).
-///
-/// Volontairement strict : les lignes de données base64 du bloc de vignette
-/// contiennent des `=` (padding) et ne doivent **pas** être prises pour des
-/// métadonnées — d'où l'exigence d'un ` = ` entouré d'espaces, ou d'un `:`.
-fn comment_pair(line: &str) -> Option<(String, String)> {
-    let body = line.trim_start().strip_prefix(';')?.trim();
-    if body.is_empty() {
-        return None;
-    }
-
-    // `; generated by PrusaSlicer 2.7.4 on 2026-09-19` : la seule ligne utile qui
-    // ne suive ni l'écriture `clé = valeur` ni l'écriture `clé:valeur`.
-    let (raw_key, raw_value) = match body.split_once(" = ") {
-        Some((key, value)) => (key, value),
-        None => match body.split_once(':') {
-            Some((key, value)) => (key, value),
-            None => {
-                let rest = body.strip_prefix("generated by ")?;
-                ("generated_by", rest)
-            }
-        },
-    };
-
-    let key = normalize_key(raw_key);
-    let value = raw_value.trim();
-    if key.is_empty() || value.is_empty() {
-        return None;
-    }
-    if key.chars().count() > META_KEY_MAX || value.chars().count() > META_VALUE_MAX {
-        return None;
-    }
-    // Une valeur qui ressemble à du base64 (que des caractères d'alphabet
-    // base64, très longue) n'est pas une métadonnée.
-    if value.len() > 60
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
-    {
-        return None;
-    }
-
-    Some((key, value.to_string()))
-}
-
-/// Clé de métadonnée : minuscules, séparateurs (` `, `(`, `-`…) réduits à un `_`.
-fn normalize_key(raw: &str) -> String {
-    let mut out = String::new();
-    for c in raw.trim().to_ascii_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-        } else if !out.ends_with('_') && !out.is_empty() {
-            out.push('_');
-        }
-    }
-    out.trim_end_matches('_').to_string()
 }
 
 /// Cherche la plus grande vignette embarquée dans un en-tête de G-code.
@@ -433,6 +499,36 @@ mod tests {
         );
         assert_eq!(meta.get("layer_height").map(String::as_str), Some("0.2"));
         assert_eq!(meta.get("layer_count").map(String::as_str), Some("120"));
+    }
+
+    /// L'encombrement, alors que QIDISlicer sépare la hauteur de l'extrusion.
+    ///
+    /// Ses extrusions ne portent pas de Z (`G1 X… Y… E…`) : la montée est écrite
+    /// à part (`G1 Z0.2 F600`). Et la fin de programme remonte la tête de 50 mm,
+    /// sans extruder — ce qui ne doit pas compter comme une hauteur d'objet.
+    #[test]
+    fn encombrement_malgre_la_hauteur_ecrite_a_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("piece.gcode");
+        fs::write(
+            &path,
+            "G0 Z50 F600\n\
+             G1 Z0.2 F600\n\
+             G1 X10 Y10 E1\n\
+             G1 X110 Y10 E5\n\
+             G1 Z30.2 F600\n\
+             G1 X110 Y60 E6\n\
+             G1 X10 Y60 E7\n\
+             G1 Z100 F600\n\
+             G1 X0 Y0 F9000\n",
+        )
+        .unwrap();
+
+        assert_eq!(toolpath_size(&path), Some([100.0, 50.0, 30.0]));
+        // Un fichier sans aucune extrusion n'a pas de dimensions du tout.
+        let vide = dir.path().join("vide.gcode");
+        fs::write(&vide, "G0 Z50\nG1 X10 Y10 F9000\n").unwrap();
+        assert_eq!(toolpath_size(&vide), None);
     }
 
     #[test]
