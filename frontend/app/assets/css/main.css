@@ -322,6 +322,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Vingt langues ne tiennent pas dans une fenêtre : la liste défile, et la
+     recherche fait le reste. `45vh` la garde courte même sur un écran bas. */
+  max-height: 45vh;
+  overflow-y: auto;
 }
 
 .lang__item {

@@ -4,6 +4,12 @@
     { "code": "fr", "name": "Français", "language": "fr-FR", "file": "fr.json" },
     { "code": "en", "name": "English", "language": "en-US", "file": "en.json" },
     { "code": "de", "name": "Deutsch", "language": "de-DE", "file": "de.json" },
-    { "code": "es", "name": "Español", "language": "es-ES", "file": "es.json" }
+    { "code": "es", "name": "Español", "language": "es-ES", "file": "es.json" },
+    { "code": "pt", "name": "Português", "language": "pt-PT", "file": "pt.json" },
+    { "code": "it", "name": "Italiano", "language": "it-IT", "file": "it.json" },
+    { "code": "nl", "name": "Nederlands", "language": "nl-NL", "file": "nl.json" },
+    { "code": "sv", "name": "Svenska", "language": "sv-SE", "file": "sv.json" },
+    { "code": "da", "name": "Dansk", "language": "da-DK", "file": "da.json" },
+    { "code": "nb", "name": "Norsk bokmål", "language": "nb-NO", "file": "nb.json" }
   ]
 }

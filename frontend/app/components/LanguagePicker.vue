@@ -22,11 +22,19 @@ const highlight = ref(0)
 /** Le champ, pour lui donner le focus à chaque ouverture. */
 const field = ref<HTMLInputElement | null>(null)
 
-/** Langues proposées : nom affiché + code (`locales` peut être mixte). */
+/**
+ * Langues proposées : nom affiché + code (`locales` peut être mixte).
+ *
+ * Triées par nom **dans la langue courante** : l'ordre du fichier de
+ * configuration ne dit rien à personne dès qu'il y a une vingtaine de langues,
+ * et `localeCompare` place les accents là où on les attend.
+ */
 const items = computed(() =>
-  locales.value.map((l) =>
-    typeof l === 'string' ? { code: l, name: l } : { code: l.code, name: l.name ?? l.code },
-  ),
+  locales.value
+    .map((l) =>
+      typeof l === 'string' ? { code: l, name: l } : { code: l.code, name: l.name ?? l.code },
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, locale.value)),
 )
 
 /** Comparaison « à la frappe » : sans casse ni accents (« francais » → Français). */
