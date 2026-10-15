@@ -10,6 +10,24 @@
     { "code": "nl", "name": "Nederlands", "language": "nl-NL", "file": "nl.json" },
     { "code": "sv", "name": "Svenska", "language": "sv-SE", "file": "sv.json" },
     { "code": "da", "name": "Dansk", "language": "da-DK", "file": "da.json" },
-    { "code": "nb", "name": "Norsk bokmål", "language": "nb-NO", "file": "nb.json" }
+    { "code": "nb", "name": "Norsk bokmål", "language": "nb-NO", "file": "nb.json" },
+    { "code": "ru", "name": "Русский", "language": "ru-RU", "file": "ru.json" },
+    { "code": "uk", "name": "Українська", "language": "uk-UA", "file": "uk.json" },
+    { "code": "pl", "name": "Polski", "language": "pl-PL", "file": "pl.json" },
+    { "code": "cs", "name": "Čeština", "language": "cs-CZ", "file": "cs.json" },
+    { "code": "sk", "name": "Slovenčina", "language": "sk-SK", "file": "sk.json" },
+    { "code": "hr", "name": "Hrvatski", "language": "hr-HR", "file": "hr.json" },
+    { "code": "ro", "name": "Română", "language": "ro-RO", "file": "ro.json" },
+    { "code": "zh", "name": "中文", "language": "zh-CN", "file": "zh.json" },
+    { "code": "ja", "name": "日本語", "language": "ja-JP", "file": "ja.json" },
+    { "code": "ko", "name": "한국어", "language": "ko-KR", "file": "ko.json" },
+    { "code": "id", "name": "Bahasa Indonesia", "language": "id-ID", "file": "id.json" },
+    { "code": "vi", "name": "Tiếng Việt", "language": "vi-VN", "file": "vi.json" },
+    { "code": "tr", "name": "Türkçe", "language": "tr-TR", "file": "tr.json" },
+    { "code": "el", "name": "Ελληνικά", "language": "el-GR", "file": "el.json" },
+    { "code": "fi", "name": "Suomi", "language": "fi-FI", "file": "fi.json" },
+    { "code": "hu", "name": "Magyar", "language": "hu-HU", "file": "hu.json" },
+    { "code": "ca", "name": "Català", "language": "ca-ES", "file": "ca.json" },
+    { "code": "bg", "name": "Български", "language": "bg-BG", "file": "bg.json" }
   ]
 }
