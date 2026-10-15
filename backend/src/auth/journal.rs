@@ -78,18 +78,28 @@ pub struct EventView {
 /// connecté et qui a été refusé est un acte qui mérite de laisser une trace —
 /// sans quoi le journal ne pourrait pas répondre à « qui a fouillé le
 /// journal ? ».
+///
+/// ⚠️ L'appelant est **facultatif** (`Option<AuthUser>`), et c'est le point à ne
+/// pas « simplifier » : quand les comptes sont éteints, il n'y a personne à
+/// nommer — et un `AuthUser` obligatoire rejetait la requête en 401 **avant** que
+/// [`recent`], qui rend alors une liste vide, ne puisse répondre. La page d'audit
+/// de l'interface, ouverte comme le reste, affichait donc une erreur au lieu de
+/// « rien à signaler ». C'est aussi ce que font `/users` et `/roles`, les deux
+/// autres routes de ce groupe.
 pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
-    caller: AuthUser,
+    caller: Option<AuthUser>,
     Query(query): Query<ListQuery>,
 ) -> Response {
     match recent(&state, limit_of(&query)) {
         Ok(vues) => {
+            // L'auteur de la consultation, quand il y en a un. Sans comptes,
+            // `Auth::log` ne fait de toute façon rien (pas de base à écrire).
             state.auth.log(
                 &headers,
                 "audit_read",
-                Some(&caller.0.uuid),
+                caller.as_ref().map(|AuthUser(compte)| compte.uuid.as_str()),
                 "",
                 &vues.len().to_string(),
             );

@@ -5144,6 +5144,36 @@ mod tests {
         );
     }
 
+    /// Sans comptes, le journal est **vide, pas refusé** : la page d'audit est
+    /// ouverte avec le reste de l'installation.
+    ///
+    /// Elle avait été cassée par la journalisation de la lecture elle-même
+    /// (`audit_read`) : le handler s'est mis à déclarer `caller: AuthUser` pour
+    /// savoir *qui* consulte, et cet extracteur obligatoire rejetait en 401
+    /// **avant** que `journal::recent` — qui rend une liste vide sans comptes,
+    /// par choix explicite — ne puisse répondre. La page affichait donc « lecture
+    /// impossible » au lieu de « rien à signaler ». Régression testée ici :
+    /// l'ordre des deux (extracteur puis handler) n'est pas visible à la lecture
+    /// du handler.
+    #[tokio::test]
+    async fn sans_comptes_le_journal_est_vide_et_non_refuse() {
+        let app = test_app(".");
+
+        let res = get_with(&app, "/journal", None).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await, serde_json::json!([]));
+
+        // Ses deux voisines du même groupe de droits répondent déjà ainsi.
+        assert_eq!(
+            get_with(&app, "/users", None).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            get_with(&app, "/roles", None).await.status(),
+            StatusCode::OK
+        );
+    }
+
     #[tokio::test]
     async fn le_journal_retient_les_jetons_et_les_changements_de_droits() {
         let (app, _dir) = app_avec_comptes(|_| {});

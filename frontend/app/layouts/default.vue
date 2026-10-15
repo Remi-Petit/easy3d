@@ -245,8 +245,10 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       active: isAccounts.value,
     })
   }
-  // Le journal se lit avec les comptes : c'est le même sujet (et le même droit).
-  if (can(PERM.usersRead)) {
+  // Le journal se lit avec les comptes : c'est le même sujet (et le même droit),
+  // et il est **vide par construction** sans eux (`journal::recent`) — l'entrée
+  // n'a donc rien à proposer sur une installation ouverte.
+  if (authStatus.value.enabled && can(PERM.usersRead)) {
     systeme.push({
       label: t('nav.journal'),
       icon: 'i-lucide-scroll-text',
