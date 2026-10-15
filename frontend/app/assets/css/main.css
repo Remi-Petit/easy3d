@@ -1013,17 +1013,25 @@ body {
 }
 
 /* Hauteur de l'éditeur Markdown : elle était posée en style en ligne dans
-   `NotePanel`, ce qui ne laissait aucun moyen de l'adapter au contexte. */
-.note .md-editor {
+   `NotePanel`, ce qui ne laissait aucun moyen de l'adapter au contexte.
+   ⚠️ `:not(.note__preview)` est le point important : le rendu seul (`MdPreview`)
+   porte **aussi** la classe `.md-editor` (md-editor la pose sur sa racine), et
+   héritait donc de cette hauteur — une note de 158 px de contenu s'affichait dans
+   un cadre de 360 px, avec **202 px de vide** sous elle (mesuré). L'aperçu suit
+   son contenu, l'éditeur garde une hauteur (CodeMirror remplit son cadre : une
+   zone de saisie qui grandit toute seule n'aide personne). */
+.note .md-editor:not(.note__preview) {
   height: 360px;
 }
 
 /* Dans l'onglet « Notes » de l'administration, la note se contente de moins de
    hauteur : la liste des éléments est juste au-dessus, et c'est elle qui mène. */
-.admin__notes .note .md-editor {
+.admin__notes .note .md-editor:not(.note__preview) {
   height: 260px;
 }
 
+/* Là, l'aperçu est **borné** (et défile) : il n'est qu'un appoint sous la liste,
+   contrairement à la page d'un modèle où la note est le sujet. */
 .admin__notes .note__preview {
   max-height: 260px;
   overflow-y: auto;
