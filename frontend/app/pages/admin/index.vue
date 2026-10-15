@@ -27,6 +27,11 @@ definePageMeta({ middleware: 'admin' })
 const { data, error, live } = useModels()
 const { t } = useI18n()
 
+// Comptes utilisateurs : la carte du fournisseur d'identité n'a de sens que
+// s'ils existent (`EASY3D_AUTH`) — l'état est déjà connu, la garde globale
+// `auth.global.ts` l'a interrogé avant d'afficher la page.
+const { enabled: authEnabled } = useAuth()
+
 // ── Réglages ────────────────────────────────────────────────────────────────
 // Un seul réglage exposé : le mode d'affichage. Il est écrit **dès le clic**
 // (pas de bouton « Enregistrer ») ; le backend le valide, l'écrit, l'applique et
@@ -879,8 +884,13 @@ usePageHeader(() => ({
         qui ne remplace pas le mot de passe — un compte local continue de
         fonctionner. Les réglages passent par `config.yml`… sauf ceux que
         l'environnement impose (`EASY3D_OIDC_*`), qui sont alors grisés.
+
+        La carte disparaît sans comptes (`EASY3D_AUTH`) : un fournisseur
+        d'identité sert à **ouvrir une session**, et le backend ignore alors
+        `EASY3D_OIDC_*` (il l'annonce au démarrage). La laisser reviendrait à
+        proposer de régler ce qui ne sera pas lu.
       -->
-      <section class="admin__card">
+      <section v-if="authEnabled" class="admin__card">
         <h2 class="admin__title">{{ $t('admin.sso') }}</h2>
 
         <div class="admin__field">

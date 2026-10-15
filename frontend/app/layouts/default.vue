@@ -215,6 +215,12 @@ function isActive(to: string) {
  * La section « Système » n'apparaît qu'avec les droits correspondants : les
  * gardes de `/admin` renvoient de toute façon au catalogue, mais proposer une
  * entrée qui mène à un refus est la pire façon d'annoncer un droit manquant.
+ *
+ * Les entrées de **comptes** demandent en plus que les comptes existent :
+ * `can()` répond `true` partout quand l'authentification est éteinte (c'est
+ * voulu, l'application est ouverte), donc sans cette condition la barre
+ * proposait « Comptes » sur une installation qui n'en a aucun — une page vide,
+ * et sans même de quoi la remplir.
  */
 const navItems = computed<NavigationMenuItem[]>(() => {
   const items: NavigationMenuItem[] = [
@@ -231,7 +237,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       active: isAdmin.value && !isAccounts.value && !isJournal.value,
     })
   }
-  if (can(PERM.usersRead) || can(PERM.rolesRead)) {
+  if (authStatus.value.enabled && (can(PERM.usersRead) || can(PERM.rolesRead))) {
     systeme.push({
       label: t('nav.accounts'),
       icon: 'i-lucide-users',
