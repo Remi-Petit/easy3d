@@ -338,14 +338,14 @@ const navUi = {
       <template #footer>
         <div class="foot">
 
+          <!-- État du backend et version du projet sur la **même ligne** : la
+               version ferme la ligne, à droite de la colonne. -->
           <div class="stats">
             <span class="pill">
               <span class="dot" :class="connected ? 'live' : 'err'" /> {{ statusLabel }}
             </span>
+            <span class="version">v{{ version }}</span>
           </div>
-
-          <!-- Version du projet, sous l'état du backend. -->
-          <p class="version">v{{ version }}</p>
 
           <label class="lang">
             <span class="lang__label">{{ $t('language.label') }}</span>

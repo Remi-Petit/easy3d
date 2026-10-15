@@ -203,15 +203,19 @@ body {
   text-overflow: ellipsis;
 }
 
+/* État du backend **et** version du projet sur une même ligne : la version se
+   pose à droite (`space-between`) quelle que soit la longueur du libellé d'état
+   (« temps réel », « repli polling », « hors ligne »). */
 .stats {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
 }
 
-/* Pied de sidebar : état du backend, version, sélecteur de langue, puis le
-   compte connecté, empilés — le compte ferme la colonne. */
+/* Pied de sidebar : état du backend (la version sur la même ligne), sélecteur de
+   langue, puis le compte connecté, empilés — le compte ferme la colonne. */
 .foot {
   display: flex;
   flex-direction: column;
@@ -270,8 +274,8 @@ body {
   color: var(--text);
 }
 
-/* Version du projet (voir `nuxt.config.ts`), sous la pastille d'état : discrète,
-   mais c'est le repère qu'on cherche quand on doute du build déployé. */
+/* Version du projet (voir `nuxt.config.ts`), à droite de la pastille d'état :
+   discrète, mais c'est le repère qu'on cherche quand on doute du build déployé. */
 .version {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
