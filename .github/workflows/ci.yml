@@ -67,6 +67,7 @@ jobs:
             docker:
               - 'docker/**'
               - 'docker-compose.yml'
+              - 'Dockerfile'
               - '.github/workflows/**'
 
   build_and_test:
@@ -145,6 +146,54 @@ jobs:
       # automatiques) ; l'audit, lui, n'attend pas.
       - run: cargo generate-lockfile
       - run: cargo audit
+
+  # Sécurité de l'**image** (Trivy) : ce qui part chez l'utilisateur est le
+  # conteneur, pas les lockfiles de développement. `bun.lock` remonte des avis
+  # HIGH et CRITICAL dans `vite`, `simple-git`, `undici`, `vue-i18n`… qui ne
+  # sont **jamais livrés** (l'image ne contient que `.output` et le binaire) :
+  # les scanner ferait échouer chaque PR sans action possible, alors que les
+  # corriger demande une montée de version majeure du frontend.
+  #
+  # Seuils : **CRITICAL bloque** — l'image est propre aujourd'hui (vérifié :
+  # « Clean (no security findings detected) ») ; **HIGH est affiché** sans
+  # bloquer, car les avis restants viennent des dépendances embarquées par
+  # `npm` dans l'image Node, qu'on ne corrige qu'en changeant d'image de base.
+  trivy:
+    name: Trivy (image)
+    needs: changes
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    # Le crate vit dans `backend/` : ce job, lui, travaille à la racine.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      # Même construction que la release, **sans publication**. Le cache GHA
+      # évite de recompiler Rust et Nuxt à chaque passage (`ignore-error` : un
+      # cache qu'on ne peut pas écrire, depuis un fork, ne doit pas casser le
+      # job).
+      - name: Construire l'image
+        run: |
+          docker buildx build \
+            --load \
+            --file Dockerfile \
+            . \
+            --tag easy3d:ci \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max,ignore-error=true
+      - uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          cache: true
+      - name: CRITICAL (bloquant)
+        run: trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 easy3d:ci
+      - name: HIGH (rapport, non bloquant)
+        if: always()
+        run: trivy image --severity HIGH --ignore-unfixed --exit-code 0 easy3d:ci
 
   # Tests unitaires (vitest) et build Nuxt : le build est le seul endroit qui
   # attrape une erreur de gabarit ou de SSR, invisible aux tests unitaires.
