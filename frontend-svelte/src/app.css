@@ -1,0 +1,2867 @@
+/* --- Feuille de style de l'application -------------------------------------
+   **Copie** de `frontend/app/assets/css/main.css`, à une ligne près : l'import
+   de `@nuxt/ui` disparaît (SvelteKit n'a pas cette bibliothèque), tout le reste
+   — palette, gabarits, cartes, barre d'outils — est identique au pixel. C'est
+   volontaire : le test porte sur ce que consomme le cadre applicatif, pas sur
+   une refonte visuelle. Les tokens `--ui-*` restent définis (sans effet ici)
+   pour que le fichier reste comparable à celui de l'app Nuxt. */
+@import "tailwindcss";
+
+/* --- Mapping des tokens Nuxt UI sur la palette maison ---------------------
+   L'app a son propre vocabulaire (--bg, --surface, --accent…). On le branche
+   sur les tokens de Nuxt UI pour que sidebar, navbar et menus héritent du
+   thème existant au lieu de leurs couleurs par défaut. Ces règles ne sont pas
+   dans un `@layer` : elles l'emportent donc sur celles de Tailwind. */
+:root,
+.dark {
+  --ui-bg: var(--bg);
+  --ui-bg-muted: var(--surface);
+  /* Un cran plus clair que la sidebar : c'est le fond de l'entrée de menu
+     active (`before:bg-elevated`), il doit se voir sur `bg-muted`.
+     (Avant : même valeur que la sidebar → aucune pastille visible.) */
+  --ui-bg-elevated: var(--surface-2);
+  --ui-bg-accented: #1f2b42;
+  --ui-border: var(--border);
+  --ui-border-muted: var(--border);
+  --ui-border-accented: var(--border);
+  --ui-text: var(--text);
+  --ui-text-muted: var(--muted);
+  --ui-text-dimmed: var(--muted);
+  --ui-text-highlighted: #f1f5f9;
+  --ui-primary: var(--accent);
+  --ui-secondary: var(--accent-2);
+  --ui-success: var(--ok);
+  --ui-error: var(--err);
+  --ui-radius: var(--radius-sm);
+  --ui-header-height: 56px;
+}
+
+:root {
+  /* Contrôles natifs (menus déroulants, barres de défilement) en sombre : sans
+     ça, la liste d'un `<select>` s'ouvre sur un fond blanc. */
+  color-scheme: dark;
+  --bg: #0a0e16;
+  --surface: #121826;
+  --surface-2: #182234;
+  --border: #1e293b;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-2: #22d3ee;
+  /* Troisième teinte d'accent : les cinq familles du journal d'audit en ont
+     besoin (connexions, refus, jetons, comptes, rôles), et la palette n'en
+     proposait que quatre. */
+  --accent-3: #c084fc;
+  /* Accent très dilué : fond des éléments « actifs » (puces de filtre). */
+  --accent-soft: rgba(99, 102, 241, 0.16);
+  --ok: #34d399;
+  --err: #f87171;
+  /* État intermédiaire (repli périodique) : ni vert, ni rouge. */
+  --warn: #fbbf24;
+  --radius: 14px;
+  --radius-sm: 9px;
+  /* Largeur de la sidebar (colonne fixe à gauche). */
+  --sidebar-w: 264px;
+  /* Marge intérieure de la zone de contenu. La barre du catalogue (`.topbar`),
+     le contenu de la page (`.page`) et le panneau de la recherche assistée
+     (`.ai`) la partagent : c'est ce qui les aligne sur une même verticale.
+
+     Une variable, et non la valeur écrite trois fois : les trois avaient fini
+     par diverger — 24 px de côté ici, 16 px là, plus un `padding-top` de
+     compensation dans le journal pour rattraper l'aplomb perdu. */
+  --gutter: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+}
+
+/* Liens du contenu. Volontairement pas un `a` global : la règle n'est pas dans
+   un `@layer`, elle écraserait les couleurs des composants Nuxt UI (menu,
+   navbar…), qui gèrent les leurs. */
+.page a {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+
+/* ---------- Coquille (composants Nuxt UI) ---------- */
+/* Le shell — sidebar, tiroir mobile, panneau — est fourni par Nuxt UI
+   (UDashboardGroup / Sidebar / Panel). Ci-dessous seulement ce que ses
+   composants ne couvrent pas. */
+
+/* Largeur fixe : Nuxt UI dimensionne la sidebar en % de la fenêtre, elle
+   s'élargissait donc avec l'écran. */
+.app-sidebar {
+  width: 13rem;
+}
+
+/* Zone de dépôt de fichiers (voir le layout `default`) : elle n'existe
+   visuellement qu'au survol d'un fichier glissé, pour ne rien changer au
+   reste du temps. */
+.drop {
+  position: relative;
+}
+
+.drop__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(10, 14, 22, 0.85);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.drop__hint {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.drop__where {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Nom de l'app dans la sidebar (volontairement pas un titre : le <h1> du
+   document est celui de la page, rendu par l'en-tête). */
+.brand__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Sous-titre de l'en-tête : contexte de la page, à côté de son titre. */
+.navbar__subtitle {
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Barre de recherche + filtres, collée sous l'en-tête pendant le défilement
+   (le corps du panneau Nuxt UI est le conteneur qui défile). */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  /* Marge basse à zéro : l'écart entre la barre et le contenu est celui du haut
+     de `.page`, qui suit juste — sinon les deux s'additionnaient. */
+  padding: var(--gutter) var(--gutter) 0;
+  background: var(--bg);
+}
+
+/* Contenu de la page : la marge est sur les quatre côtés, y compris en haut. */
+.page {
+  padding: var(--gutter);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Le titre de la sidebar est un nom de dossier/fichier : il peut être long. */
+.brand > div:last-child {
+  min-width: 0;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 18px;
+  color: #fff;
+}
+
+/* Une seule ligne : la sidebar est étroite, un retour à la ligne du sous-titre
+   déformerait le haut de la colonne. */
+.brand small {
+  display: block;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* État du backend **et** version du projet sur une même ligne : le libellé reste
+   **à gauche** (même colonne que « Langue » et le nom du compte), la version
+   **ferme la ligne à droite** (`space-between`). Elle arrive ainsi exactement au
+   bord du bouton de déconnexion et du sélecteur de langue — ce qui n'était pas
+   le cas tant que `.foot` restait dimensionné par son contenu (voir `.foot`).
+   `nowrap` est voulu — les libellés d'état sont plus longs que « temps réel »
+   (« repli polling », « polling fallback », « respaldo por sondeo ») : c'est le
+   libellé qui se replie dans sa case (`min-width: 0` côté `.status`), jamais la
+   version qui part à la ligne. */
+.stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+/* Pied de sidebar : sélecteur de langue, compte connecté, puis l'état du backend
+   avec la version — empilés, la ligne d'état ferme la colonne.
+   `width: 100%` est indispensable : le pied vit dans la rangée flex de la
+   sidebar, où il prenait la largeur de son **contenu** — mesuré 137 px pour
+   176 disponibles (sidebar de 208 px), donc **toutes** les lignes s'arrêtaient
+   39 px avant le bord droit : sélecteur de langue, bouton de déconnexion et
+   version flottaient au milieu. Chaque ligne répartit ensuite ses deux extrémités
+   (`space-between`) : le libellé d'état reste à gauche, la version à droite. */
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+/* Ligne de langue : l'intitulé reste **à gauche** (même colonne que l'état du
+   backend et le compte), le contrôle **à droite**. */
+.lang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.lang__label {
+  color: var(--muted);
+}
+
+/* Sélecteur de langue : un bouton qui ouvre le popup de choix (voir
+   `LanguagePicker.vue`). Il reprend la pastille du `<select>` qu'il remplace,
+   donc la ligne garde sa hauteur et le pied ne bouge pas. */
+.lang__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 62%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.lang__btn:hover {
+  border-color: var(--accent);
+}
+
+.lang__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* C'est le nom qui cède, jamais le chevron : « Español » est le plus long des
+   quatre, et une langue cliente le sera davantage. */
+.lang__current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lang__caret {
+  flex: none;
+  color: var(--muted);
+}
+
+/* ── Popup de choix ──────────────────────────────────────────────────────
+   Le champ et la liste sont des éléments simples, stylés ici comme le reste de
+   l'application : `UModal` ne fournit que la fenêtre. */
+.lang__search {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.lang__search::placeholder {
+  color: var(--muted);
+}
+
+.lang__search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.lang__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Vingt langues ne tiennent pas dans une fenêtre : la liste défile, et la
+     recherche fait le reste. `45vh` la garde courte même sur un écran bas. */
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.lang__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* L'entrée sous le curseur **et** celle des flèches se ressemblent : le clavier
+   et la souris désignent la même chose, sans deux vocabulaires visuels. */
+.lang__item--over {
+  background: var(--surface-2);
+}
+
+.lang__item--on {
+  color: var(--accent);
+}
+
+.lang__check {
+  flex: none;
+  color: var(--accent);
+}
+
+.lang__empty {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* État du backend : le voyant et son libellé, **sans cadre** — c'était une
+   pastille, dont le fond, le contour et le rembourrage décalaient le texte de
+   13 px par rapport aux autres lignes du pied (langue, compte). */
+.status {
+  font-size: 13px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* La case peut se réduire : c'est le libellé qui se replie, jamais la ligne
+     qui déborde (voir `.stats`). */
+  min-width: 0;
+}
+
+/* Version du projet (voir `nuxt.config.ts`), à droite de l'état : discrète,
+   mais c'est le repère qu'on cherche quand on doute du build déployé. */
+.version {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+
+.dot.offline {
+  background: var(--err);
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.18);
+}
+
+/* Repli périodique : le backend répond encore, mais plus en temps réel. */
+.dot.polling {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18);
+}
+
+.dot.live {
+  animation: pulse 1.6s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+
+/* ---------- Search + tri ---------- */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.search {
+  flex: 1;
+  min-width: 220px;
+  position: relative;
+}
+
+.search input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 13px 16px 13px 44px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.18s;
+}
+
+.search input:focus {
+  border-color: var(--accent);
+}
+
+.search .icon {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+}
+
+/* Bouton de tri par date (cycle normal -> récent → ancien -> ancien → récent). */
+.sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: pointer;
+}
+
+.sort:hover {
+  border-color: var(--accent);
+}
+
+.sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sort__icon {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+/* Tri actif : on met le bouton en évidence. */
+.sort:not(.sort--none) {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+.sort:not(.sort--none) .sort__icon {
+  color: var(--accent-2);
+}
+
+/* Bouton d'ajout de fichiers (voir `UploadButton`) : même facture que le tri. */
+.add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.add:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.add__icon {
+  color: var(--muted);
+}
+
+/* Sélections masquées : seules les entrées du menu les ouvrent. */
+.add__input {
+  display: none;
+}
+
+/* Zone de dépôt de la fenêtre d'ajout (voir `UploadButton`) : c'est le chemin
+   principal, le bouton n'ouvre plus un sélecteur de fichiers. */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 190px;
+  padding: 24px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone--over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Les enfants ne sont pas des cibles de glisser : sans ça, `dragleave` se
+   déclenche au passage d'un texte à l'autre et la zone clignote. */
+.dropzone > * {
+  pointer-events: none;
+}
+
+.dropzone__icon {
+  font-size: 30px;
+  color: var(--muted);
+}
+
+.dropzone__hint {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+}
+
+.dropzone__detail {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Secours clavier : discret, sous la zone. */
+.dropzone__browse {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.dropzone__link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--accent-2);
+  font-family: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Avancement de l'envoi : sur sa propre ligne, sous la barre d'outils. Le
+   bilan, lui, passe par les notifications de Nuxt UI. */
+.add__status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Puces de filtre par type, dans l'en-tête du catalogue. */
+.types {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  /* L'espace sous l'en-tête est géré par `.header`. */
+  margin-bottom: 0;
+}
+
+.types__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 13px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.types__item:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.types__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Nombre de fichiers du format. */
+.types__item b {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Sélectionné : teinte d'accent + bordure accentuée. */
+.types__item--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.types__item--on b,
+.types__item--on:hover b {
+  color: var(--accent-2);
+}
+
+.types__clear {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  margin-left: 2px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.types__clear:hover {
+  color: var(--accent-2);
+}
+
+/* ---------- Empty / error ---------- */
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 60px 0;
+  font-size: 15px;
+}
+
+.error {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 14px;
+}
+
+.section-label {
+  color: var(--muted);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 26px 0 12px;
+  font-weight: 700;
+}
+
+/* ---------- Grille de fichiers (cartes 3D) ---------- */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  transition: border-color 0.15s, transform 0.15s;
+  overflow: hidden;
+}
+
+/* Lien qui enveloppe une carte : hérite du style, remplit la carte. */
+.model-card__link {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+  width: 100%;
+}
+
+/* Bouton de retour des pages de détail. Rendu par la page, donc sous l'en-tête
+   du layout. C'est un <button> (il revient à la position précédente via
+   l'historique), d'où la remise à zéro des styles natifs. */
+.back {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 18px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.back:hover {
+  color: var(--accent-2);
+}
+.back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* Barre d'actions en tête des pages de détail : le retour à gauche, les
+   actions à droite. */
+.detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+/* L'espacement vertical vient de la barre : le retour n'a plus à porter le sien. */
+.detail-bar .back {
+  margin-bottom: 0;
+}
+
+/* Lien d'action « Télécharger ». La couleur est écrite avec les deux classes
+   pour l'emporter sur `.page a`, la règle globale de l'app. */
+.detail-bar .download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.detail-bar .download:hover {
+  color: var(--accent-2);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.detail-bar .download:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.detail-bar .download svg {
+  flex: none;
+}
+
+/* Rappel discret du format, pour distinguer les boutons d'une même page. */
+.download__size {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.detail-bar .download:hover .download__size {
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+/* ---------- Pages de détail ---------- */
+/* Page fichier : aperçu à gauche, informations à droite. L'aperçu est la
+   colonne qui grandit ; les infos sont bornées (métadonnées + note). */
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 20px;
+  align-items: start;
+}
+
+.detail__side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Dans la grille, l'espacement est porté par le `gap` : on neutralise les
+   marges que ces blocs avaient en disposition verticale. */
+.detail .viewer-card {
+  margin-bottom: 0;
+}
+
+/* Colonne de droite de la page fichier : tout l'espacement vient du `gap`. */
+.detail__side .note {
+  margin: 0;
+}
+
+/* Écran étroit : on empile, l'aperçu reste au-dessus des informations. */
+@media (max-width: 900px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.viewer-card {
+  position: relative;
+  height: 480px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  margin-bottom: 20px;
+}
+
+.file-detail-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+  padding: 20px;
+}
+
+.meta-table {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.meta-row {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+}
+
+.meta-row dt {
+  color: var(--muted);
+  min-width: 92px;
+  font-weight: 600;
+}
+
+.meta-row dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ce que le slicer annonce (page d'un fichier) : les mêmes lignes que les
+   propriétés du fichier, sous un titre — les deux se lisent pareil. */
+.print__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
+
+.model-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.model-card__preview {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0d1322;
+  cursor: pointer;
+}
+
+.model-card--file .model-card__preview {
+  cursor: default;
+}
+
+.model-card__ph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.model-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ph--gcode {
+  background: linear-gradient(135deg, #1a2333, #0d1322);
+}
+
+.ph--other {
+  background: var(--surface);
+}
+
+.ph-badge {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11px;
+}
+
+.model-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.model-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__meta {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ---------- Carte de dossier (même taille qu'une carte de fichier) ---------- */
+.folder-icon {
+  font-size: 32px;
+}
+
+.folder-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-2);
+}
+
+/* ---------- Marqueur de note (sur les cartes) ---------- */
+.note-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* Note Markdown (pages de détail) —
+   pas de marge haute : le bouton « Retour » qui précède porte déjà la sienne,
+   les deux s'additionnaient. L'espace passe sous la note, pour la séparer de
+   la liste de fichiers. */
+.note {
+  margin: 0 0 26px;
+}
+
+.note__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.note__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.note__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.note__status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note__status--saved {
+  color: var(--ok);
+}
+
+.note__status--error {
+  color: var(--err);
+}
+
+.note__btn {
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.note__btn:hover {
+  border-color: var(--accent);
+}
+
+.note__btn--primary {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.note__empty {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+/* Le rendu Markdown est posé dans une carte, comme le reste de l'interface. */
+.note__preview {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 16px;
+}
+
+/* Hauteur de l'éditeur Markdown : elle était posée en style en ligne dans
+   `NotePanel`, ce qui ne laissait aucun moyen de l'adapter au contexte.
+   ⚠️ `:not(.note__preview)` est le point important : le rendu seul (`MdPreview`)
+   porte **aussi** la classe `.md-editor` (md-editor la pose sur sa racine), et
+   héritait donc de cette hauteur — une note de 158 px de contenu s'affichait dans
+   un cadre de 360 px, avec **202 px de vide** sous elle (mesuré). L'aperçu suit
+   son contenu, l'éditeur garde une hauteur (CodeMirror remplit son cadre : une
+   zone de saisie qui grandit toute seule n'aide personne). */
+.note .md-editor:not(.note__preview) {
+  height: 360px;
+}
+
+/* Dans l'onglet « Notes » de l'administration, la note se contente de moins de
+   hauteur : la liste des éléments est juste au-dessus, et c'est elle qui mène. */
+.admin__notes .note .md-editor:not(.note__preview) {
+  height: 260px;
+}
+
+/* Là, l'aperçu est **borné** (et défile) : il n'est qu'un appoint sous la liste,
+   contrairement à la page d'un modèle où la note est le sujet. */
+.admin__notes .note__preview {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* ---------- Page d'administration ---------- */
+/* Deux colonnes : les réglages (et la recherche assistée, juste en dessous) à
+   gauche, les notes à droite — leur éditeur s'ouvre sous la liste, dans la même
+   colonne. Les cartes de gauche sont regroupées dans `.admin__col` plutôt que
+   placées par la grille : sinon la seconde se retrouverait en colonne de droite,
+   à côté de la première, et les notes seraient repoussées en dessous.
+   Les hauteurs restent **naturelles** (`start`) : étirer la colonne des notes à
+   la hauteur de la gauche, avec une liste qui prend l'espace disponible, fait
+   boucler le calcul de la ligne de grille (la carte grandit, la ligne grandit,
+   la carte grandit…). La liste est donc bornée par la fenêtre, ce qui revient au
+   même à l'œil sans le risque. */
+.admin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 20px;
+  align-items: start;
+}
+
+/* Colonne (réglages + IA à gauche, liste + éditeur à droite). */
+.admin__col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.admin__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.admin__title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.admin__count {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--accent-2);
+  font-size: 12px;
+}
+
+.admin__field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.admin__label {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Même vocabulaire que les puces de filtre, mais de vrais radios dessous. */
+.admin__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 13px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.admin__choice--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/*
+ * Puce d'adresse connue : même dessin que les radios ci-dessus, mais un vrai
+ * bouton — un clic remplit le champ, rien n'est mémorisé à cet endroit. Seule
+ * la police est à reprendre : un `button` n'hérite pas de celle du document.
+ */
+.admin__choice--pick {
+  font-family: inherit;
+}
+
+.admin__input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.admin__input:focus {
+  border-color: var(--accent);
+}
+
+/* Réglage numérique (re-scan périodique) : champ court, unité, action. */
+.admin__input--short {
+  width: 96px;
+}
+
+/*
+ * Cartes « Recherche assistée » : les champs prennent la place disponible.
+ * Sans ça, un `input` et un `select` se contentent de leur largeur intrinsèque —
+ * très différente de l'un à l'autre — et la carte paraît bancale.
+ */
+.admin__field--ai .admin__row > .admin__input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* Liste de choix : même facture que les champs de saisie. */
+select.admin__input {
+  cursor: pointer;
+}
+
+/* Le menu déroulant natif doit rester lisible sur le thème sombre. */
+select.admin__input option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.admin__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin__unit {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.admin__action {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.admin__action:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Ligne d'actions en fin de carte (bouton « Enregistrer » de la recherche IA) :
+   le bouton principal porte la couleur, comme les confirmations de dialogue. */
+.admin__field--actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin__action--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.admin__action--primary:hover {
+  color: #fff;
+  filter: brightness(1.06);
+}
+
+.admin__action--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Recommandation du backend : une phrase, pas un réglage. */
+.admin__hint--rec {
+  color: var(--text);
+  opacity: 0.72;
+  font-style: italic;
+}
+
+.admin__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin__hint code {
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11.5px;
+}
+
+.admin__status {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.admin__status--ok {
+  color: var(--ok);
+}
+
+.admin__status--err {
+  color: var(--err);
+}
+
+/* Rappel de ce qui tourne réellement côté backend (après rechargement à chaud). */
+.admin__applied {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.admin__applied > div {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.admin__applied dt {
+  color: var(--muted);
+  min-width: 92px;
+}
+
+.admin__applied dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* Volontairement courte : l'éditeur s'ouvre juste en dessous, et doit rester
+     visible sans faire défiler la page. */
+  max-height: min(38vh, 340px);
+  overflow-y: auto;
+}
+
+.admin__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.admin__item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.admin__item--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Refus (connexion ratée ou bloquée, SSO refusé) : c'est ce qu'on vient
+   chercher dans le journal, donc ça se repère sans lire la ligne entière. */
+.admin__item--alert {
+  border-left: 2px solid var(--err);
+}
+
+.admin__item--alert .admin__item-label {
+  color: var(--err);
+}
+
+.admin__item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin__item-where {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.admin__empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+/* Dans une carte, l'espacement est porté par le `gap` de la carte. */
+.admin__card .note {
+  margin: 0;
+}
+
+/* ---------- Pages à onglets ---------- */
+/* Une page à onglets empile sa barre, puis la vue active. Les deux pages qui
+   s'en servent — « Mon compte » (identité, jetons, agent) et les comptes
+   (utilisateurs, rôles) — n'ont pas la même largeur naturelle d'un onglet à
+   l'autre : `align-items: stretch` est donc explicite, et pas décoratif. Sans
+   lui, le panneau suit son contenu et la page **saute** de largeur au
+   changement d'onglet. */
+.tabbed-page {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* Barre d'onglets, partagée (voir `PanelTabs`). */
+.panel-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Un onglet : texte seul, trait d'accent quand il est actif. Le trait se pose
+   sur la ligne du bas (`margin-bottom: -1px`) pour la recouvrir, pas la
+   décaler. */
+.panel-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.panel-tab:hover {
+  color: var(--text);
+}
+
+.panel-tab--on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+@media (max-width: 1000px) {
+  .admin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Visionneuse 3D ---------- */
+.model-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 140px;
+  overflow: hidden;
+}
+
+.model-viewer__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.model-viewer__overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  background: rgba(13, 19, 34, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.model-viewer__overlay--err {
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.model-viewer__info {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 10.5px;
+  color: var(--muted);
+  background: rgba(10, 14, 22, 0.6);
+  border-radius: 999px;
+  padding: 2px 8px;
+  pointer-events: none;
+}
+
+.thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.thumb__ph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* ---------- Modal ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(4, 6, 12, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  animation: fade 0.15s ease;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal__head {
+  width: min(100%, 980px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modal__title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal__close {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.modal__close:hover {
+  background: #1f2b42;
+}
+
+.modal__body {
+  width: min(100%, 980px);
+  height: min(72vh, 760px);
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.modal__hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Menu contextuel des cartes ─────────────────────────────────────────────
+   Posé au curseur et téléporté dans le `body` (voir `CardMenu`) : z-index haut
+   pour passer au-dessus des cartes, des volets et de la barre d'outils. */
+.card-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
+}
+
+.card-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-menu__item:hover,
+.card-menu__item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+/* Action destructive : repérable au premier coup d'œil, sans crier. */
+.card-menu__item--danger,
+.card-menu__item--danger .card-menu__icon {
+  color: var(--err);
+}
+
+.card-menu__icon {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+/* ── Renommage ────────────────────────────────────────────────────────────── */
+.rename__input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.rename__input:focus {
+  border-color: var(--accent);
+}
+
+/* Un refus du backend reste affiché sous le champ : on corrige et on réessaie. */
+.rename__error,
+.confirm__error {
+  margin: 9px 0 0;
+  color: var(--err);
+  font-size: 12.5px;
+}
+
+/* Confirmation d'une action destructive : ce qui va partir, puis les choix. */
+.confirm__warning {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.rename__actions,
+.confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rename__cancel,
+.rename__confirm,
+.confirm__cancel,
+.confirm__confirm {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rename__confirm,
+.confirm__confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.confirm__confirm--danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+.rename__cancel:disabled,
+.rename__confirm:disabled,
+.confirm__cancel:disabled,
+.confirm__confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---------- Recherche assistée (IA) ---------- */
+/* Bascule dans la barre d'outils : même facture que le tri et l'ajout, mais
+   désactivée tant qu'aucun fournisseur n'est configuré. */
+.ai-toggle {
+  position: relative;
+  display: flex;
+}
+
+/*
+ * Infobulle maison : plus rapide et plus lisible que le `title` natif, et seule
+ * façon d'expliquer un bouton désactivé (qui, lui, n'en déclenche pas toujours).
+ * Elle est toujours dans le DOM, révélée par l'opacité : la transition reste
+ * donc fluide dans les deux sens.
+ */
+.ai-toggle__tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 260px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.ai-toggle:hover .ai-toggle__tip,
+.ai-toggle:focus-within .ai-toggle__tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/*
+ * Infobulle d'une action **désactivée** — mêmes raisons que ci-dessus (le `title`
+ * natif arrive en retard, sans style, et un bouton désactivé ne déclenche pas
+ * toujours d'événement de survol : c'est le porteur qui les reçoit). Elle se
+ * place **au-dessus** de son porteur, pour ne pas recouvrir la note qui suit.
+ */
+.tip {
+  position: relative;
+  display: inline-flex;
+}
+
+.tip__bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 280px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.tip:hover .tip__bubble,
+.tip:focus-within .tip__bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: border-color 0.18s, background 0.18s;
+  cursor: pointer;
+}
+
+.ai-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ai-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Désactivé : le bouton dit *pourquoi* (infobulle), il reste lisible. */
+.ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-btn--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+
+/* Champ de description : le préfixe rappelle qu'on ne filtre plus. */
+.search--ai .icon {
+  color: var(--accent-2);
+}
+
+.search__go {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: calc(var(--radius) - 2px);
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.search__go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Panneau de résultats : il remplace le catalogue tant que le mode est ouvert.
+   C'est un encart, donc il porte lui-même les marges que `.page` applique en
+   padding (il remplace le contenu de la page, pas la page). */
+.ai {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  /* Le panneau est un **frère** de `.page`, pas son enfant : il porte donc la
+     même marge que le padding de celle-ci, avec la même variable — c'est ce qui
+     aligne son cadre sur la barre du catalogue et sur la page. */
+  margin: var(--gutter);
+}
+
+.ai__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai__badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+
+.ai__asked {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.ai__clear {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.ai__clear:hover {
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+.ai__state,
+.ai__foot {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.ai__error {
+  margin: 0;
+  color: var(--err);
+  font-size: 13.5px;
+  white-space: pre-wrap;
+}
+
+/*
+ * La réponse de l'assistant, rendue en Markdown (même bibliothèque que les
+ * notes). On annule la **boîte de l'éditeur** — 500 px de haut, une bordure et
+ * un fond noir, faits pour un éditeur plein écran, pas pour un texte posé dans
+ * un panneau.
+ */
+.ai .md-text {
+  flex: none;
+  height: auto;
+  border: none;
+  background: transparent;
+}
+
+.ai .md-text .md-editor-content,
+.ai .md-text .md-editor-preview-wrapper {
+  height: auto;
+}
+
+.ai .md-text .md-editor-preview {
+  padding: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+/* Le premier titre du Markdown n'a pas à pousser le panneau vers le bas. */
+.ai .md-text .md-editor-preview > :first-child {
+  margin-top: 0;
+}
+
+/*
+ * Sauts de ligne : la bibliothèque pose `word-break: break-all` sur
+ * `.md-editor-preview`, qui autorise une coupure **n'importe où** — un mot court
+ * comme « test » se retrouvait coupé en deux, et un identifiant au milieu d'un
+ * segment, dans une cellule de tableau Markdown comme dans un paragraphe.
+ *
+ * On revient à la coupure normale (aux espaces, aux tirets), et
+ * `overflow-wrap: anywhere` ne prend le relais que dans le seul cas qui l'exige :
+ * un jeton plus long que la ligne (un UUID, une URL).
+ *
+ * Le sélecteur est **plus spécifique** que celui de la bibliothèque, et pas par
+ * hasard : sa feuille est chargée après la nôtre, donc à spécificité égale c'est
+ * elle qui gagne (vérifié : `break-all` restait appliqué). `.md-editor` est le
+ * parent réel — la règle vaut pour les notes comme pour la réponse de
+ * l'assistant, qui passent par le même moteur.
+ */
+.md-editor .md-editor-preview {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.ai__hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai__hit {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.18s;
+}
+
+.ai__hit:hover {
+  border-color: var(--accent);
+}
+
+.ai__icon {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.ai__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai__name {
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai__path {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai__reason {
+  font-size: 13.5px;
+  color: var(--text);
+  margin-top: 4px;
+}
+
+/* ---------- Journal d'audit ---------- */
+/*
+ * La page : une rangée de commandes (celle du catalogue, voir `.toolbar` un peu
+ * plus haut), puis le journal — un `UTable` de Nuxt UI (TanStack Table), avec la
+ * pagination de `UPagination`. Ce qui est écrit ici, c'est l'**habillage** : les
+ * couleurs de familles, la largeur des colonnes, l'en-tête collant.
+ */
+.audit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  /* Aucun rattrapage : `.page` pose 16 px en haut, comme la barre collée du
+     catalogue — les deux barres sont donc à la même hauteur, par construction. */
+}
+
+.audit .toolbar {
+  margin-bottom: 0;
+}
+
+/* Compte des lignes affichées, puis l'explication du journal en retrait. */
+.audit__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+
+/*
+ * Racine du tableau : Nuxt UI y met `overflow-auto`, ce qui en fait un
+ * conteneur de défilement — et un en-tête `sticky` ne colle alors plus qu'à
+ * *lui*, qui ne défile jamais. On rend donc le défilement à la page : l'en-tête
+ * se fixe en haut du panneau, comme la barre du catalogue.
+ */
+.audit .audit__table-root {
+  overflow: visible;
+}
+
+.audit__table {
+  width: 100%;
+  /* Largeurs fixes : la date et l'adresse ne dansent pas d'une ligne à l'autre,
+     et le sujet / le détail prennent la place restante. */
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+/* En-tête collant (voir la racine ci-dessus) : il reste sous les yeux pendant
+   qu'on lit la page, et son fond est opaque — sinon les lignes passeraient
+   dessous. */
+.audit .audit__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+/*
+ * En-tête et cellules : Nuxt UI pose 16 px de chaque côté. Ici, six colonnes
+ * dans 817 px ne le permettent pas — 12 px laissent **24 px entre deux valeurs**
+ * (ce qui se lit sans les coller) et rendent la place au sujet et au détail, les
+ * deux colonnes qui portent du texte libre. Seul l'horizontal est resserré : le
+ * vertical reste celui de Nuxt UI.
+ */
+.audit__th {
+  padding-right: 12px;
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.audit__td {
+  padding-right: 12px;
+  padding-left: 12px;
+  color: var(--muted);
+  /* Nuxt UI passe ses cellules en `nowrap` (une valeur ne se coupe pas au
+     milieu) ; ici, le sujet et le détail doivent pouvoir revenir à la ligne,
+     sinon la colonne du sujet déborde au lieu de se replier. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Largeurs mesurées sur le vrai journal (contenu le plus large de chaque
+ * colonne, + le padding), et non devinées : les deux colonnes qui restent — le
+ * sujet et le détail — se partagent ce qui reste, et c'est le sujet qu'on veut
+ * large (un e-mail, un nom de jeton ou l'identifiant d'un jeton).
+ *
+ * Chacune de ces largeurs vient d'une contrainte :
+ *
+ * - la **date** est dimensionnée pour le format le plus long des quatre langues
+ *   (l'américain, avec AM/PM) — une colonne trop juste laissait la date dépasser
+ *   sur la colonne suivante ;
+ * - l'**événement** tient le libellé le plus long des **événements courants**
+ *   (« Connexion refusée »), icône comprise : c'est la colonne qu'on lit pour
+ *   savoir ce qui s'est passé ;
+ * - l'**adresse** tient une IPv4 (`192.168.96.1`) ;
+ * - le **détail** est une phrase (« identifiant ou mot de passe incorrect ») :
+ *   deux lignes au pire.
+ */
+.audit__table th:nth-child(1) { width: 165px; }
+.audit__table th:nth-child(2) { width: 175px; }
+.audit__table th:nth-child(3) { width: 75px; }
+.audit__table th:nth-child(5) { width: 150px; }
+.audit__table th:nth-child(6) { width: 110px; }
+
+/* Le type d'événement, avec sa couleur de famille : un refus (rouge) et une
+   connexion (vert) se distinguent sans lire la ligne. Le libellé **revient à la
+   ligne** s'il est trop long : c'est la largeur du mot le plus long des quatre
+   langues (« Anmeldung abgelehnt », 146 px) qui déciderait sinon, et elle ne
+   tient pas — un libellé qui déborde passerait par-dessus la colonne suivante. */
+.audit__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.audit__kind--sessions { color: var(--ok); }
+.audit__kind--refusals { color: var(--err); }
+.audit__kind--tokens { color: var(--accent-2); }
+.audit__kind--accounts { color: var(--accent); }
+.audit__kind--roles { color: var(--accent-3); }
+
+/* Un refus se repère sans lire la ligne : c'est ce qu'on vient chercher. */
+.audit__row--alert td:first-child {
+  border-left: 2px solid var(--err);
+}
+
+.audit__table tbody tr:hover td {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Pagination : la taille de page à gauche, les numéros à droite. */
+.audit__pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audit__perpage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---------- Comptes utilisateurs ---------- */
+/* Fonctionnalité facultative (`EASY3D_AUTH`) : rien de ce bloc n'existe sur une
+   installation sans comptes — ni page de connexion, ni bloc de compte. */
+
+/* Page de connexion : elle se tient hors de la coquille du catalogue (voir
+   `pages/login.vue`), donc centrée sur toute la fenêtre. */
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login__card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 26px 26px;
+}
+
+.login__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Une phrase pour dire ce qu'on attend d'un compte, sous le titre. */
+.login__hint {
+  margin: -8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Message d'erreur **dans le flux** (pas une notification) : le bouton ne doit
+   pas sauter sous le curseur au moment où l'on clique. */
+.login__error {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--err);
+  font-size: 13px;
+}
+
+/* Séparateur « ou » entre le mot de passe et le fournisseur d'identité : un
+   filet de chaque côté du mot, sans bordure à retoucher dans le gabarit. */
+.login__sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.login__sep::before,
+.login__sep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Compte connecté, en pied de sidebar.
+   Bloc **distinct** de la page « Mon compte » : les deux portaient le nom
+   `.account`, et la règle la plus tardive l'emportait pour tout ce que l'autre
+   ne redéclarait pas — le pied passait en colonne (nom au-dessus du bouton) et
+   la page centrait ses onglets au lieu de les étirer. */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.sidebar-user__who {
+  color: var(--text);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user__out {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.sidebar-user__out:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.sidebar-user__out:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Comptes et rôles ---------- */
+
+/* Ligne de liste cliquable en entier (rôle, compte) : le bouton couvre la ligne
+   au lieu d'obliger à viser le libellé. */
+.accounts__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Pastille d'état : « livré », « par défaut », « désactivé ». */
+.accounts__tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.accounts__tag--on {
+  border-color: var(--accent);
+  color: var(--accent-2);
+  background: var(--accent-soft);
+}
+
+/* Compte désactivé : c'est l'état qui empêche d'entrer, donc en rouge. */
+.accounts__tag--off {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+/* ---------- Comptes : tableau des utilisateurs ---------- */
+/*
+ * L'onglet « Utilisateurs » : une rangée de filtres, puis une grille pleine
+ * largeur. Le formulaire d'édition a quitté la page (il vit dans une fenêtre),
+ * il n'y a donc plus de grille à deux colonnes ici — d'où le `flex` vertical,
+ * qui laisse la grille occuper toute la largeur de la carte.
+ */
+.accounts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* La rangée reprend `.toolbar` (celle du catalogue) : même facture, mais
+   `align-items: center` — les listes déroulantes, plus courtes que le champ de
+   recherche, ne s'étirent pas à sa hauteur. */
+.accounts__toolbar {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+/* Le geste d'ajout ferme la rangée : il ne dépend pas de ce qu'on filtre. */
+.accounts__add {
+  margin-left: auto;
+}
+
+/* Compte des lignes affichées, puis l'explication du droit en retrait. */
+.accounts__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+
+/* `.section-label` porte une marge de titre : dans la carte, l'espace vient du
+   `gap`, et ce compteur suit la première ligne. */
+.accounts__meta .section-label {
+  margin: 0;
+}
+
+/*
+ * Pages de saisie d'un compte (`/admin/accounts/new`, `/admin/accounts/edit/<uuid>`) :
+ * une seule carte, de largeur **bornée** — un formulaire étalé sur toute la
+ * largeur se lit mal, et les cases de droits se rangeraient sur une ligne
+ * interminable.
+ */
+.accounts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+}
+
+/* Le lien de retour est un `<a>` (l'adresse de la liste est explicite, on ne
+   remonte pas l'historique) : il garde la couleur du bouton de retour, que
+   `.page a` emporterait sinon — spécificité oblige. */
+.page a.back {
+  color: var(--muted);
+}
+
+.page a.back:hover {
+  color: var(--accent-2);
+}
+
+/* Champs des fenêtres de saisie : ils se partagent la rangée au lieu de
+   s'arrêter à leur largeur intrinsèque — très différente d'un `input` à un
+   `select`, ce qui rendait la colonne bancale. */
+.accounts__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accounts__form .admin__row > .admin__input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+/* ---------- Grille de données (façon `st.dataframe`) ---------- */
+/*
+ * La grille des comptes (voir `components/DataGrid.vue`) : dense, en-tête
+ * collant, filets de séparation, colonnes redimensionnables — la facture de
+ * Streamlit, qui s'appuie sur Glide Data Grid. C'est une `<table>` virtualisée,
+ * pas un canvas : les couleurs restent donc les jetons de l'application, et le
+ * texte est du vrai texte (sélection, zoom navigateur, lecteurs d'écran).
+ *
+ * La zone **défile** (`overflow: auto`) et c'est elle qui porte la hauteur :
+ * l'en-tête se colle en haut de cette boîte, pas de la fenêtre.
+ *
+ * ⚠️ Le bloc s'appelle `data-grid` et non `grid` : `.grid` est un **utilitaire
+ * Tailwind** (`display: grid`), et comme cette feuille ne déclarait pas de
+ * `display`, l'utilitaire gagnait — la grille devenait un conteneur CSS `grid`,
+ * la table s'étirait à la hauteur de la boîte, et les lignes se partageaient
+ * l'espace restant (des lignes de 157 px au lieu de 34). `display: block` est
+ * donc explicite ici, en plus du renommage.
+ */
+.data-grid {
+  display: block;
+  position: relative;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+/* Le cadre dit où est le clavier (la grille est focusable : c'est elle qui
+   reçoit les flèches). */
+.data-grid:focus-visible {
+  border-color: var(--accent);
+}
+
+.data-grid__table {
+  /* `fixed` : les largeurs viennent du `colgroup` (donc du redimensionnement),
+     et un texte long ne peut pas élargir sa colonne. */
+  table-layout: fixed;
+  width: 100%;
+  /* Somme des colonnes : c'est elle qui donne le défilement horizontal. En
+     dessous, les colonnes se partagent la place disponible. */
+  min-width: var(--grid-width);
+  /* `separate` + `border-spacing: 0` : avec `collapse`, Chrome perd les bordures
+     de l'en-tête collant. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.data-grid__th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  vertical-align: middle;
+  /* Pas de `overflow: hidden` ici : la poignée de redimensionnement dépasse de
+     quelques pixels à droite, et c'est le libellé qui porte l'ellipse. */
+  user-select: none;
+}
+
+.data-grid__th:last-child {
+  border-right: 0;
+}
+
+.data-grid__th--right,
+.data-grid__td--right {
+  text-align: right;
+}
+
+/* Une colonne d'actions se centre : le bouton garde la même place d'une ligne à
+   l'autre, quelle que soit la longueur des valeurs voisines. */
+.data-grid__th--center,
+.data-grid__td--center {
+  text-align: center;
+}
+
+/* En-tête triable : c'est l'en-tête entier qui est cliquable (comme dans
+   Streamlit), pas une icône à viser. */
+.data-grid__th--tri {
+  cursor: pointer;
+}
+
+.data-grid__th--tri:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.data-grid__th--tri:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.data-grid__th-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Sans `min-width: 0`, un enfant flex refuse de rétrécir sous sa largeur
+     intrinsèque : l'ellipse ne s'appliquerait jamais. */
+  min-width: 0;
+}
+
+.data-grid__th-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Sens du tri : les mêmes flèches ↕ ↓ ↑ que le catalogue et le journal. */
+.data-grid__fleche {
+  flex: none;
+  color: var(--accent-2);
+}
+
+/*
+ * Poignée de redimensionnement, à cheval sur le filet de droite : elle dépasse
+ * de 4 px de chaque côté, donc on l'attrape sans viser au pixel.
+ */
+.data-grid__resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.data-grid__resize:hover {
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+/* Dernière colonne : la poignée se rentre dans la cellule. Sinon elle dépasse
+   de 4 px, et ce dépassement suffit à faire apparaître un **ascenseur
+   horizontal** sous une grille qui tient pourtant dans sa carte. */
+.data-grid__th:last-child .data-grid__resize {
+  right: 0;
+}
+
+.data-grid__td {
+  height: var(--grid-row-h);
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  vertical-align: middle;
+  /* Une valeur tient sur une ligne : au-delà, elle est rognée (l'infobulle
+     éventuelle est posée par la page, qui seule connaît le sens du contenu). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-grid__td:last-child {
+  border-right: 0;
+}
+
+.data-grid__row {
+  cursor: pointer;
+}
+
+.data-grid__row:hover .data-grid__td {
+  background: var(--surface-2);
+}
+
+/* Ligne sélectionnée : elle se lit d'un coup d'œil, même au clavier. */
+.data-grid__row--on .data-grid__td {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Cellule du curseur : un cadre **dans** la cellule (`outline-offset` négatif),
+   pour ne pas décaler la grille au passage des flèches. */
+.data-grid__td--focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Une pastille d'état en tête de cellule ne se décale pas : le `margin-left` de
+   `.accounts__tag` sert à les séparer quand elles se suivent. */
+.data-grid__td .accounts__tag:first-child {
+  margin-left: 0;
+}
+
+/* Cales de virtualisation : de la hauteur, rien d'autre. */
+.data-grid__spacer td {
+  padding: 0;
+  border: 0;
+}
+
+.data-grid__empty {
+  height: 46px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Cases à cocher des droits, groupées par domaine. */
+.perm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.perm__group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px 10px;
+  margin: 0;
+}
+
+.perm__legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.perm__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.perm__item input,
+.admin__choice input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* Superutilisateur : tout coché, rien de décochable. */
+.perm--locked .perm__item {
+  color: var(--muted);
+}
+
+/* Droit venu d'un **rôle** coché : coché, mais pas décochable ici. Il se
+   distingue des droits propres au compte, et la note sous la liste dit
+   pourquoi (voir `PermissionPicker`). */
+.perm__item--herite {
+  color: var(--muted);
+}
+
+.perm__note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Action destructrice : même forme que les autres, en rouge. */
+.admin__action--danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.admin__action--danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.admin__choice input {
+  margin-right: 6px;
+}
+
+/* ---------- Mon compte ---------- */
+
+/* Jeton fraîchement créé : une chaîne longue, à copier telle quelle. */
+.token__new {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  padding: 10px;
+}
+
+.token__value {
+  display: block;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+/*
+ * Formulaire de création d'un jeton : c'est la **seule action** de la carte, et
+ * on y tape un nom qu'on veut pouvoir relire — d'où des champs plus grands que
+ * la moyenne de l'administration, et un bouton à leur hauteur.
+ */
+.token__form .admin__input {
+  font-size: 15px;
+  padding: 12px 14px;
+}
+
+/* Le nom prend la place disponible ; la durée reste courte, à sa mesure. */
+.token__form .admin__row > .admin__input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.token__form .admin__input--short {
+  flex: 0 0 auto;
+  width: 140px;
+}
+
+.token__form .admin__action--primary {
+  padding: 12px 20px;
+  font-size: 14px;
+}
+
+/*
+ * Onglet MCP : l'adresse et les extraits se **recopient** tels quels — chasse
+ * fixe, et `pre` conserve la mise en forme des extraits JSON/shell sans qu'on
+ * ait à gérer l'indentation dans le template.
+ */
+.mcp__ligne {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp__url {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.mcp__code {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}

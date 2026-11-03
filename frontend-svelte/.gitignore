@@ -1,0 +1,5 @@
+node_modules/
+.svelte-kit/
+build/
+bun.lock
+package-lock.json
