@@ -186,8 +186,18 @@ jobs:
             --tag easy3d:ci \
             --cache-from type=gha \
             --cache-to type=gha,mode=max,ignore-error=true
+      # Version **figée**, et non `latest` : avec `latest`, `setup-trivy` refuse
+      # de mettre le binaire en cache (« doesn't currently support caching the
+      # 'latest' version ») et le retélécharge à chaque passage. Le 2026-11-03,
+      # ce téléchargement a échoué (script d'installation sorti en code 6 :
+      # résolution DNS du domaine de publication), et le job est tombé sans que
+      # l'image soit en cause — `trivy: command not found` à l'étape suivante.
+      # Une version figée rend le binaire **cachable** (donc plus de réseau au
+      # bout de la première réussite) et le résultat reproductible d'un jour à
+      # l'autre. Monter cette version est un changement volontaire, testé.
       - uses: aquasecurity/setup-trivy@v0.3.1
         with:
+          version: 0.76.1
           cache: true
       - name: CRITICAL (bloquant)
         run: trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 easy3d:ci
