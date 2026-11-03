@@ -77,9 +77,15 @@ const coverage =
     ? 'traduites à 100 %'
     : `à compléter : ${incomplete.map((l) => `${l.name} (${l.translated}/${total})`).join(', ')}`
 
+// Les marqueurs doivent être **seuls sur leur ligne** : en Markdown, un bloc HTML
+// (`<!-- … -->`) commencé en début de ligne avale tout le reste de la ligne, et
+// le gras de la phrase n'était pas rendu (visible sur GitHub). La phrase vit donc
+// entre deux lignes de marqueurs, après la liste des atouts.
 const block =
-  `${START}**${languages.length} ${languages.length > 1 ? 'langues' : 'langue'}** : ` +
-  `${languages.map((l) => l.name).join(', ')} — ${total} clés, ${coverage}.${END}`
+  `${START}\n` +
+  `**${languages.length} ${languages.length > 1 ? 'langues' : 'langue'}** : ` +
+  `${languages.map((l) => l.name).join(', ')} — ${total} clés, ${coverage}.\n` +
+  `${END}`
 
 const summary = languages.map((l) => `${l.code} ${l.translated}/${total}`).join(' · ')
 

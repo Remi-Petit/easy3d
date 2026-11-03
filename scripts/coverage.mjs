@@ -96,7 +96,12 @@ if (debut === -1 || fin === -1 || fin < debut) {
     process.exit(2)
 }
 
-const maj = texte.slice(0, debut + START.length) + badges + texte.slice(fin)
+// Les marqueurs doivent être **seuls sur leur ligne**. En Markdown, un bloc HTML
+// (`<!-- … -->`) commencé en début de ligne avale tout le reste de la ligne : les
+// badges posés entre deux marqueurs en ligne s'affichent alors en clair au lieu
+// d'être rendus (constaté sur GitHub).
+const bloc = `${START}\n${badges}\n${END}`
+const maj = texte.slice(0, debut) + bloc + texte.slice(fin + END.length)
 
 console.log(
     `backend  : ${pctBackend.toFixed(1)} % (${lignesBackend.covered}/${lignesBackend.count} lignes)`,
