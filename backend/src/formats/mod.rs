@@ -37,6 +37,9 @@ mod thumb_style;
 
 pub use image::{IMAGE_EXTENSIONS, is_image, priority as image_priority};
 pub use print_info::PrintInfo;
+// Le rasteriseur et son maillage sortent du dossier pour être mesurables :
+// `benches/formats.rs` sépare le rendu de l'encodage PNG (voir `mesh::render`).
+pub use mesh::{Mesh, render};
 
 /// Métadonnées de slicer d'un G-code (voir [`gcode::metadata_for`]).
 pub(crate) use gcode::metadata_for as gcode_metadata;

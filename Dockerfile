@@ -21,13 +21,22 @@ WORKDIR /build/backend
 # crate vide. Tant que `backend/Cargo.toml` ne bouge pas, modifier `backend/src/`
 # ne les recompile pas. (`Cargo.*` tolère l'absence de `Cargo.lock`, qui n'est
 # pas versionné dans ce dépôt.)
+#
+# `benches/` : le manifeste déclare deux cibles de banc (`[[bench]]`), et Cargo
+# refuse un manifeste qui pointe vers un fichier absent — même quand on ne
+# construit pas ces cibles. D'où les fichiers vides, remplacés par les vrais
+# plus bas.
 COPY backend/Cargo.* ./
-RUN mkdir -p src \
+RUN mkdir -p src benches \
     && printf '' > src/lib.rs \
     && printf 'fn main() {}\n' > src/main.rs \
+    && printf '' > benches/formats.rs \
+    && printf '' > benches/catalogue.rs \
     && cargo build --release
 
 COPY backend/src ./src
+# Les bancs ne servent pas à l'image, mais ils font partie du manifeste.
+COPY backend/benches ./benches
 # Les adresses connues des fournisseurs sont **embarquées** dans le binaire
 # (`include_str!`, voir `ai/presets.rs`) : le fichier fait donc partie des
 # sources à compiler, pas seulement de l'exécution. Les commentaires du fichier

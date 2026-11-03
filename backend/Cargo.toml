@@ -41,6 +41,20 @@ tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
 http-body-util = "0.1"
 tokio-tungstenite = "0.24"
+# Bancs de performance (`cargo bench`) : ils mesurent du **temps**, là où les
+# tests vérifient un résultat. Voir `benches/` et `docker/k6/` (charge réelle).
+criterion = "0.8"
+
+# Un fichier de banc = un binaire indépendant.
+#   cargo bench --bench formats      # rendu, PNG, aperçus complets
+#   cargo bench --bench catalogue    # scan + JSON de `/models`
+[[bench]]
+name = "formats"
+harness = false
+
+[[bench]]
+name = "catalogue"
+harness = false
 
 [profile.dev]
 debug = "line-tables-only"

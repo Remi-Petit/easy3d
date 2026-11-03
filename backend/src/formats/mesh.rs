@@ -60,11 +60,16 @@ pub fn write(mesh: &Mesh, out: &Path, rotate_x: bool) -> Option<()> {
     if rotate_x {
         mesh.rotate_x_minus90();
     }
-    render_mesh(&mesh).save(out).ok()?;
+    render(&mesh).save(out).ok()?;
     Some(())
 }
 
-fn render_mesh(mesh: &Mesh) -> image::RgbaImage {
+/// Rasterise `mesh` en mémoire (480 × 366, fond du thème), sans écrire de fichier.
+///
+/// Séparé de [`write`] parce que ce sont deux coûts distincts : le rendu d'un
+/// côté, l'encodage PNG et le disque de l'autre. Le banc `benches/formats.rs`
+/// les mesure séparément — savoir lequel a bougé évite d'optimiser le mauvais.
+pub fn render(mesh: &Mesh) -> image::RgbaImage {
     let (w, h) = (THUMB_W as u32, THUMB_H as u32);
     let mut buf = vec![0u8; (w * h * 4) as usize];
     let mut zbuf = vec![f32::INFINITY; (w * h) as usize];

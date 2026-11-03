@@ -1,3 +1,24 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  FICHIER DE **DÉVELOPPEMENT** — ne pas utiliser tel quel en production.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Ce que ce fichier fait, et qui n'a pas sa place sur un serveur :
+#
+#   - il **construit** l'image depuis les sources (`pull_policy: build`) au lieu
+#     de tirer une version publiée ;
+#   - il lance un fournisseur d'identité **fictif** (`fake-oidc`) qui accepte
+#     n'importe quelle connexion, sans mot de passe ;
+#   - il pose un mot de passe administrateur de **test** en clair
+#     (`adminadmin`), et publie l'API sur 3101 ;
+#   - il déclare le banc de charge k6 (profil `loadtest`, jamais lancé par `up`).
+#
+# Pour un déploiement, partir de `docker/docker-compose.yml` : un seul service,
+# image publiée `ghcr.io/remi-petit/easy3d`, aucune dépendance de test, comptes
+# et SSO à configurer soi-même.
+#
+# Rien ici ne doit être exposé au-delà de la machine.
+# ═══════════════════════════════════════════════════════════════════════════
+
 services:
   easy3d:
     # Image construite **localement** depuis les sources du dépôt, jamais tirée
@@ -207,3 +228,62 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  # ── Banc de charge k6 (profil `loadtest`, jamais lancé par défaut) ────────
+  #
+  # Les scénarios sont dans `docker/k6/` — voir `docker/k6/README.md`. Ils
+  # attaquent l'**API** depuis le réseau Compose (`http://easy3d:8090`), sans
+  # passer ni par la machine hôte ni par le proxy Nitro.
+  #
+  #   docker compose --profile loadtest run --rm k6 run /scripts/smoke.js
+  #   docker compose --profile loadtest run --rm k6 run /scripts/load.js
+  #   docker compose --profile loadtest run --rm k6 run /scripts/ws.js
+  #
+  # `run` exécute k6 puis supprime le conteneur (`--rm`). Rien ne survit à un
+  # test.
+  #
+  # ⚠️ **Pas de `depends_on`** : il ferait démarrer (donc, avec
+  # `pull_policy: build` sur `easy3d`, **reconstruire et redémarrer**) le
+  # serveur qu'on s'apprête à mesurer. L'application doit tourner avant :
+  # `docker compose up -d`. Sinon le premier appel échoue tout de suite en
+  # disant que `/auth/me` est injoignable.
+  #
+  # Le **profil** est la clé : `docker compose up` continue de ne lancer que
+  # l'application. Un banc de charge ne doit jamais pouvoir démarrer par
+  # accident sur une machine utilisée pour autre chose.
+  k6:
+    # Version épinglée : un changement de version peut changer les unités ou les
+    # seuils, donc fausser une comparaison avant/après.
+    image: grafana/k6:2.3.0
+    profiles: ["loadtest"]
+    volumes:
+      # Lecture seule : les scénarios sont des sources, relues à chaque
+      # lancement — aucune image à reconstruire quand on en modifie un.
+      - ./docker/k6:/scripts:ro
+    ports:
+      # Tableau de bord web de k6 : courbes en direct pendant le test
+      # (http://localhost:5665), plus lisibles que le résumé de fin.
+      #
+      # ⚠️ `docker compose run` ne publie **pas** les ports par défaut : il faut
+      # ajouter `--service-ports` à la commande (voir `docker/k6/README.md`).
+      - "5665:5665"
+    environment:
+      # Nom de service Compose : vu de ce conteneur, la machine hôte s'appelle
+      # `host.docker.internal` (son `localhost` est le conteneur k6 lui-même).
+      BASE_URL: http://easy3d:8090
+      # Le tableau de bord est armé par défaut (c'est la façon la plus simple de
+      # suivre un test). Le couper pour une mesure « propre » :
+      # `-e K6_WEB_DASHBOARD=false`.
+      K6_WEB_DASHBOARD: "true"
+      # Sans ça, le tableau de bord n'écoute que sur la boucle locale du
+      # conteneur, où le port publié ne mène pas.
+      K6_WEB_DASHBOARD_HOST: "0.0.0.0"
+      # Compte utilisé par les scénarios quand `EASY3D_AUTH` est actif. La
+      # référence reste le bloc `environment:` du service `easy3d` ; ce sont des
+      # identifiants de développement, surchargeables au lancement
+      # (`EASY3D_PASSWORD=… docker compose --profile loadtest run …`).
+      EASY3D_LOGIN: admin
+      EASY3D_PASSWORD: "adminadmin"
+    # Scénario par défaut. `run` remplace ces arguments :
+    #   docker compose --profile loadtest run --rm k6 run /scripts/load.js
+    command: ["run", "/scripts/smoke.js"]
