@@ -1,4 +1,4 @@
-use easy3d::{ai, api, auth, config, formats, thumbnail, watcher};
+use easy3d::{ai, api, auth, config, formats, maintenance, thumbnail, watcher};
 use notify::RecursiveMode;
 use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 use std::path::{Path, PathBuf};
@@ -186,6 +186,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         async move {
             if let Err(e) = api::serve(state).await {
                 eprintln!("Erreur serveur : {e}");
+            }
+        }
+    });
+
+    // Entretien de la mémoire : un pic de trafic fait grandir le tas, que
+    // l'allocateur ne rend pas de lui-même (voir `maintenance`). La période est
+    // **relue à chaque tour** (comme le re-scan périodique) : la changer dans
+    // /admin s'applique sans redémarrer. Le tour fait une minute : c'est la
+    // granularité maximale de la prise en compte d'un nouveau réglage, très
+    // suffisante pour une action d'entretien.
+    tokio::spawn({
+        let state = state.clone();
+        async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(60));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut last = std::time::Instant::now();
+            let mut logged: Option<u64> = None;
+            loop {
+                tick.tick().await;
+                let Some(period) = config::trim_interval(&state.config()) else {
+                    // Désactivé : on remet le compteur à zéro pour que la
+                    // réactivation reparte de maintenant, sans rattrapage.
+                    last = std::time::Instant::now();
+                    if logged != Some(0) {
+                        logged = Some(0);
+                        println!("Entretien mémoire : désactivé (memory.trim_minutes: 0).");
+                    }
+                    continue;
+                };
+                if logged != Some(period.as_secs() / 60) {
+                    logged = Some(period.as_secs() / 60);
+                    println!(
+                        "Entretien mémoire : restitution au système toutes les {} min.",
+                        period.as_secs() / 60
+                    );
+                }
+                if last.elapsed() < period {
+                    continue;
+                }
+                last = std::time::Instant::now();
+                let before = maintenance::rss_kb();
+                let released = maintenance::trim_heap();
+                let after = maintenance::rss_kb();
+                // Silence quand il n'y avait rien à rendre : un serveur au
+                // repos ne doit pas remplir le journal toutes les 15 minutes.
+                if released && before > after {
+                    println!(
+                        "Entretien mémoire : {} Mo rendus au système (résident {} → {} Mo).",
+                        (before - after) / 1024,
+                        before / 1024,
+                        after / 1024
+                    );
+                }
             }
         }
     });

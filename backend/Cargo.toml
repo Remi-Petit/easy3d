@@ -39,6 +39,12 @@ blake2 = "0.11"
 # `ServiceExt::oneshot`. `tower` est déjà une dépendance d'axum.
 tower = { version = "0.5", features = ["util"] }
 
+# `malloc_trim` (entretien de la mémoire, voir `maintenance`) : la glibc de
+# l'image Docker est la seule à exposer cet appel. Déjà compilé en transitif par
+# `tokio`, on ne l'ajoute ici que pour pouvoir le nommer.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 http-body-util = "0.1"

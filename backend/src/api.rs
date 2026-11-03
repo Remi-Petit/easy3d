@@ -969,6 +969,14 @@ pub fn apply_config(
         .oidc
         .merge_secret(config.oidc.client_secret.as_deref());
 
+    // L'entretien de la mémoire n'a **pas de champ dans l'interface** : un
+    // enregistrement depuis /admin arrive donc sans ce bloc, et l'écrire tel
+    // quel effacerait en silence une valeur réglée à la main dans `config.yml`.
+    // Absent = « ne me prononce pas », donc on garde ce qui est en place.
+    if config.memory.trim_minutes.is_none() {
+        config.memory = stored.memory.clone();
+    }
+
     // Refuse une config qui pointerait vers un dossier inexistant : le watcher
     // basculerait dessus et le catalogue se viderait.
     let root = config.resolve_models_root();
@@ -1989,6 +1997,55 @@ mod tests {
 
         // `0` — désactivé — est une valeur choisie, pas « automatique ».
         assert_eq!(Config::default().watch.poll_seconds, None);
+    }
+
+    /// L'entretien de la mémoire n'a pas de champ dans l'interface : un
+    /// enregistrement depuis /admin ne doit donc pas effacer la valeur réglée à
+    /// la main dans `config.yml`.
+    #[tokio::test]
+    async fn put_config_conserve_le_reglage_d_entretien_memoire() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.yml");
+        let models = dir.path().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+
+        // Réglé à la main, comme le ferait un administrateur dans son YAML.
+        let mut initial = Config::default();
+        initial.memory.trim_minutes = Some(45);
+
+        let (ws, _) = broadcast::channel::<String>(16);
+        let app = routes(AppState::new(".", ws, initial).with_config_path(&config_path));
+
+        // Ce que /admin envoie : ni `memory`, ni autre chose que ses champs.
+        let body = serde_json::json!({
+            "models_root": models.to_string_lossy(),
+            "display": { "mode": "image" }
+        })
+        .to_string();
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/config")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Le réglage survit à l'enregistrement, dans le YAML comme dans l'état.
+        assert_eq!(
+            Config::load_from(&config_path).memory.trim_minutes,
+            Some(45)
+        );
+        // Et le reste a bien été appliqué.
+        assert_eq!(
+            Config::load_from(&config_path).display.mode,
+            config::DisplayMode::Image
+        );
     }
 
     /// `/config` expose de quoi expliquer la recommandation dans l'interface :

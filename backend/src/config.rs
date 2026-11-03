@@ -56,6 +56,30 @@ impl Watch {
     }
 }
 
+/// Entretien de la mémoire du process.
+///
+/// Un pic de trafic fait grandir le tas ; l'allocateur ne le rend pas de
+/// lui-même (voir [`crate::maintenance`]). Ce bloc règle la restitution
+/// périodique, sans redémarrage.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Memory {
+    /// Période de **restitution de la mémoire** au système, en minutes.
+    ///
+    /// - absent (`None`) : le défaut de [`DEFAULT_TRIM_MINUTES`] s'applique ;
+    /// - `0` : jamais — pour un serveur dont la mémoire ne bouge pas, ou pour
+    ///   garder la main sur un système qui n'aime pas les `madvise` ;
+    /// - `n` : restitution toutes les `n` minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim_minutes: Option<u64>,
+}
+
+impl Memory {
+    /// `true` si rien n'est fixé : `save` laisse alors le YAML sans ce bloc.
+    fn is_auto(&self) -> bool {
+        self.trim_minutes.is_none()
+    }
+}
+
 /// Valeur renvoyée **à la place** de la clé d'API dans les réponses HTTP.
 ///
 /// Elle dit au navigateur « une clé est enregistrée » sans la révéler. En sens
@@ -292,6 +316,9 @@ pub struct Config {
     /// Surveillance du dossier des modèles.
     #[serde(default, skip_serializing_if = "Watch::is_auto")]
     pub watch: Watch,
+    /// Entretien de la mémoire du process.
+    #[serde(default, skip_serializing_if = "Memory::is_auto")]
+    pub memory: Memory,
     /// Recherche assistée par un modèle de langage.
     #[serde(default, skip_serializing_if = "Ai::is_empty")]
     pub ai: Ai,
@@ -504,6 +531,19 @@ pub fn watch_poll_interval(config: &Config, root: &Path) -> Option<Duration> {
     effective_interval(config.watch.poll_seconds, recommended)
 }
 
+/// Période par défaut de la restitution de mémoire : **15 minutes**.
+pub const DEFAULT_TRIM_MINUTES: u64 = 15;
+
+/// Période de restitution de la mémoire (`None` = jamais).
+///
+/// Sans réglage, [`DEFAULT_TRIM_MINUTES`] s'applique : la restitution est sans
+/// effet sur le débit (quelques microsecondes) et évite qu'un pic de trafic
+/// laisse le process au niveau de mémoire qu'il a atteint.
+pub fn trim_interval(config: &Config) -> Option<Duration> {
+    let minutes = config.memory.trim_minutes.unwrap_or(DEFAULT_TRIM_MINUTES);
+    (minutes > 0).then(|| Duration::from_secs(minutes * 60))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,6 +663,33 @@ mod tests {
             effective_interval(Some(15), 5),
             Some(Duration::from_secs(15))
         );
+    }
+
+    #[test]
+    fn entretien_memoire_par_defaut_reglable_et_desactivable() {
+        // Sans réglage : quinze minutes.
+        assert_eq!(
+            trim_interval(&Config::default()),
+            Some(Duration::from_secs(DEFAULT_TRIM_MINUTES * 60))
+        );
+        // Valeur choisie.
+        let mut config = Config::default();
+        config.memory.trim_minutes = Some(5);
+        assert_eq!(trim_interval(&config), Some(Duration::from_secs(300)));
+        // Désactivé explicitement.
+        config.memory.trim_minutes = Some(0);
+        assert_eq!(trim_interval(&config), None);
+    }
+
+    #[test]
+    fn le_bloc_memoire_se_lit_dans_le_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yml");
+        std::fs::write(&file, "memory:\n  trim_minutes: 30\n").unwrap();
+        assert_eq!(Config::load_from(&file).memory.trim_minutes, Some(30));
+        // Absent → défaut de la structure (`None` = automatique).
+        std::fs::write(&file, "display:\n  mode: image\n").unwrap();
+        assert_eq!(Config::load_from(&file).memory.trim_minutes, None);
     }
 
     #[test]
