@@ -27,6 +27,7 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// UUID du rôle livré `admin`.
@@ -613,25 +614,37 @@ pub fn create_session(conn: &Connection, session: &NewSession<'_>) -> Result<(),
 ///
 /// Le compte désactivé est filtré **ici** : couper l'accès à quelqu'un prend
 /// effet à la requête suivante, sans avoir à retrouver ses sessions.
+/// Requête de session, composée **une fois**.
+///
+/// Elle était reconstruite à chaque requête (`format!` puis `prepare`) : mesuré
+/// à **62 µs** par `cargo bench --bench auth`, pour un `SELECT` qui devrait en
+/// coûter quelques-uns. La chaîne est désormais figée, et la requête préparée
+/// reste en cache dans la connexion (`prepare_cached`).
+fn session_query() -> &'static str {
+    static QUERY: OnceLock<String> = OnceLock::new();
+    QUERY.get_or_init(|| {
+        let columns = USER_COLUMNS
+            .split(", ")
+            .map(|c| format!("u.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "SELECT {columns}, s.uuid FROM sessions s
+             JOIN users u ON u.uuid = s.user_uuid
+             WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled = 0"
+        )
+    })
+}
+
 pub fn session_of(
     conn: &Connection,
     token_hash: &str,
     at: i64,
 ) -> Result<Option<(User, String)>, String> {
-    conn.query_row(
-        &format!(
-            "SELECT {}, s.uuid FROM sessions s
-             JOIN users u ON u.uuid = s.user_uuid
-             WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled = 0",
-            USER_COLUMNS
-                .split(", ")
-                .map(|c| format!("u.{c}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        params![token_hash, at],
-        |row| Ok((row_to_user(row)?, row.get::<_, String>(USER_COLUMN_COUNT)?)),
-    )
+    let mut stmt = conn.prepare_cached(session_query()).map_err(err)?;
+    stmt.query_row(params![token_hash, at], |row| {
+        Ok((row_to_user(row)?, row.get::<_, String>(USER_COLUMN_COUNT)?))
+    })
     .optional()
     .map_err(err)
 }

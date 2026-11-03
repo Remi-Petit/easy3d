@@ -1,7 +1,7 @@
 use crate::{formats, notes, thumbnail};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Métadonnées d'un fichier découvert par le scan.
@@ -88,16 +88,18 @@ impl ModelsScan {
 
 /// Liste récursive de **tous** les fichiers (racine + dossiers, à plat).
 pub fn scan_files(root: &Path) -> Vec<FileInfo> {
+    let notes = NoteIndex::build(root);
     let mut out = Vec::new();
     scan_dir_recursive(root, root, &mut out);
     attach_sibling_images(&mut out, root);
     attach_generated_thumbs(&mut out);
-    attach_notes(&mut out, root);
+    attach_notes(&mut out, &notes);
     out
 }
 
 /// Scan structuré : fichiers à la racine et fichiers groupés par sous-dossier.
 pub fn scan_models(root: &Path) -> ModelsScan {
+    let notes = NoteIndex::build(root);
     let mut scan = ModelsScan {
         folders: BTreeMap::new(),
         files: Vec::new(),
@@ -114,23 +116,31 @@ pub fn scan_models(root: &Path) -> ModelsScan {
             continue;
         }
 
-        if path.is_dir() {
+        // Une seule interrogation des métadonnées par entrée : `path.is_dir()`
+        // puis `is_file()` puis `fs::metadata()` en coûtaient trois. Sur un
+        // montage virtualisé, chaque appel pèse ~3 ms (mesuré) — c'est le poste
+        // dominant du scan, bien avant le traitement en mémoire.
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+
+        if meta.is_dir() {
             let mut files = Vec::new();
             scan_dir_recursive(&path, root, &mut files);
             attach_sibling_images(&mut files, root);
             attach_generated_thumbs(&mut files);
-            attach_notes(&mut files, root);
+            attach_notes(&mut files, &notes);
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let modified = folder_modified(&path, &files);
+            let modified = folder_modified(&meta, &files);
             let mut subfolders = Vec::new();
             scan_subfolders(&path, root, &files, &mut subfolders);
             scan.folders.insert(
                 name.clone(),
                 FolderInfo {
-                    note: notes::read(root, &name),
+                    note: notes.get(&name),
                     name,
                     count: files.len(),
                     modified,
@@ -138,16 +148,14 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                     subfolders,
                 },
             );
-        } else if path.is_file()
-            && let Some(info) = file_info(&path, root)
-        {
-            scan.files.push(info);
+        } else if meta.is_file() {
+            scan.files.push(file_info(&path, root, &meta));
         }
     }
 
     attach_sibling_images(&mut scan.files, root);
     attach_generated_thumbs(&mut scan.files);
-    attach_notes(&mut scan.files, root);
+    attach_notes(&mut scan.files, &notes);
     scan
 }
 
@@ -163,12 +171,16 @@ fn scan_dir_recursive(dir: &Path, root: &Path, out: &mut Vec<FileInfo>) {
             continue;
         }
 
-        if path.is_dir() {
+        // Voir `scan_models` : métadonnées lues une fois, réutilisées par
+        // `file_info` au lieu d'un second appel système.
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+
+        if meta.is_dir() {
             scan_dir_recursive(&path, root, out);
-        } else if path.is_file()
-            && let Some(info) = file_info(&path, root)
-        {
-            out.push(info);
+        } else if meta.is_file() {
+            out.push(file_info(&path, root, &meta));
         }
     }
 }
@@ -223,13 +235,16 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
-/// Dernière modification d'un dossier, en secondes unix.
-///
-/// Le plus récent entre son `mtime` (ajout, suppression ou renommage d'une
-/// entrée) et celui des fichiers qu'il contient (édition de contenu, qui ne
-/// touche pas le répertoire). `None` seulement si rien n'est lisible.
-fn folder_modified(dir: &Path, files: &[FileInfo]) -> Option<u64> {
-    max_modified(dir, files.iter().map(|f| f.modified))
+/// Dernière modification d'un dossier, à partir de son `mtime` **déjà lu**
+/// (un `stat` de plus serait payé à chaque dossier du catalogue).
+fn folder_modified(meta: &std::fs::Metadata, files: &[FileInfo]) -> Option<u64> {
+    let dir_mtime = meta.modified().ok().and_then(to_unix_secs);
+    let files_mtime = files.iter().map(|f| f.modified).max().flatten();
+
+    match (dir_mtime, files_mtime) {
+        (Some(dir), Some(file)) => Some(dir.max(file)),
+        (dir, file) => dir.or(file),
+    }
 }
 
 /// Le plus récent entre le `mtime` d'un dossier et celui des fichiers donnés.
@@ -247,9 +262,12 @@ fn max_modified(dir: &Path, files: impl Iterator<Item = Option<u64>>) -> Option<
 }
 
 /// Lit les métadonnées d'un fichier en `FileInfo`.
-fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some(FileInfo {
+///
+/// Les métadonnées sont **fournies** : l'entrée de dossier les a déjà lues, et
+/// un second `stat` du même chemin est le poste le plus cher du scan sur un
+/// montage virtualisé.
+fn file_info(path: &Path, root: &Path, meta: &std::fs::Metadata) -> FileInfo {
+    FileInfo {
         path: path.display().to_string(),
         rel: rel_path(root, path),
         created: meta.created().ok().and_then(to_unix_secs),
@@ -257,7 +275,7 @@ fn file_info(path: &Path, root: &Path) -> Option<FileInfo> {
         image: None,
         image_version: None,
         note: None,
-    })
+    }
 }
 
 /// Nom de base sans extension d'un chemin relatif.
@@ -325,10 +343,64 @@ fn attach_generated_thumbs(files: &mut [FileInfo]) {
     }
 }
 
+/// Notes présentes sur le disque, relevées **une fois** par scan.
+///
+/// Sans cet index, chaque fichier et chaque dossier payait un `open` en échec
+/// pour découvrir qu'il n'a pas de note. Sur le montage Docker Desktop, un appel
+/// système coûte ~3 ms (mesuré) : pour un catalogue de 8 fichiers dans 5
+/// dossiers, c'étaient 13 ouvertures ratées par requête.
+struct NoteIndex {
+    root: PathBuf,
+    presentes: std::collections::HashSet<String>,
+}
+
+impl NoteIndex {
+    fn build(root: &Path) -> Self {
+        let base = root.join(notes::NOTES_DIR);
+        let mut presentes = std::collections::HashSet::new();
+        collect_note_rels(&base, &base, &mut presentes);
+        Self {
+            root: root.to_path_buf(),
+            presentes,
+        }
+    }
+
+    /// Contenu de la note de `rel`, ou `None` s'il n'y en a pas.
+    fn get(&self, rel: &str) -> Option<String> {
+        self.presentes
+            .contains(rel)
+            .then(|| notes::read(&self.root, rel))
+            .flatten()
+    }
+}
+
+/// Parcourt l'arbre des notes et relève les `rel` qui en ont une.
+///
+/// Les séparateurs sont normalisés en `/` : `notes::note_path` construit ses
+/// chemins avec cette forme, y compris sous Windows.
+fn collect_note_rels(base: &Path, dir: &Path, out: &mut std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if kind.is_dir() {
+            collect_note_rels(base, &path, out);
+        } else if let Some(rel) = path.strip_prefix(base).ok().and_then(|p| p.to_str())
+            && let Some(rel) = rel.strip_suffix(".md")
+        {
+            out.insert(rel.replace('\\', "/"));
+        }
+    }
+}
+
 /// Associe à chaque élément sa note Markdown (`.easy3d-notes/<rel>.md`).
-fn attach_notes(files: &mut [FileInfo], root: &Path) {
+fn attach_notes(files: &mut [FileInfo], notes: &NoteIndex) {
     for f in files.iter_mut() {
-        f.note = notes::read(root, &f.rel);
+        f.note = notes.get(&f.rel);
     }
 }
 

@@ -51,8 +51,20 @@ pub struct AppState {
     ///
     /// Référence du **re-scan périodique** ([`refresh_if_changed`]) : sans elle,
     /// chaque tic rediffuserait un contenu identique et le frontend, qui
-    /// remplace son état à chaque message, se re-rendrait pour rien.
+    /// remplace son état à chaque message, se re-rendrait pour rien. Elle sert
+    /// aussi de cache à `GET /models` (voir [`SNAPSHOT_TTL`]).
     pub last_snapshot: Arc<RwLock<String>>,
+    /// Instant de production de [`AppState::last_snapshot`].
+    ///
+    /// Date de péremption du cache de `/models` : au-delà de [`SNAPSHOT_TTL`],
+    /// la requête suivante relance un scan. Mis à jour par toute écriture
+    /// (`broadcast_snapshot`), donc un envoi, un renommage ou une suppression
+    /// sont visibles immédiatement.
+    pub snapshot_at: Arc<Mutex<Option<std::time::Instant>>>,
+    /// Verrou de rafraîchissement : **un** scan à la fois, même si mille
+    /// requêtes arrivent sur un cache périmé (voir [`list_models`]).
+    pub refresh: Arc<tokio::sync::Mutex<()>>,
+
     /// Comptes utilisateurs et sessions.
     ///
     /// **Éteint par défaut** ([`auth::Auth::disabled`]) : sans `EASY3D_AUTH`, le
@@ -93,6 +105,8 @@ impl AppState {
             // configuration les remplace s'il existe (voir `main.rs`).
             presets: Arc::new(RwLock::new(ai::presets::defaults())),
             last_snapshot: Arc::new(RwLock::new(String::new())),
+            snapshot_at: Arc::new(Mutex::new(None)),
+            refresh: Arc::new(tokio::sync::Mutex::new(())),
             auth: Arc::new(auth::Auth::disabled()),
             oidc: Arc::new(auth::oidc::Env::empty()),
             mcp: Arc::new(Mutex::new(HashMap::new())),
@@ -697,13 +711,98 @@ impl ModelsResponse {
     }
 }
 
+/// Durée pendant laquelle `GET /models` peut répondre depuis la mémoire.
+///
+/// Le scan coûte **169 ms** sur un montage Docker Desktop (mesuré) et rien en
+/// mémoire ; le refaire à chaque navigation ne sert à rien quand le catalogue
+/// ne bouge pas. Au-delà de ce délai, la requête suivante rescanne : un fichier
+/// déposé hors de l'interface apparaît donc en **une seconde** au plus, plus
+/// frais que le re-scan périodique de 5 s de ce type de montage. Toute écriture
+/// passant par l'API met le cache à jour immédiatement ([`broadcast_snapshot`]).
+const SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Liste en cache si elle a moins de [`SNAPSHOT_TTL`], sinon `None`.
+fn cached_snapshot(state: &AppState) -> Option<String> {
+    let at = (*state.snapshot_at.lock().unwrap())?;
+    if at.elapsed() > SNAPSHOT_TTL {
+        return None;
+    }
+    let json = state.last_snapshot.read().unwrap();
+    (!json.is_empty()).then(|| json.clone())
+}
+
+/// Liste courante, même périmée (`None` seulement s'il n'y en a jamais eu).
+fn any_snapshot(state: &AppState) -> Option<String> {
+    let json = state.last_snapshot.read().unwrap();
+    (!json.is_empty()).then(|| json.clone())
+}
+
+/// Relance un scan **en tâche de fond**, sans faire attendre l'appelant.
+///
+/// Sans cela, les requêtes qui arrivent pendant un scan (169 ms à vide, bien
+/// davantage quand le disque est saturé par les téléchargements) s'empilaient
+/// sur le verrou : mesuré à 1000 VU, `/models` restait l'endpoint le plus lent
+/// (p95 5,8 s) alors que la réponse en cache coûte 2,5 ms.
+fn refresh_in_background(state: &AppState) {
+    // `try_lock_owned` : si un scan tourne déjà, il fera le travail. Le verrou
+    // est **possédé** pour pouvoir être déplacé dans la tâche bloquante.
+    let Ok(garde) = Arc::clone(&state.refresh).try_lock_owned() else {
+        return;
+    };
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let _garde = garde; // relâché à la fin du scan
+        if cached_snapshot(&state).is_some() {
+            return; // une écriture a rafraîchi entre-temps
+        }
+        store_snapshot(&state, snapshot(&state));
+    });
+}
+
+/// Enregistre une liste comme étant **la** référence courante.
+fn store_snapshot(state: &AppState, json: String) -> String {
+    *state.last_snapshot.write().unwrap() = json.clone();
+    *state.snapshot_at.lock().unwrap() = Some(std::time::Instant::now());
+    json
+}
+
 /// Renvoie le contenu structuré : fichiers racine + dossiers + total.
-async fn list_models(State(state): State<AppState>) -> Json<ModelsResponse> {
-    Json(ModelsResponse::from_scan(
-        scanner::scan_models(&state.root()),
-        &state.config(),
-        &state.presets(),
-    ))
+///
+/// Le scan est **synchrone** (un `stat` par fichier, une lecture par note) et le
+/// handler est async : lancé sur place, il immobilise un worker tokio pendant
+/// toute la durée du parcours. Mesuré sur le montage Docker Desktop : **250 ms**
+/// par appel avant optimisation, 169 ms après — pour un serveur qui restait à
+/// ~1,1 cœur à 1000 VU. Deux corrections : `spawn_blocking` (le travail part sur
+/// le pool bloquant) et un cache d'une seconde ([`SNAPSHOT_TTL`]).
+async fn list_models(State(state): State<AppState>) -> Response {
+    if let Some(json) = cached_snapshot(&state) {
+        return json_response(json);
+    }
+
+    // Périmé mais présent : on **répond tout de suite** et on rafraîchit
+    // derrière. Faire attendre la requête derrière le verrou était le dernier
+    // goulot mesuré à 1000 VU.
+    if let Some(json) = any_snapshot(&state) {
+        refresh_in_background(&state);
+        return json_response(json);
+    }
+
+    // Jamais scanné (démarrage) : là, il faut bien attendre le premier scan.
+    let _garde = state.refresh.lock().await;
+    if let Some(json) = cached_snapshot(&state) {
+        return json_response(json);
+    }
+    let scan_state = state.clone();
+    match tokio::task::spawn_blocking(move || store_snapshot(&scan_state, snapshot(&scan_state)))
+        .await
+    {
+        Ok(json) => json_response(json),
+        Err(e) => internal_error(e).into_response(),
+    }
+}
+
+fn json_response(json: String) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], json).into_response()
 }
 
 /// Réponse de `/config` : la configuration, plus le dossier réellement surveillé.
@@ -1292,14 +1391,20 @@ async fn post_upload(
     //
     // L'aperçu est donc généré ici (le watcher ne le fera pas non plus), puis
     // la liste est rediffusée à tous les clients WebSocket.
-    let root = state.root();
-    thumbnail::ensure_for_changed(&root, &root.join(thumbnail::THUMB_DIR), &relative);
-    broadcast_snapshot(&state);
+    //
+    // Les deux sont **synchrones** (rendu PNG + scan complet) : hors du réacteur,
+    // sinon 1 000 envois simultanés immobiliseraient autant de workers.
+    let bytes = body.len() as u64;
+    let state = state.clone();
+    let changed = relative.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let root = state.root();
+        thumbnail::ensure_for_changed(&root, &root.join(thumbnail::THUMB_DIR), &changed);
+        broadcast_snapshot(&state);
+    })
+    .await;
 
-    Ok(Json(UploadResponse {
-        rel: q.path,
-        bytes: body.len() as u64,
-    }))
+    Ok(Json(UploadResponse { rel: q.path, bytes }))
 }
 
 /// Chemin du fichier temporaire d'écriture : **caché** (le scan et le
@@ -1429,16 +1534,23 @@ async fn post_rename(
 
     // 2. Ce qui l'accompagne, en signalant les échecs sans faire échouer
     //    l'opération : le catalogue, lui, est déjà à jour.
-    if let Err(e) = notes::move_for_path(&root, &from, &to) {
-        eprintln!(
-            "⚠️  Notes non déplacées ({} → {}) : {e}",
-            request.path, to_rel
-        );
-    }
-    thumbnail::move_for_path(&root, &root.join(thumbnail::THUMB_DIR), &from, &to);
-
-    // 3. Les clients : la liste complète, comme après un envoi.
-    broadcast_snapshot(&state);
+    //
+    //    Déporté hors du réacteur : déplacements sur disque + scan complet.
+    let state = state.clone();
+    let root = root.clone();
+    let from = from.clone();
+    let to = to.clone();
+    let from_rel = request.path.clone();
+    let to_rel_erreur = to_rel.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Err(e) = notes::move_for_path(&root, &from, &to) {
+            eprintln!("⚠️  Notes non déplacées ({from_rel} → {to_rel_erreur}) : {e}");
+        }
+        thumbnail::move_for_path(&root, &root.join(thumbnail::THUMB_DIR), &from, &to);
+        // 3. Les clients : la liste complète, comme après un envoi.
+        broadcast_snapshot(&state);
+    })
+    .await;
 
     Ok(Json(RenameResponse { rel: to_rel }))
 }
@@ -1509,11 +1621,18 @@ async fn post_delete(
 
     // 2. Ce qui l'accompagnait, en signalant les échecs sans faire échouer
     //    l'opération : le catalogue, lui, est déjà à jour.
-    notes::remove_for_path(&root, &request.path);
-    thumbnail::remove_for_path(&root, &root.join(thumbnail::THUMB_DIR), &path);
-
-    // 3. Les clients : la liste complète, comme après un envoi.
-    broadcast_snapshot(&state);
+    //    Déporté hors du réacteur : suppressions + scan complet.
+    let state = state.clone();
+    let root = root.clone();
+    let path = path.clone();
+    let rel = request.path.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        notes::remove_for_path(&root, &rel);
+        thumbnail::remove_for_path(&root, &root.join(thumbnail::THUMB_DIR), &path);
+        // 3. Les clients : la liste complète, comme après un envoi.
+        broadcast_snapshot(&state);
+    })
+    .await;
 
     Ok(Json(DeleteResponse { rel: request.path }))
 }
@@ -1537,9 +1656,16 @@ struct NoteResponse {
 /// synchronisation (voir [`crate::collab`]), seul à même de fusionner des
 /// modifications concurrentes.
 async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> Json<NoteResponse> {
-    Json(NoteResponse {
-        content: notes::read(&state.root(), &q.path).unwrap_or_default(),
-    })
+    // Une note = un `open` ; sur un montage virtualisé il coûte plusieurs ms, et
+    // 1000 clients le paient en même temps. Hors du réacteur, comme le scan.
+    let root = state.root();
+    let rel = q.path;
+    let content = tokio::task::spawn_blocking(move || notes::read(&root, &rel))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    Json(NoteResponse { content })
 }
 
 /// Rescanne l'état courant et diffuse la liste des modèles aux clients WS.
@@ -1548,7 +1674,9 @@ async fn get_note(State(state): State<AppState>, Query(q): Query<FileQuery>) -> 
 /// c'est le re-scan périodique, lui, qui filtre les contenus inchangés.
 pub fn broadcast_snapshot(state: &AppState) {
     let payload = snapshot(state);
-    *state.last_snapshot.write().unwrap() = payload.clone();
+    // Stampé ici : toute écriture (envoi, renommage, suppression, watcher)
+    // rafraîchit le cache de `GET /models`.
+    store_snapshot(state, payload.clone());
     let _ = state.ws.send(payload);
 }
 
