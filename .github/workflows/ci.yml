@@ -197,7 +197,9 @@ jobs:
       # l'autre. Monter cette version est un changement volontaire, testé.
       - uses: aquasecurity/setup-trivy@v0.3.1
         with:
-          version: 0.76.1
+          # Le préfixe `v` fait partie du **nom du tag** Git chez Trivy : sans
+          # lui, l'action répond « unable to find '0.76.1' » (vérifié).
+          version: v0.76.1
           cache: true
       - name: CRITICAL (bloquant)
         run: trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 easy3d:ci
