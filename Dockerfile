@@ -79,11 +79,39 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Deux process, deux ports — donc deux variables de port **distinctes** : le
 # backend lit `PORT`, le serveur Nitro lit `NITRO_PORT` (prioritaire sur `PORT`,
 # qu'il partage avec la plupart des applications Node).
+#
+# `NODE_ENV=production` : le build l'est déjà (`bun run build`), mais sans cette
+# variable le runtime garde ses heuristiques de développement au démarrage —
+# mesuré, ~3,5 Mo de mémoire résidente en moins à l'arrêt, pour une latence
+# identique (p50 9,3 ms contre 9,4 ms sur 500 rendus SSR).
 ENV PORT=8090 \
     NITRO_PORT=3000 \
     NITRO_HOST=0.0.0.0 \
     MODELS_ROOT=/models \
+    NODE_ENV=production \
     NUXT_HPCCAT_API_BASE=http://127.0.0.1:8090
+
+# Arènes du `malloc` de la glibc. Par défaut, chaque thread de Tokio peut ouvrir
+# sa propre arène (64 Mo virtuels, et autant de pages réellement touchées) — et
+# une arène ne rend jamais ses pages au système : mesuré après un banc à
+# 1 000 utilisateurs virtuels, le process Rust passait de 14 Mo à **155 Mo** de
+# mémoire résidente, sans jamais redescendre. Avec deux arènes : **116 Mo**
+# (−25 %), à débit identique (589 contre 593 requêtes/s, p95 3,21 s contre
+# 3,38 s). Une seule arène n'apporte rien de plus (117 Mo, débit un peu
+# inférieur) : deux est l'optimum, et c'est aussi le réglage recommandé pour les
+# serveurs Node/Rust multi-thread en conteneur.
+ENV MALLOC_ARENA_MAX=2
+
+# Arènes du `malloc` de la glibc. Par défaut, chaque thread de Tokio peut ouvrir
+# sa propre arène (64 Mo virtuels, et autant de pages réellement touchées) — et
+# une arène ne rend jamais ses pages au système : mesuré après un banc à
+# 1 000 utilisateurs virtuels, le process Rust passait de 14 Mo à **155 Mo** de
+# mémoire résidente, sans jamais redescendre. Avec deux arènes : **116 Mo**
+# (−25 %), à débit identique (589 contre 593 requêtes/s, p95 3,21 s contre
+# 3,38 s). Une seule arène n'apporte rien de plus (117 Mo, débit un peu
+# inférieur) : deux est l'optimum, et c'est aussi le réglage recommandé pour les
+# serveurs Node/Rust multi-thread en conteneur.
+ENV MALLOC_ARENA_MAX=2
 
 # L'API doit écouter sur toutes les interfaces du conteneur : la publication de
 # port (`-p 8090:8090`) ne relaie pas vers la boucle locale. Hors conteneur, la
@@ -106,8 +134,14 @@ RUN mkdir -p /models /config && chown node:node /models /config
 USER node
 EXPOSE 8090 3000
 
+# Deux process à vérifier, donc deux requêtes. La seconde passe par le proxy
+# `/api/health` de Nitro et **non** par la page d'accueil : celle-ci rendait tout
+# le HTML (et, au passage, un scan complet du catalogue côté backend) toutes les
+# 30 s, soit la moitié du CPU de veille du conteneur. Un rendu SSR cassé se voit
+# dans les tests et la CI ; ce que le healthcheck doit dire, c'est que les deux
+# process répondent.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null \
-        && curl -fsS "http://127.0.0.1:${NITRO_PORT}/" >/dev/null || exit 1
+        && curl -fsS "http://127.0.0.1:${NITRO_PORT}/api/health" >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

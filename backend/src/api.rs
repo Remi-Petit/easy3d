@@ -64,6 +64,9 @@ pub struct AppState {
     /// Verrou de rafraîchissement : **un** scan à la fois, même si mille
     /// requêtes arrivent sur un cache périmé (voir [`list_models`]).
     pub refresh: Arc<tokio::sync::Mutex<()>>,
+    /// État du **re-scan périodique** (voir [`refresh_if_changed`]) : empreinte
+    /// de l'arborescence au dernier scan complet, et nombre de tics depuis.
+    poll: Arc<Mutex<PollState>>,
 
     /// Comptes utilisateurs et sessions.
     ///
@@ -107,6 +110,7 @@ impl AppState {
             last_snapshot: Arc::new(RwLock::new(String::new())),
             snapshot_at: Arc::new(Mutex::new(None)),
             refresh: Arc::new(tokio::sync::Mutex::new(())),
+            poll: Arc::new(Mutex::new(PollState::default())),
             auth: Arc::new(auth::Auth::disabled()),
             oidc: Arc::new(auth::oidc::Env::empty()),
             mcp: Arc::new(Mutex::new(HashMap::new())),
@@ -1680,6 +1684,82 @@ pub fn broadcast_snapshot(state: &AppState) {
     let _ = state.ws.send(payload);
 }
 
+/// Nombre de tics de re-scan entre deux scans **complets** du catalogue.
+///
+/// À 5 s par tic (l'intervalle recommandé sur les montages virtualisés), un
+/// scan complet par minute : c'est la seule façon de voir une modification
+/// **sur place** (fichier réécrit sous le même nom), que l'empreinte de noms
+/// ne peut pas distinguer. Le watcher, lui, voit ces modifications
+/// immédiatement là où le système de fichiers remonte des événements.
+const DEEP_SCAN_EVERY: u32 = 12;
+
+/// État du re-scan périodique : ce que le dernier scan complet a vu, et combien
+/// de tics se sont écoulés depuis.
+#[derive(Default)]
+struct PollState {
+    /// Empreinte de l'arborescence au dernier scan complet (`None` : aucun).
+    signature: Option<u64>,
+    /// Tics écoulés depuis le dernier scan complet.
+    rounds: u32,
+}
+
+/// Empreinte **bon marché** de l'arborescence du catalogue : les **noms** des
+/// entrées, dossier par dossier.
+///
+/// Un `read_dir` par dossier rend ses entrées en un seul appel système
+/// (`getdents`), alors qu'un `stat` par fichier en coûte un par entrée — le
+/// poste dominant du scan sur un montage virtualisé. Aucune métadonnée n'est
+/// lue ici : ajouter, supprimer ou renommer change la liste des noms, donc
+/// l'empreinte. Modifier le **contenu** d'un fichier existant ne la change pas :
+/// c'est assumé, et rattrapé par le scan complet forcé (voir
+/// [`refresh_if_changed`]).
+///
+/// Le calcul est indépendant de l'ordre (somme et XOR des hachages) : deux
+/// parcours qui rendent les entrées dans un ordre différent donnent la même
+/// empreinte, et une arborescence inchangée ne provoque donc pas de faux scan.
+fn tree_signature(root: &Path) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn walk(dir: &Path, acc: &mut u64, dirs: &mut u64) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            let mut hasher = DefaultHasher::new();
+            name.hash(&mut hasher);
+            *acc ^= hasher.finish();
+            *dirs = dirs.wrapping_add(1);
+            let path = entry.path();
+            // `file_type()` évite un `stat` sur Linux (le type vient de `d_type`).
+            // Un lien symbolique est résolu, lui, comme le fait le scan : sans
+            // ça, un sous-dossier lié verrait ses changements ignorés par le tic.
+            let is_dir = match entry.file_type() {
+                Ok(t) if t.is_symlink() => path.metadata().map(|m| m.is_dir()).unwrap_or(false),
+                Ok(t) => t.is_dir(),
+                Err(_) => false,
+            };
+            if is_dir {
+                walk(&path, acc, dirs);
+            }
+        }
+    }
+
+    let mut acc = 0u64;
+    let mut dirs = 0u64;
+    walk(root, &mut acc, &mut dirs);
+    // Le nombre d'entrées entre aussi dans l'empreinte : une entrée ajoutée et
+    // une autre retirée dans le même tic ne s'annulent pas par hasard.
+    acc ^ dirs.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
 /// Re-scanne le catalogue et ne rediffuse **que si le contenu a changé**.
 ///
 /// Appelé à intervalle régulier quand un re-scan est configuré ou recommandé
@@ -1689,14 +1769,45 @@ pub fn broadcast_snapshot(state: &AppState) {
 /// rien. Les aperçus manquants sont générés au passage — le watcher, lui, les
 /// régénère au fil de ses événements.
 ///
+/// Deux étages, parce que le tic est fréquent (5 s) et le scan cher sur ces
+/// montages (un appel système par entrée, ~3 ms sur un partage Docker Desktop) :
+///
+///  1. [`tree_signature`] relit **seulement les noms** des entrées (un
+///     `read_dir` par dossier, aucun `stat` par fichier). Empreinte identique et
+///     scan complet non dû → il n'y a rien à faire : c'est le cas de très loin
+///     le plus fréquent, et il coûte quelques dizaines de microsecondes au lieu
+///     d'un parcours complet (mesuré : 0,50 % → 0,16 % de CPU au repos) ;
+///  2. sinon, scan complet : ajout, suppression, renommage, mais aussi
+///     modification **sur place** — qu'aucune empreinte de noms ne peut voir,
+///     et que la mesure complète seule détecte. Il est donc forcé au moins une
+///     fois par [`DEEP_SCAN_EVERY`] tics.
+///
 /// Retourne `true` si une liste a été diffusée.
 pub fn refresh_if_changed(state: &AppState) -> bool {
+    let root = state.root();
+    let signature = tree_signature(&root);
+
+    // Étage 1, bon marché : la liste des entrées n'a pas bougé et le scan
+    // complet n'est pas dû → inutile d'aller plus loin.
+    {
+        let mut poll = state.poll.lock().unwrap();
+        poll.rounds = poll.rounds.saturating_add(1);
+        let deep_due = poll.rounds >= DEEP_SCAN_EVERY;
+        if !deep_due && poll.signature == Some(signature) {
+            return false;
+        }
+        if deep_due {
+            poll.rounds = 0;
+        }
+        poll.signature = Some(signature);
+    }
+
+    // Étage 2 : le scan complet, seul à voir une modification **sur place**.
     let unchanged = snapshot(state) == *state.last_snapshot.read().unwrap();
     if unchanged {
         return false;
     }
 
-    let root = state.root();
     thumbnail::generate_all(&root, &root.join(thumbnail::THUMB_DIR));
     broadcast_snapshot(state);
     true
@@ -2666,6 +2777,58 @@ mod tests {
         );
         // Stabilisé : plus rien à annoncer tant que rien ne bouge.
         assert!(!refresh_if_changed(&state));
+    }
+
+    /// Une modification **sur place** (même nom, même dossier) ne change pas
+    /// l'empreinte de noms : c'est le scan complet forcé qui la rattrape. Il
+    /// doit donc finir par la voir, sans dépendre des événements du système de
+    /// fichiers.
+    #[tokio::test]
+    async fn rescan_periodique_finit_par_voir_une_modification_sur_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+
+        let file = dir.path().join("piece.stl");
+        std::fs::write(&file, "solid piece\nendsolid piece\n").unwrap();
+        assert!(refresh_if_changed(&state));
+        let _ = updates.try_recv().unwrap();
+        let avant: serde_json::Value =
+            serde_json::from_str(&state.last_snapshot.read().unwrap()).unwrap();
+
+        // Réécriture sous le même nom, avec une date nettement plus récente
+        // (le catalogue n'expose que des dates à la seconde).
+        let handle = std::fs::File::options().write(true).open(&file).unwrap();
+        std::fs::write(&file, "solid piece\nfacet normal 0 0 1\nendsolid piece\n").unwrap();
+        handle
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)),
+            )
+            .unwrap();
+
+        // Les tics qui ne font que relire les noms ne diffusent rien…
+        let mut diffuse = false;
+        for _ in 0..DEEP_SCAN_EVERY {
+            if refresh_if_changed(&state) {
+                diffuse = true;
+                break;
+            }
+        }
+
+        // …mais le scan complet forcé, lui, publie la nouvelle date.
+        assert!(diffuse, "modification sur place jamais vue");
+        let apres: serde_json::Value =
+            serde_json::from_str(&state.last_snapshot.read().unwrap()).unwrap();
+        assert_ne!(
+            avant["files"][0]["modified"], apres["files"][0]["modified"],
+            "la date n'a pas été relue"
+        );
     }
 
     #[tokio::test]

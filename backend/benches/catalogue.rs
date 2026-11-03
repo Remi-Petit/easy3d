@@ -73,5 +73,73 @@ fn json(c: &mut Criterion) {
     });
 }
 
-criterion_group!(bancs, scan, json);
+/// Agrégation par sous-dossier : filtre par préfixe (ancienne façon, `O(dossiers
+/// × fichiers)`) contre un passage par les ancêtres (`O(fichiers × profondeur)`).
+///
+/// Le calcul se fait en mémoire, sur la liste déjà collectée par le scan : il
+/// n'y a aucun appel système à mesurer ici, seulement la complexité. C'est
+/// précisément ce qui n'apparaissait pas sur un petit catalogue — et qui
+/// dominait sur un gros.
+fn sous_dossiers(c: &mut Criterion) {
+    use easy3d::scanner::FileInfo;
+    use std::collections::HashMap;
+
+    let dossiers = 40;
+    let par_dossier = 25;
+    let files: Vec<FileInfo> = (0..dossiers)
+        .flat_map(|d| {
+            (0..par_dossier).map(move |f| FileInfo {
+                path: format!("/models/Dossier {d}/piece {f}.stl"),
+                rel: format!("Dossier {d}/piece {f}.stl"),
+                created: None,
+                modified: Some(1_700_000_000),
+                image: None,
+                image_version: None,
+                note: None,
+            })
+        })
+        .collect();
+    let rels: Vec<String> = (0..dossiers).map(|d| format!("Dossier {d}")).collect();
+
+    let mut group = c.benchmark_group("catalogue/sous_dossiers");
+    group.throughput(Throughput::Elements((dossiers * par_dossier) as u64));
+
+    group.bench_function("filtre_par_prefixe", |b| {
+        b.iter(|| {
+            let mut out = Vec::new();
+            for rel in &rels {
+                let prefix = format!("{rel}/");
+                out.push(
+                    black_box(&files)
+                        .iter()
+                        .filter(|f| f.rel.starts_with(&prefix))
+                        .count(),
+                );
+            }
+            black_box(out)
+        })
+    });
+
+    group.bench_function("passage_par_ancetres", |b| {
+        b.iter(|| {
+            let mut totals: HashMap<String, (usize, Option<u64>)> = HashMap::new();
+            for file in black_box(&files) {
+                let mut parent = file.rel.as_str();
+                while let Some((up, _)) = parent.rsplit_once('/') {
+                    let entry = totals.entry(up.to_string()).or_insert((0, None));
+                    entry.0 += 1;
+                    if let Some(modified) = file.modified {
+                        entry.1 = Some(entry.1.map_or(modified, |cur| cur.max(modified)));
+                    }
+                    parent = up;
+                }
+            }
+            black_box(totals)
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(bancs, scan, json, sous_dossiers);
 criterion_main!(bancs);

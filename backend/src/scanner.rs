@@ -1,6 +1,6 @@
 use crate::{formats, notes, thumbnail};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -136,7 +136,8 @@ pub fn scan_models(root: &Path) -> ModelsScan {
                 .unwrap_or_default();
             let modified = folder_modified(&meta, &files);
             let mut subfolders = Vec::new();
-            scan_subfolders(&path, root, &files, &mut subfolders);
+            let totals = folder_totals(&files);
+            scan_subfolders(&path, root, &totals, &mut subfolders);
             scan.folders.insert(
                 name.clone(),
                 FolderInfo {
@@ -197,31 +198,49 @@ fn is_hidden(name: &str) -> bool {
 /// Le compte et la date se calculent à partir des fichiers **déjà** collectés par
 /// [`scan_dir_recursive`] (filtre sur préfixe de chemin) : aucun second parcours
 /// du disque, et donc le même compte que celui affiché pour le dossier parent.
-fn scan_subfolders(dir: &Path, root: &Path, files: &[FileInfo], out: &mut Vec<SubFolderInfo>) {
+fn scan_subfolders(
+    dir: &Path,
+    root: &Path,
+    totals: &HashMap<String, (usize, Option<u64>)>,
+    out: &mut Vec<SubFolderInfo>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
 
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() || is_hidden(entry.file_name().to_str().unwrap_or("")) {
+        let file_name = entry.file_name();
+        if is_hidden(file_name.to_str().unwrap_or("")) {
             continue;
         }
 
+        // Métadonnées lues **une** fois : l'ancien code testait `is_dir()` puis
+        // relisait la date du dossier dans `max_modified` (deux appels).
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
         let rel = rel_path(root, &path);
-        let prefix = format!("{rel}/");
-        let inside = || files.iter().filter(|f| f.rel.starts_with(&prefix));
+        let (count, files_mtime) = totals.get(&rel).copied().unwrap_or((0, None));
+        let dir_mtime = meta.modified().ok().and_then(to_unix_secs);
 
         out.push(SubFolderInfo {
-            name: entry.file_name().to_string_lossy().into_owned(),
-            count: inside().count(),
-            modified: max_modified(&path, inside().map(|f| f.modified)),
+            name: file_name.to_string_lossy().into_owned(),
+            count,
+            modified: match (dir_mtime, files_mtime) {
+                (Some(dir), Some(file)) => Some(dir.max(file)),
+                (dir, file) => dir.or(file),
+            },
             note: notes::read(root, &rel),
             rel,
         });
 
         // Descendants : listés à la suite, le frontend filtrant par parent.
-        scan_subfolders(&path, root, files, out);
+        scan_subfolders(&path, root, totals, out);
     }
 }
 
@@ -247,18 +266,28 @@ fn folder_modified(meta: &std::fs::Metadata, files: &[FileInfo]) -> Option<u64> 
     }
 }
 
-/// Le plus récent entre le `mtime` d'un dossier et celui des fichiers donnés.
-fn max_modified(dir: &Path, files: impl Iterator<Item = Option<u64>>) -> Option<u64> {
-    let dir_mtime = std::fs::metadata(dir)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(to_unix_secs);
-    let files_mtime = files.max().flatten();
-
-    match (dir_mtime, files_mtime) {
-        (Some(dir), Some(file)) => Some(dir.max(file)),
-        (dir, file) => dir.or(file),
+/// Nombre de fichiers et date la plus récente **par sous-dossier**, calculés en
+/// **un** passage sur les fichiers déjà collectés.
+///
+/// L'ancien code filtrait la liste complète des fichiers pour **chaque**
+/// sous-dossier (`rel.starts_with("dossier/")`), soit `O(dossiers × fichiers)` :
+/// sur un catalogue à quarante dossiers et mille fichiers, cela faisait quarante
+/// mille comparaisons de chaînes à chaque scan — pour un résultat qui se déduit
+/// en parcourant les ancêtres de chaque fichier (`O(fichiers × profondeur)`).
+fn folder_totals(files: &[FileInfo]) -> HashMap<String, (usize, Option<u64>)> {
+    let mut totals: HashMap<String, (usize, Option<u64>)> = HashMap::new();
+    for file in files {
+        let mut parent = file.rel.as_str();
+        while let Some((up, _)) = parent.rsplit_once('/') {
+            let entry = totals.entry(up.to_string()).or_insert((0, None));
+            entry.0 += 1;
+            if let Some(modified) = file.modified {
+                entry.1 = Some(entry.1.map_or(modified, |cur| cur.max(modified)));
+            }
+            parent = up;
+        }
     }
+    totals
 }
 
 /// Lit les métadonnées d'un fichier en `FileInfo`.
