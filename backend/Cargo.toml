@@ -48,12 +48,17 @@ criterion = "0.8"
 # Un fichier de banc = un binaire indépendant.
 #   cargo bench --bench formats      # rendu, PNG, aperçus complets
 #   cargo bench --bench catalogue    # scan + JSON de `/models`
+#   cargo bench --bench auth         # contrôle d'accès par requête
 [[bench]]
 name = "formats"
 harness = false
 
 [[bench]]
 name = "catalogue"
+harness = false
+
+[[bench]]
+name = "auth"
 harness = false
 
 [profile.dev]

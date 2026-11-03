@@ -55,6 +55,12 @@ docker compose --profile loadtest run --rm --service-ports `
 # → docker/k6/reports/rapport.html, ouvrable hors ligne
 ```
 
+⚠️ **Fermer l'onglet du tableau de bord avant la fin du test** : un onglet
+resté ouvert garde ses connexions vivantes, et le processus k6 ne se termine
+plus (observé : conteneur encore là 4 min après la fin du scénario, port 5665
+occupé — le run suivant échoue sur `port is already allocated`). Sinon :
+`docker rm -f easy3d-k6-run-…` avant de relancer.
+
 Pour une mesure sans aucun outil en plus : `-e K6_WEB_DASHBOARD=false`.
 
 ## Les scénarios
@@ -153,6 +159,7 @@ k6 dit **où** ça coûte ; les bancs `criterion` de `backend/benches/` disent
 cd backend
 cargo bench --bench formats     # rendu, encodage PNG, aperçus STL/OBJ
 cargo bench --bench catalogue   # scan du dossier + JSON de /models
+cargo bench --bench auth        # contrôle d'accès (une requête = une vérification)
 ```
 
 Ils écrivent leurs rapports dans `backend/target/criterion/` (ignoré par git).

@@ -201,6 +201,60 @@ jobs:
           git commit -m 'docs: langues du README' README.md
           git push
 
+  # Couverture **globale** (Rust + frontend) : le badge du README est calculé
+  # ici, jamais saisi à la main. Même principe que le job `readme` — il ne
+  # committe que si le badge a bougé, et `README.md` n'est pas dans les `paths`
+  # du workflow, donc ce commit ne relance pas la CI.
+  #
+  # Deux chaînes d'instrumentation distinctes : `cargo llvm-cov` (tests unitaires
+  # et d'intégration Rust) et `vitest --coverage` (frontend). `scripts/coverage.mjs`
+  # additionne les **lignes** couvertes des deux — additionner les pourcentages
+  # donnerait le même poids à ~16 000 lignes de Rust et à ~1 900 de TypeScript.
+  #
+  # Les e2e Playwright ne sont pas comptés (navigateur, build, autre chaîne).
+  couverture:
+    name: Couverture (badge)
+    needs: changes
+    if: >-
+      github.event_name == 'push' &&
+      (needs.changes.outputs.backend == 'true' ||
+       needs.changes.outputs.frontend == 'true' ||
+       needs.changes.outputs.scripts == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Le crate vit dans `backend/` : ce job, lui, travaille à la racine.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: frontend/package.json
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
+      - name: Couverture Rust
+        working-directory: backend
+        run: |
+          mkdir -p target/cov
+          cargo llvm-cov --json --summary-only --output-path target/cov/backend-coverage.json
+      - name: Couverture frontend
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run test:coverage
+      - run: node scripts/coverage.mjs
+      - run: |
+          if git diff --quiet -- README.md; then
+            echo "Badge déjà à jour."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: badge de couverture' README.md
+          git push
+
   # Le fournisseur d'identité fictif est du code, lui aussi — et c'est lui qui
   # sert à éprouver le SSO à la main comme en e2e. Son auto-test rejoue le flux
   # OIDC complet (découverte, autorisation, jeton, userinfo, refus), et il

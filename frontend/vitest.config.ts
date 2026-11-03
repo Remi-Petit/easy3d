@@ -16,5 +16,15 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Couverture : périmètre volontairement limité à la **logique** que les
+    // tests unitaires exercent. Les composants et pages `.vue` sont couverts
+    // par les e2e Playwright : les compter ici afficherait 0 % pour du code
+    // testé autrement (et vitest ne compile pas les SFC sans le plugin Vue).
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'json-summary'],
+      include: ['app/utils/**', 'app/composables/**', 'app/workers/**', 'server/**', 'i18n/**'],
+      exclude: ['**/*.d.ts'],
+    },
   },
 })

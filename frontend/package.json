@@ -12,6 +12,7 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:auth": "playwright test --config playwright.auth.config.ts"
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.131",
     "@playwright/test": "^1.62.1",
+    "@vitest/coverage-v8": "4.1.11",
     "vitest": "^4.1.11"
   }
 }

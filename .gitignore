@@ -39,3 +39,6 @@ frontend/.env.*
 !frontend/.env.example
 frontend/test-results
 frontend/playwright-report
+# rapport de couverture produit par `bun run test:coverage` (le badge du README,
+# lui, est versionné : c'est le résumé, pas les données brutes).
+frontend/coverage

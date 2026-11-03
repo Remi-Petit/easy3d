@@ -32,6 +32,7 @@ RUN mkdir -p src benches \
     && printf 'fn main() {}\n' > src/main.rs \
     && printf '' > benches/formats.rs \
     && printf '' > benches/catalogue.rs \
+    && printf '' > benches/auth.rs \
     && cargo build --release
 
 COPY backend/src ./src
