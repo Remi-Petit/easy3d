@@ -4,7 +4,7 @@
 [![CI](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml/badge.svg)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/Remi-Petit/easy3d)](LICENSE)
 <!-- couverture:start -->
-[![couverture backend](https://img.shields.io/badge/coverage%20backend-92.9%25-brightgreen)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml) [![couverture frontend](https://img.shields.io/badge/coverage%20frontend-27.6%25-red)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml)
+[![couverture backend](https://img.shields.io/badge/coverage%20backend-92.7%25-brightgreen)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml) [![couverture frontend](https://img.shields.io/badge/coverage%20frontend-27.6%25-red)](https://github.com/Remi-Petit/easy3d/actions/workflows/ci.yml)
 <!-- couverture:end -->
 
 Une solution pour gérer ses modèles 3D de manière **auto-hébergé**.
