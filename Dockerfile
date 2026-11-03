@@ -13,7 +13,7 @@
 # `cargo run` sur l'hôte ne se marchent donc pas dessus.
 
 # ── 1. Backend (Rust) ──────────────────────────────────────────────────────
-FROM rust:1.98-slim-bookworm AS backend
+FROM rust:1.99-slim-bookworm AS backend
 
 WORKDIR /build/backend
 
