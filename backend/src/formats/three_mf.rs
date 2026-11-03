@@ -17,6 +17,23 @@ use std::path::Path;
 /// Instance unique du format, référencée par le registre de [`super`].
 pub static THREE_MF: ThreeMf = ThreeMf;
 
+/// Nom de l'entrée `index` de l'archive, ou `""`.
+///
+/// Depuis zip 9, `name_for_index` renvoie `Option<Result<Cow<str>, ZipError>>` :
+/// entrée absente, ou nom illisible (encodage inconnu). Les appelants ne font
+/// pas la différence — un nom qu'on ne sait pas lire ne correspondra à aucune
+/// entrée recherchée.
+fn entry_name<R: std::io::Read + std::io::Seek>(
+    archive: &zip::ZipArchive<R>,
+    index: usize,
+) -> String {
+    archive
+        .name_for_index(index)
+        .and_then(Result::ok)
+        .unwrap_or_default()
+        .into_owned()
+}
+
 /// Le format 3MF.
 pub struct ThreeMf;
 
@@ -68,12 +85,12 @@ fn try_extract_thumbnail(model_path: &Path, out: &Path) -> Option<()> {
     // Nom de l'entrée contenant la vignette (recherche insensible à la casse).
     let mut target: Option<String> = None;
     for i in 0..archive.len() {
-        let name = archive.name_for_index(i).unwrap_or("").to_ascii_lowercase();
+        let name = entry_name(&archive, i).to_ascii_lowercase();
         if name == "metadata/thumbnail.png"
             || name == "thumbnail.png"
             || name.starts_with("metadata/plate_")
         {
-            target = Some(archive.name_for_index(i).unwrap().to_string());
+            target = Some(entry_name(&archive, i));
             break;
         }
     }
@@ -114,7 +131,7 @@ fn load_mesh(path: &Path) -> Option<Mesh> {
 
     // Trouve l'entrée du modèle 3D (ex : `3D/3dmodel.model`).
     let model_name = (0..archive.len())
-        .map(|i| archive.name_for_index(i).unwrap_or("").to_string())
+        .map(|i| entry_name(&archive, i))
         .find(|n| n.to_ascii_lowercase().ends_with(".model"))?;
 
     let mut xml = String::new();
@@ -197,10 +214,7 @@ fn metadata_of(path: &Path) -> BTreeMap<String, String> {
     };
 
     for index in 0..archive.len() {
-        let name = archive
-            .name_for_index(index)
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let name = entry_name(&archive, index).to_ascii_lowercase();
         if !name.starts_with("metadata/") || !name.ends_with(".config") {
             continue;
         }
