@@ -186,26 +186,24 @@ jobs:
             --tag easy3d:ci \
             --cache-from type=gha \
             --cache-to type=gha,mode=max,ignore-error=true
-      # Version **figée**, et non `latest` : avec `latest`, `setup-trivy` refuse
-      # de mettre le binaire en cache (« doesn't currently support caching the
-      # 'latest' version ») et le retélécharge à chaque passage. Le 2026-11-03,
-      # ce téléchargement a échoué (script d'installation sorti en code 6 :
-      # résolution DNS du domaine de publication), et le job est tombé sans que
-      # l'image soit en cause — `trivy: command not found` à l'étape suivante.
-      # Une version figée rend le binaire **cachable** (donc plus de réseau au
-      # bout de la première réussite) et le résultat reproductible d'un jour à
-      # l'autre. Monter cette version est un changement volontaire, testé.
-      - uses: aquasecurity/setup-trivy@v0.3.1
-        with:
-          # Le préfixe `v` fait partie du **nom du tag** Git chez Trivy : sans
-          # lui, l'action répond « unable to find '0.76.1' » (vérifié).
-          version: v0.76.1
-          cache: true
+      # Trivy tourne depuis son **image officielle** (Docker Hub) plutôt que via
+      # `aquasecurity/setup-trivy` : l'action télécharge l'archive de release
+      # GitHub à chaque passage, et ce téléchargement échoue sur les runners
+      # depuis le 2026-11-03 (`curl` sortie 6 — résolution DNS — alors que l'API
+      # GitHub répond et que les images Docker Hub se tirent sans problème dans
+      # le même job). Version épinglée, image tirée du registre, et aucune action
+      # tierce de plus dans le workflow.
       - name: CRITICAL (bloquant)
-        run: trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 easy3d:ci
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.76.1 image \
+            --severity CRITICAL --ignore-unfixed --exit-code 1 easy3d:ci
       - name: HIGH (rapport, non bloquant)
         if: always()
-        run: trivy image --severity HIGH --ignore-unfixed --exit-code 0 easy3d:ci
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.76.1 image \
+            --severity HIGH --ignore-unfixed --exit-code 0 easy3d:ci
 
   # Tests unitaires (vitest) et build Nuxt : le build est le seul endroit qui
   # attrape une erreur de gabarit ou de SSR, invisible aux tests unitaires.
