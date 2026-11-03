@@ -40,7 +40,7 @@ tower = { version = "0.5", features = ["util"] }
 [dev-dependencies]
 tempfile = "3"
 http-body-util = "0.1"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 # Bancs de performance (`cargo bench`) : ils mesurent du **temps**, là où les
 # tests vérifient un résultat. Voir `benches/` et `docker/k6/` (charge réelle).
 criterion = "0.8"
