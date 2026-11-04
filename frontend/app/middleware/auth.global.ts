@@ -1,4 +1,4 @@
-import { LOGIN_PATH, safeRedirect } from '~/utils/auth'
+import { DEV_LOGIN_PATH, LOGIN_PATH, safeRedirect } from '~/utils/auth'
 
 /**
  * Garde d'accès : sans session, on ne va pas plus loin que la page de connexion.
@@ -18,6 +18,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!ready.value) await refresh()
 
   if (!status.value.enabled) return
+
+  // Page de **développement** (choisir un compte du fournisseur) : elle doit
+  // être atteignable sans session — c'est son objet — et aussi quand on en a
+  // une, puisque son intérêt est justement de changer de compte. La page
+  // elle-même répond 404 quand le drapeau est absent.
+  if (to.path === DEV_LOGIN_PATH) return
 
   if (to.path === LOGIN_PATH) {
     // Déjà connecté : la page de connexion n'a plus rien à proposer.

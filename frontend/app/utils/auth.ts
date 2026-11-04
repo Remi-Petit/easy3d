@@ -9,6 +9,18 @@
 /** Chemin de la page de connexion. Une seule occurrence : ici. */
 export const LOGIN_PATH = '/login'
 
+/**
+ * Page **de développement** qui propose les comptes du fournisseur.
+ *
+ * Elle n'existe que quand `NUXT_PUBLIC_DEV_LOGIN=1` (voir
+ * `server/utils/devRealm.ts`) : elle sert à essayer plusieurs comptes — et donc
+ * plusieurs jeux de droits — sans retaper un mot de passe à chaque fois.
+ */
+export const DEV_LOGIN_PATH = '/dev/login'
+
+/** Libellé du bouton de développement (le fournisseur, lui, s'appelle autrement). */
+export const DEV_SSO_LABEL = 'keycloak-dev'
+
 /** Compte connecté, tel que `/api/auth/me` le décrit. */
 export interface AuthUser {
   uuid: string
@@ -47,6 +59,22 @@ export interface AuthStatus {
 export interface OidcProvider {
   /** Hôte du fournisseur, tel qu'affiché sur le bouton. */
   label: string
+  /**
+   * Fournisseurs **supplémentaires** (déclarés par `EASY3D_OIDC_PROVIDERS`).
+   *
+   * Chacun ajoute un bouton de connexion : le principal reste le premier, et ces
+   * fournisseurs-là s'ajoutent (développement : Keycloak **et** le fournisseur
+   * fictif en même temps).
+   */
+  providers?: OidcExtraProvider[]
+}
+
+/** Fournisseur supplémentaire : de quoi dessiner son bouton et partir chez lui. */
+export interface OidcExtraProvider {
+  /** Identifiant d'URL (`fake`, `keycloak`…), transmis au départ du flux. */
+  id: string
+  /** Nom affiché sur le bouton. */
+  label: string
 }
 
 /**
@@ -54,10 +82,31 @@ export interface OidcProvider {
  *
  * `redirect` dit où revenir **après** la connexion : c'est un chemin interne,
  * et le backend le refuse s'il n'en est pas un.
+ *
+ * `loginHint` (facultatif) demande au fournisseur de **pré-remplir** le compte.
+ * C'est une indication, pas une garantie : seul le fournisseur décide. La page
+ * de développement s'en sert, et le backend la nettoie avant de la transmettre.
  */
-export function oidcStartUrl(redirect?: string | null): string {
-  const cible = redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''
-  return `/api/auth/oidc/start${cible}`
+export function oidcStartUrl(
+  redirect?: string | null,
+  loginHint?: string | null,
+  provider?: string | null,
+): string {
+  // `encodeURIComponent` et non `URLSearchParams` : ce dernier écrit une espace
+  // en `+`, ce qui changerait l'adresse produite jusqu'ici (`%20`). Rien ne
+  // l'exige, et une adresse qui ne bouge pas évite de se demander si un relais
+  // la décode pareil.
+  const parametres: string[] = []
+  if (redirect) parametres.push(`redirect=${encodeURIComponent(redirect)}`)
+  if (loginHint) parametres.push(`login_hint=${encodeURIComponent(loginHint)}`)
+  // Fournisseur supplémentaire ; absent = le principal.
+  if (provider) parametres.push(`provider=${encodeURIComponent(provider)}`)
+  return `/api/auth/oidc/start${parametres.length > 0 ? `?${parametres.join('&')}` : ''}`
+}
+
+/** Adresse de la page de choix des comptes de développement. */
+export function devLoginUrl(redirect?: string | null): string {
+  return redirect ? `${DEV_LOGIN_PATH}?redirect=${encodeURIComponent(redirect)}` : DEV_LOGIN_PATH
 }
 
 /**

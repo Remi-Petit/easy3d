@@ -41,7 +41,7 @@ pub const ADMIN_ROLE: &str = "0199e3d0-0000-7000-8000-000000000001";
 pub const READER_ROLE: &str = "0199e3d0-0000-7000-8000-000000000002";
 
 /// Version du schéma. À incrémenter en ajoutant une table ou une colonne.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Schéma initial (v1).
 const SCHEMA_V1: &str = r#"
@@ -204,6 +204,69 @@ CREATE UNIQUE INDEX IF NOT EXISTS sessions_uuid ON sessions(uuid);
 CREATE INDEX IF NOT EXISTS sessions_sso ON sessions(sso_checked_at);
 "#;
 
+/// Schéma v5 : **quel fournisseur** a rattaché le compte.
+///
+/// Jusqu'ici il n'y en avait qu'un, donc `oidc_subject` suffisait. Avec deux
+/// fournisseurs à la fois (voir `EASY3D_OIDC_PROVIDERS`), le même `sub` peut
+/// désigner deux personnes différentes selon qui l'émet : sans cette colonne,
+/// le second fournisseur pourrait reprendre le compte du premier en annonçant
+/// le même identifiant.
+///
+/// `NULL` = rattaché au fournisseur **principal** (les comptes d'avant la
+/// version 5, et ceux du principal aujourd'hui). `''` n'est jamais écrit.
+///
+/// La même colonne est ajoutée aux **sessions** : une session ouverte par un
+/// fournisseur supplémentaire doit être revérifiée **auprès de lui** — la
+/// vérifier auprès du principal ferait répondre `invalid_grant` à un jeton qui
+/// n'est pas le sien, donc fermerait des comptes à tort.
+///
+/// ⚠️ **La table `users` est reconstruite**, et c'est voulu : `oidc_subject`
+/// portait une contrainte `UNIQUE` **globale**, qui empêcherait deux annuaires
+/// d'émettre le même identifiant pour deux personnes (le second login échouerait
+/// sur la contrainte, ou pire, prendrait le compte du premier). L'unicité devient
+/// un couple : un `sub` est unique **dans son fournisseur**. La recette est celle
+/// de SQLite (nouvelle table, copie, bascule) ; les clés étrangères des tables
+/// filles sont désactivées le temps de l'opération pour que `DROP TABLE users`
+/// n'efface pas en cascade les rôles et les sessions.
+const SCHEMA_V5: &str = r#"
+PRAGMA foreign_keys = OFF;
+
+-- Table de travail : la laisser d'une exécution interrompue ne doit pas
+-- empêcher la reprise.
+DROP TABLE IF EXISTS users_v5;
+
+CREATE TABLE users_v5 (
+    uuid          TEXT PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT,
+    oidc_subject  TEXT,
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    oidc_provider TEXT
+);
+
+INSERT INTO users_v5 (uuid, username, email, password_hash, oidc_subject, disabled, created_at)
+SELECT uuid, username, email, password_hash, oidc_subject, disabled, created_at FROM users;
+
+DROP TABLE users;
+ALTER TABLE users_v5 RENAME TO users;
+
+-- Rattachement au fournisseur principal : l'unicité d'avant.
+CREATE UNIQUE INDEX IF NOT EXISTS users_subject_principal
+    ON users(oidc_subject) WHERE oidc_provider IS NULL;
+-- Rattachement à un fournisseur supplémentaire : unique **chez lui**.
+CREATE UNIQUE INDEX IF NOT EXISTS users_subject_provider
+    ON users(oidc_subject, oidc_provider) WHERE oidc_provider IS NOT NULL;
+
+PRAGMA foreign_keys = ON;
+
+-- Le fournisseur de la **session** : seule la colonne est ajoutée ici, et
+-- `ADD COLUMN` n'étant pas rejouable, `migrate` tolère explicitement l'erreur
+-- « duplicate column name ».
+ALTER TABLE sessions ADD COLUMN oidc_provider TEXT;
+"#;
+
 /// Horodatage courant, en secondes depuis l'époque.
 ///
 /// Les dates sont stockées en entier (et non en texte ISO) : les comparaisons
@@ -287,6 +350,16 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         // Ré-exécutable telle quelle : la table est recréée à l'identique.
         conn.execute_batch(SCHEMA_V4).map_err(err)?;
     }
+    if version < 5 {
+        // Même précaution que pour v3 : `ADD COLUMN` n'est pas rejouable. Les
+        // comptes déjà rattachés gardent `NULL`, ce qui veut dire « rattaché au
+        // fournisseur principal » (il n'y en avait qu'un).
+        if let Err(erreur) = conn.execute_batch(SCHEMA_V5)
+            && !erreur.to_string().contains("duplicate column name")
+        {
+            return Err(err(erreur));
+        }
+    }
 
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(err)?;
@@ -305,6 +378,9 @@ pub struct User {
     pub email: String,
     pub password_hash: Option<String>,
     pub oidc_subject: Option<String>,
+    /// Fournisseur qui a rattaché le compte (voir [`SCHEMA_V5`]) ; `None` =
+    /// principal.
+    pub oidc_provider: Option<String>,
     pub disabled: bool,
     pub created_at: i64,
     /// **Portée du jeton** qui a authentifié la requête, quand il y en a une.
@@ -323,6 +399,8 @@ pub struct NewUser {
     pub email: String,
     pub password_hash: Option<String>,
     pub oidc_subject: Option<String>,
+    /// Fournisseur qui rattache ce compte (vide = principal).
+    pub oidc_provider: Option<String>,
     pub created_at: i64,
 }
 
@@ -336,20 +414,21 @@ impl NewUser {
             email: email.trim().to_lowercase(),
             password_hash,
             oidc_subject: None,
+            oidc_provider: None,
             created_at: now(),
         }
     }
 }
 
 const USER_COLUMNS: &str =
-    "uuid, username, email, password_hash, oidc_subject, disabled, created_at";
+    "uuid, username, email, password_hash, oidc_subject, disabled, created_at, oidc_provider";
 
 /// Nombre de colonnes de [`USER_COLUMNS`].
 ///
 /// Sert aux requêtes qui **ajoutent** une colonne à la suite (la session d'un
 /// compte, par exemple) : l'index de la colonne suivante en dépend, et le
 /// calculer ici évite de le recopier en dur.
-const USER_COLUMN_COUNT: usize = 7;
+const USER_COLUMN_COUNT: usize = 8;
 
 fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
     Ok(User {
@@ -360,6 +439,7 @@ fn row_to_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         oidc_subject: row.get(4)?,
         disabled: row.get::<_, i64>(5)? != 0,
         created_at: row.get(6)?,
+        oidc_provider: row.get(7)?,
         scope: None,
     })
 }
@@ -403,10 +483,22 @@ pub fn find_by_email(conn: &Connection, email: &str) -> Result<Option<User>, Str
 ///
 /// C'est **la** clé de reconnaissance une fois le compte rattaché : l'e-mail,
 /// lui, peut changer chez le fournisseur sans casser le compte.
-pub fn find_by_subject(conn: &Connection, subject: &str) -> Result<Option<User>, String> {
+///
+/// Le `sub` est cherché **dans son fournisseur** : deux annuaires peuvent émettre
+/// le même identifiant pour deux personnes différentes, et sans cette portée le
+/// second prendrait le compte du premier. `provider` vide = le principal, et
+/// c'est aussi ce que valent les comptes rattachés avant le schéma v5.
+pub fn find_by_subject(
+    conn: &Connection,
+    provider: &str,
+    subject: &str,
+) -> Result<Option<User>, String> {
     conn.query_row(
-        &format!("SELECT {USER_COLUMNS} FROM users WHERE oidc_subject = ?1"),
-        params![subject],
+        &format!(
+            "SELECT {USER_COLUMNS} FROM users \
+             WHERE oidc_subject = ?1 AND COALESCE(oidc_provider, '') = ?2"
+        ),
+        params![subject, provider],
         row_to_user,
     )
     .optional()
@@ -418,10 +510,16 @@ pub fn find_by_subject(conn: &Connection, subject: &str) -> Result<Option<User>,
 /// L'écriture n'a lieu que si le compte n'est pas déjà rattaché : un `sub`
 /// appartient à un seul compte (contrainte d'unicité), et laisser une écriture
 /// l'écraser silencieusement changerait qui peut entrer.
-pub fn set_oidc_subject(conn: &Connection, uuid: &str, subject: &str) -> Result<(), String> {
+pub fn set_oidc_subject(
+    conn: &Connection,
+    uuid: &str,
+    provider: &str,
+    subject: &str,
+) -> Result<(), String> {
     conn.execute(
-        "UPDATE users SET oidc_subject = ?2 WHERE uuid = ?1 AND oidc_subject IS NULL",
-        params![uuid, subject],
+        "UPDATE users SET oidc_subject = ?2, oidc_provider = NULLIF(?3, '') \
+         WHERE uuid = ?1 AND oidc_subject IS NULL",
+        params![uuid, subject, provider],
     )
     .map(|_| ())
     .map_err(err)
@@ -434,15 +532,16 @@ pub fn set_oidc_subject(conn: &Connection, uuid: &str, subject: &str) -> Result<
 /// entre la vérification et l'écriture.
 pub fn insert_user(conn: &Connection, user: &NewUser) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, oidc_subject, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO users (uuid, username, email, password_hash, oidc_subject, created_at, oidc_provider)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             user.uuid,
             user.username,
             user.email,
             user.password_hash,
             user.oidc_subject,
-            user.created_at
+            user.created_at,
+            user.oidc_provider
         ],
     )
     .map(|_| ())
@@ -586,14 +685,17 @@ pub struct NewSession<'a> {
     pub ip: &'a str,
     /// Renseigné pour une session ouverte par le fournisseur d'identité.
     pub refresh_token: Option<&'a str>,
+    /// Fournisseur qui a ouvert la session (vide = principal) : c'est lui qu'on
+    /// interrogera pour savoir si l'accès existe encore.
+    pub oidc_provider: Option<&'a str>,
 }
 
 /// Enregistre une session ouverte. Seule l'**empreinte** du jeton est écrite.
 pub fn create_session(conn: &Connection, session: &NewSession<'_>) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sessions
-            (token_hash, uuid, user_uuid, refresh_token, created_at, expires_at, user_agent, ip)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (token_hash, uuid, user_uuid, refresh_token, created_at, expires_at, user_agent, ip, oidc_provider)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             session.token_hash,
             session.uuid,
@@ -602,7 +704,8 @@ pub fn create_session(conn: &Connection, session: &NewSession<'_>) -> Result<(),
             now(),
             session.expires_at,
             session.user_agent,
-            session.ip
+            session.ip,
+            session.oidc_provider
         ],
     )
     .map(|_| ())
@@ -732,18 +835,19 @@ pub fn revoke_session(conn: &Connection, user_uuid: &str, uuid: &str) -> Result<
 }
 
 /// Sessions ouvertes par le fournisseur d'identité, jamais revérifiées depuis
-/// `before` : `(uuid, user_uuid, refresh_token)`.
+/// `before` : `(uuid, user_uuid, refresh_token, provider)`.
 ///
 /// La borne est `sso_checked_at` **ou** la date d'ouverture quand la session
 /// n'a jamais été vérifiée : une session née il y a cinq minutes n'a pas à
-/// interroger le fournisseur tout de suite.
+/// interroger le fournisseur tout de suite. Le fournisseur (`''` = principal)
+/// dit **à qui** poser la question.
 pub fn sso_sessions_to_check(
     conn: &Connection,
     before: i64,
-) -> Result<Vec<(String, String, String)>, String> {
+) -> Result<Vec<(String, String, String, String)>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT uuid, user_uuid, refresh_token FROM sessions
+            "SELECT uuid, user_uuid, refresh_token, COALESCE(oidc_provider, '') FROM sessions
              WHERE refresh_token IS NOT NULL
                AND expires_at > ?1
                AND COALESCE(sso_checked_at, created_at) <= ?2",
@@ -755,6 +859,7 @@ pub fn sso_sessions_to_check(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(err)?;
@@ -1073,7 +1178,7 @@ pub fn clear_password_hash(conn: &Connection, uuid: &str) -> Result<(), String> 
 /// Détache le compte du fournisseur d'identité (voir `rbac::detach_oidc`).
 pub fn clear_oidc_subject(conn: &Connection, uuid: &str) -> Result<(), String> {
     conn.execute(
-        "UPDATE users SET oidc_subject = NULL WHERE uuid = ?1",
+        "UPDATE users SET oidc_subject = NULL, oidc_provider = NULL WHERE uuid = ?1",
         params![uuid],
     )
     .map(|_| ())
@@ -1530,6 +1635,7 @@ mod tests {
                 user_agent: "",
                 ip: "",
                 refresh_token: refresh,
+                oidc_provider: None,
             },
         )
         .unwrap();
@@ -1821,5 +1927,56 @@ mod tests {
         // l'action racontée continue. C'est le contrat de `log_event`.
         conn.execute("DROP TABLE auth_events", []).unwrap();
         assert!(log_event(&conn, "login_ok", Some("u"), "remi", "", "", "").is_err());
+    }
+
+    /// La migration v5 **reconstruit** `users` pour que l'unicité d'un `sub`
+    /// soit celle de son fournisseur, et pas celle de l'installation.
+    ///
+    /// Ce test la rejoue sur une base **qui contient déjà des comptes** : c'est
+    /// là que la reconstruction pourrait tout perdre (la recette SQLite passe
+    /// par `DROP TABLE users`, et les tables filles sont en `ON DELETE
+    /// CASCADE` — sans la coupure des clés étrangères, rôles et sessions
+    /// partiraient avec).
+    #[test]
+    fn la_migration_du_fournisseur_de_rattachement_ne_perd_ni_compte_ni_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("easy3d.db");
+        let conn = open(&path).unwrap();
+        ensure_builtin_roles(&conn).unwrap();
+        let user = NewUser::new("remi", "remi@exemple.fr", None);
+        insert_user(&conn, &user).unwrap();
+        set_oidc_subject(&conn, &user.uuid, "", "sub-remi").unwrap();
+        set_user_roles(&conn, &user.uuid, &[READER_ROLE.to_string()]).unwrap();
+        drop(conn);
+
+        // Version remise en arrière : la migration est rejouée sur des données.
+        // (`ALTER TABLE sessions ADD COLUMN` échouera en « duplicate column »,
+        // ce que `migrate` tolère — c'est le cas d'une reprise.)
+        let conn = open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let retrouve = find_by_subject(&conn, "", "sub-remi").unwrap();
+        assert_eq!(
+            retrouve.map(|relu| relu.uuid),
+            Some(user.uuid.clone()),
+            "le compte et son rattachement ont survécu"
+        );
+        assert!(
+            has_role(&conn, &user.uuid, READER_ROLE).unwrap(),
+            "les rôles ne sont pas partis en cascade"
+        );
+        // Le même `sub` chez un **autre** fournisseur n'est pas ce compte.
+        assert!(
+            find_by_subject(&conn, "fake", "sub-remi")
+                .unwrap()
+                .is_none()
+        );
     }
 }

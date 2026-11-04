@@ -4,6 +4,14 @@ import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   API_PORT,
+  EXTRA_CLIENT_SECRET,
+  EXTRA_EMAIL,
+  EXTRA_ID,
+  EXTRA_LABEL,
+  EXTRA_ORIGIN,
+  EXTRA_PORT,
+  EXTRA_SUBJECT,
+  EXTRA_USERNAME,
   KC_CLIENT_ID,
   KC_CLIENT_SECRET,
   KC_ISSUER,
@@ -86,6 +94,37 @@ export default defineConfig({
         // `auto` : une première connexion SSO inconnue crée le compte et lui
         // donne le rôle livré `lecteur`.
         EASY3D_OIDC_PROVISIONING: 'auto',
+        // Second fournisseur, à côté du principal : la page de connexion doit
+        // afficher **deux** boutons, et les deux doivent mener quelque part.
+        EASY3D_OIDC_PROVIDERS: JSON.stringify([
+          {
+            id: EXTRA_ID,
+            label: EXTRA_LABEL,
+            issuer: EXTRA_ORIGIN,
+            client_id: 'easy3d',
+            client_secret: EXTRA_CLIENT_SECRET,
+          },
+        ]),
+      },
+    },
+    {
+      // Le fournisseur fictif, lancé par Node comme dans la campagne `e2e-auth`
+      // (aucune dépendance, un seul fichier).
+      command: 'node ../docker/fake-oidc/server.mjs',
+      url: `${EXTRA_ORIGIN}/health`,
+      reuseExistingServer: true,
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        PORT: String(EXTRA_PORT),
+        PUBLIC_URL: EXTRA_ORIGIN,
+        CLIENT_ID: 'easy3d',
+        CLIENT_SECRET: EXTRA_CLIENT_SECRET,
+        SUBJECT: EXTRA_SUBJECT,
+        EMAIL: EXTRA_EMAIL,
+        // `USERNAME` existe déjà sous Windows : on l'écrase.
+        USERNAME: EXTRA_USERNAME,
+        NAME: 'Compte fictif e2e',
       },
     },
     {
@@ -97,6 +136,12 @@ export default defineConfig({
         ...process.env,
         E2E_WEB_PORT: String(WEB_PORT),
         E2E_API_BASE: `http://127.0.0.1:${API_PORT}`,
+        // Page de connexion **de développement** (`/dev/login`) : la campagne
+        // passe par elle comme le ferait un développeur, donc le choix du compte
+        // est exercé par **tous** les tests, pas seulement par le sien. Le
+        // royaume est lu dans `docker/keycloak/realm.json` (chemin par défaut,
+        // relatif au dossier de `nuxt dev`).
+        NUXT_PUBLIC_DEV_LOGIN: '1',
       },
     },
   ],

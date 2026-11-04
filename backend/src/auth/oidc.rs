@@ -105,6 +105,92 @@ pub struct Env {
     /// URL publique de l'interface (`EASY3D_PUBLIC_URL`), pour construire le
     /// `redirect_uri` quand le backend ne voit que le relais Nitro.
     pub public_url: Option<String>,
+    /// Fournisseurs **supplémentaires** (`EASY3D_OIDC_PROVIDERS`, JSON), en plus
+    /// du principal.
+    pub providers: Vec<ExtraProvider>,
+}
+
+/// Fournisseur d'identité **supplémentaire**, déclaré par l'environnement.
+///
+/// Il **s'ajoute** au fournisseur principal (celui de `config.yml` /
+/// `EASY3D_OIDC_*`) : la page de connexion affiche alors un bouton de plus, et
+/// chaque bouton démarre un flux chez le fournisseur choisi. C'est ce qui permet
+/// d'avoir en développement un vrai Keycloak **et** le fournisseur fictif sans
+/// changer de configuration.
+///
+/// Le rattachement reste étanche : un `sub` n'est reconnu que **dans** le
+/// fournisseur qui l'a émis (colonne `oidc_provider`).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ExtraProvider {
+    /// Identifiant d'URL (`fake`, `keycloak`…) : il apparaît dans
+    /// `/auth/oidc/start?provider=…`.
+    pub id: String,
+    /// Nom affiché sur le bouton ; à défaut, l'identifiant.
+    #[serde(default)]
+    pub label: String,
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// Portées demandées ; à défaut, celles du fournisseur principal.
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    /// Provisionnement ; à défaut, celui du fournisseur principal.
+    #[serde(default)]
+    pub provisioning: Option<Provisioning>,
+}
+
+/// Lit `EASY3D_OIDC_PROVIDERS` et vérifie ce qui doit l'être.
+///
+/// Une déclaration illisible **arrête le serveur** : un fournisseur qu'on croit
+/// branché et qui ne l'est pas est exactement la panne qu'on ne diagnostique pas
+/// (même règle que `EASY3D_OIDC_PROVISIONING`).
+fn extra_providers() -> Result<Vec<ExtraProvider>, String> {
+    match non_empty("EASY3D_OIDC_PROVIDERS") {
+        Some(brut) => parse_providers(&brut),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Valide une déclaration de fournisseurs supplémentaires (partie **pure**, donc
+/// testable sans environnement).
+fn parse_providers(brut: &str) -> Result<Vec<ExtraProvider>, String> {
+    let mut providers: Vec<ExtraProvider> = serde_json::from_str(brut)
+        .map_err(|e| format!("EASY3D_OIDC_PROVIDERS : JSON invalide ({e})"))?;
+    let mut vus = std::collections::HashSet::new();
+    for provider in &mut providers {
+        provider.id = provider.id.trim().to_ascii_lowercase();
+        provider.label = provider.label.trim().to_string();
+        if provider.label.is_empty() {
+            provider.label = provider.id.clone();
+        }
+        if provider.id.is_empty()
+            || !provider
+                .id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        {
+            return Err(format!(
+                "EASY3D_OIDC_PROVIDERS : identifiant « {} » invalide (a-z, 0-9, - et _ seulement)",
+                provider.id
+            ));
+        }
+        if !vus.insert(provider.id.clone()) {
+            return Err(format!(
+                "EASY3D_OIDC_PROVIDERS : identifiant « {} » déclaré deux fois",
+                provider.id
+            ));
+        }
+        if provider.issuer.trim().is_empty()
+            || provider.client_id.trim().is_empty()
+            || provider.client_secret.is_empty()
+        {
+            return Err(format!(
+                "EASY3D_OIDC_PROVIDERS : « {} » est incomplet (issuer, client_id, client_secret)",
+                provider.id
+            ));
+        }
+    }
+    Ok(providers)
 }
 
 impl Env {
@@ -142,6 +228,7 @@ impl Env {
             }),
             provisioning,
             public_url: non_empty("EASY3D_PUBLIC_URL"),
+            providers: extra_providers()?,
         })
     }
 
@@ -219,6 +306,13 @@ impl Missing {
 /// Réglages effectifs : `config.yml`, corrigés par l'environnement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
+    /// Identifiant du fournisseur : `""` pour le **principal** (celui de
+    /// `config.yml` / `EASY3D_OIDC_*`), l'identifiant déclaré pour un
+    /// fournisseur **supplémentaire** (`EASY3D_OIDC_PROVIDERS`).
+    ///
+    /// Il voyage avec les réglages parce qu'il conditionne le rattachement : un
+    /// `sub` n'a de sens que dans l'annuaire qui l'a émis.
+    pub provider: String,
     pub issuer: String,
     pub client_id: String,
     pub client_secret: String,
@@ -253,6 +347,7 @@ pub fn resolve(config: &Oidc, env: &Env) -> Result<Option<Settings>, Missing> {
     }
 
     Ok(Some(Settings {
+        provider: String::new(),
         issuer: issuer.ok_or(Missing::Issuer)?,
         client_id: client_id.ok_or(Missing::ClientId)?,
         client_secret: client_secret.ok_or(Missing::ClientSecret)?,
@@ -261,9 +356,41 @@ pub fn resolve(config: &Oidc, env: &Env) -> Result<Option<Settings>, Missing> {
     }))
 }
 
-/// Réglages effectifs de l'installation courante.
+/// Réglages effectifs de l'installation courante (le fournisseur **principal**).
 pub fn settings(state: &AppState) -> Result<Option<Settings>, Missing> {
     resolve(&state.config().oidc, &state.oidc)
+}
+
+/// Réglages d'un fournisseur nommé : `""` = le principal, sinon un fournisseur
+/// de `EASY3D_OIDC_PROVIDERS`.
+///
+/// `Ok(None)` signifie « rien à proposer » : SSO éteint pour le principal, ou
+/// identifiant inconnu pour un supplémentaire (l'appelant le dit alors en 400).
+/// Les supplémentaires **s'ajoutent** au principal : si celui-ci est éteint, il
+/// n'y a pas de SSO du tout (un seul interrupteur, `EASY3D_AUTH` +
+/// configuration principale).
+pub fn settings_for(state: &AppState, provider: &str) -> Result<Option<Settings>, Missing> {
+    if provider.is_empty() {
+        return settings(state);
+    }
+    if !state.auth.is_enabled() || !matches!(settings(state), Ok(Some(_))) {
+        return Ok(None);
+    }
+    let Some(extra) = state.oidc.providers.iter().find(|p| p.id == provider) else {
+        return Ok(None);
+    };
+    let principal = match settings(state) {
+        Ok(Some(principal)) => principal,
+        _ => return Ok(None),
+    };
+    Ok(Some(Settings {
+        provider: extra.id.clone(),
+        issuer: extra.issuer.clone(),
+        client_id: extra.client_id.clone(),
+        client_secret: extra.client_secret.clone(),
+        scopes: extra.scopes.clone().unwrap_or(principal.scopes),
+        provisioning: extra.provisioning.unwrap_or(principal.provisioning),
+    }))
 }
 
 /// Phrase de journal (démarrage, ou panne d'un appelant).
@@ -285,6 +412,9 @@ pub fn is_enabled(state: &AppState) -> bool {
 /// Une connexion commencée, en attente du retour du fournisseur.
 #[derive(Debug, Clone)]
 pub struct Pending {
+    /// Fournisseur choisi au départ : le retour du fournisseur ne dit pas
+    /// lequel l'a émis, et c'est lui qui décide où échanger le code.
+    pub provider: String,
     /// `redirect_uri` envoyé au fournisseur : renvoyé **à l'identique** à
     /// l'échange du code (les fournisseurs refusent une valeur différente).
     pub redirect_uri: String,
@@ -425,25 +555,50 @@ pub fn same_issuer(annonce: &str, configure: &str) -> bool {
 /// Fonction **pure** : c'est la partie qu'on veut pouvoir relire et tester sans
 /// réseau, une URL d'autorisation ratée se diagnostiquant très mal côté
 /// navigateur.
+///
+/// `login_hint` (facultatif) demande au fournisseur de **pré-remplir** le
+/// compte. Il est passé après validation par [`login_hint`] ; le fournisseur
+/// reste libre de l'ignorer.
 pub fn authorize_url(
     settings: &Settings,
     discovery: &Discovery,
     redirect_uri: &str,
     state: &str,
+    login_hint: Option<&str>,
 ) -> String {
     let separateur = if discovery.authorization_endpoint.contains('?') {
         '&'
     } else {
         '?'
     };
+    let hint = login_hint
+        .filter(|hint| !hint.is_empty())
+        .map(|hint| format!("&login_hint={}", encode(hint)))
+        .unwrap_or_default();
     format!(
-        "{}{separateur}response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
+        "{}{separateur}response_type=code&client_id={}&redirect_uri={}&scope={}&state={}{hint}",
         discovery.authorization_endpoint,
         encode(&settings.client_id),
         encode(redirect_uri),
         encode(&settings.scopes.join(" ")),
         encode(state),
     )
+}
+
+/// Nettoie un `login_hint` venu du client.
+///
+/// Ce n'est qu'une **indication** pour le fournisseur, mais elle voyage dans une
+/// URL et se retrouve affichée par lui : on se limite donc à ce qu'un nom
+/// d'utilisateur ou une adresse peut contenir, et on borne la longueur. Un hint
+/// vide ou entièrement nettoyé disparaît (l'URL reste celle d'aujourd'hui).
+pub fn login_hint(raw: Option<&str>) -> Option<String> {
+    let cleaned: String = raw?
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '+'))
+        .take(255)
+        .collect();
+    (!cleaned.is_empty()).then_some(cleaned)
 }
 
 /// Corps du `POST` d'échange du code contre un jeton d'accès.
@@ -623,8 +778,11 @@ pub fn provision(
 ) -> Result<(db::User, Origin), String> {
     // 1. Déjà rattaché : le cas normal, à partir du deuxième login. Le `sub` est
     //    la seule chose qui compte alors — l'e-mail peut avoir changé chez le
-    //    fournisseur.
-    if let Some(user) = auth.db(|conn| db::find_by_subject(conn, &identity.subject))? {
+    //    fournisseur. Le `sub` n'est cherché que **dans ce fournisseur** : deux
+    //    annuaires peuvent émettre le même identifiant.
+    if let Some(user) =
+        auth.db(|conn| db::find_by_subject(conn, &settings.provider, &identity.subject))?
+    {
         return match user.disabled {
             true => Err("account_disabled".to_string()),
             false => Ok((user, Origin::Existing)),
@@ -649,7 +807,7 @@ pub fn provision(
         // naît après ce bloc) — et celles d'un administrateur sont épargnées,
         // comme son mot de passe : c'est la porte de secours de l'installation.
         auth.db(|conn| {
-            db::set_oidc_subject(conn, &user.uuid, &identity.subject)?;
+            db::set_oidc_subject(conn, &user.uuid, &settings.provider, &identity.subject)?;
             if !db::has_role(conn, &user.uuid, db::ADMIN_ROLE)? {
                 db::delete_sessions_of(conn, &user.uuid)?;
             }
@@ -683,6 +841,7 @@ pub fn provision(
             let username = unique_username(auth, &identity.username)?;
             let mut user = db::NewUser::new(&username, &identity.email, None);
             user.oidc_subject = Some(identity.subject.clone());
+            user.oidc_provider = (!settings.provider.is_empty()).then(|| settings.provider.clone());
             let user = crate::auth::rbac::insert_account(auth, user, &[], &[])?;
             if disabled {
                 auth.db(|conn| db::set_disabled(conn, &user.uuid, true))?;
@@ -812,10 +971,19 @@ where
 // ── Routes ──────────────────────────────────────────────────────────────
 
 /// `GET /auth/oidc/start` — début du flux : redirection vers le fournisseur.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct StartQuery {
     /// Page à rejoindre après la connexion (facultatif, chemin interne).
     pub redirect: Option<String>,
+    /// Compte à pré-remplir chez le fournisseur (facultatif).
+    ///
+    /// Le fournisseur en fait ce qu'il veut : la spécification OIDC dit que
+    /// c'est une **indication** (`login_hint`), pas une garantie. Sert à la page
+    /// de développement qui propose un compte, pour éviter de retaper son nom ;
+    /// l'authentification, elle, reste entière.
+    pub login_hint: Option<String>,
+    /// Fournisseur choisi (`fake`, `keycloak`…) ; absent = le principal.
+    pub provider: Option<String>,
 }
 
 /// `GET /auth/oidc/callback` — retour du fournisseur.
@@ -840,7 +1008,7 @@ pub async fn start(
         let client = client.clone();
         Box::pin(async move { send(&client, request).await })
     };
-    start_with(&state, &headers, query.redirect.as_deref(), transport).await
+    start_with(&state, &headers, &query, transport).await
 }
 
 /// Retour du fournisseur : échange le code, rattache le compte, ouvre la session.
@@ -863,7 +1031,7 @@ pub async fn callback(
 pub async fn start_with<F>(
     state: &AppState,
     headers: &HeaderMap,
-    redirect: Option<&str>,
+    query: &StartQuery,
     mut transport: F,
 ) -> Response
 where
@@ -872,9 +1040,22 @@ where
     if !state.auth.is_enabled() {
         return auth::error(StatusCode::BAD_REQUEST, "auth_disabled");
     }
-    let settings = match settings(state) {
+    // Quel fournisseur : celui demandé, sinon le principal. Un identifiant
+    // inconnu est **dit** (400) : un bouton mort serait plus difficile à
+    // diagnostiquer qu'une erreur serveur explicite.
+    let provider = query
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .unwrap_or_default()
+        .to_string();
+    let settings = match settings_for(state, &provider) {
         Ok(Some(settings)) => settings,
-        Ok(None) => return auth::error(StatusCode::BAD_REQUEST, "oidc_disabled"),
+        Ok(None) if provider.is_empty() => {
+            return auth::error(StatusCode::BAD_REQUEST, "oidc_disabled");
+        }
+        Ok(None) => return auth::error(StatusCode::BAD_REQUEST, "unknown_provider"),
         Err(manque) => return auth::internal(&describe(manque)),
     };
 
@@ -885,10 +1066,12 @@ where
 
     let redirect_uri = format!("{}{CALLBACK_PATH}", base_url(headers, &state.oidc));
     let etat = auth::new_token();
-    let cible = return_to(redirect);
+    let cible = return_to(query.redirect.as_deref());
+    let hint = login_hint(query.login_hint.as_deref());
     state.auth.oidc.remember(
         &etat,
         Pending {
+            provider: settings.provider.clone(),
             redirect_uri: redirect_uri.clone(),
             return_to: cible,
             expires_at: db::now() + STATE_SECONDS,
@@ -899,7 +1082,7 @@ where
         StatusCode::FOUND,
         [(
             header::LOCATION,
-            authorize_url(&settings, &discovery, &redirect_uri, &etat),
+            authorize_url(&settings, &discovery, &redirect_uri, &etat, hint.as_deref()),
         )],
     )
         .into_response()
@@ -935,9 +1118,16 @@ where
         return redirect_to(&format!("{}?error=invalid_state", auth::LOGIN_PATH));
     };
 
-    let settings = match settings(state) {
+    // C'est **le fournisseur du départ** qui échange le code : le retour ne dit
+    // pas d'où il vient, et deux fournisseurs n'ont ni le même jeton ni le même
+    // `userinfo`.
+    let settings = match settings_for(state, &pending.provider) {
         Ok(Some(settings)) => settings,
-        Ok(None) => return auth::error(StatusCode::BAD_REQUEST, "oidc_disabled"),
+        Ok(None) => {
+            return auth::internal(
+                "fournisseur d'identité : réglages introuvables au retour du flux",
+            );
+        }
         Err(manque) => return auth::internal(&describe(manque)),
     };
     let discovery = match discover(&state.auth, &settings, &mut transport).await {
@@ -1007,20 +1197,23 @@ where
         // compte ont pu être fermées par le rattachement.
         state.kick_user(&user.uuid);
     }
-    let token =
-        match state
-            .auth
-            .start_sso_session(&user.uuid, headers, tokens.refresh_token.as_deref())
-        {
-            Ok(token) => token,
-            Err(e) => return auth::internal(&e),
-        };
+    let token = match state.auth.start_sso_session(
+        &user.uuid,
+        headers,
+        tokens.refresh_token.as_deref(),
+        &settings.provider,
+    ) {
+        Ok(token) => token,
+        Err(e) => return auth::internal(&e),
+    };
     // Le détail dit **ce qui vient de se passer**, pas le mode configuré : une
     // reconnexion d'un compte déjà rattaché ne doit pas se lire « création
     // automatique » dans le journal (c'est une trace d'audit, pas un rappel de
     // réglage), ni un rattachement se lire comme une création.
     let detail = origine.detail(settings.provisioning);
-    state.auth.log(headers, "sso_login", Some(&user.uuid), &user.email, detail);
+    state
+        .auth
+        .log(headers, "sso_login", Some(&user.uuid), &user.email, detail);
     match origine {
         Origin::Existing => println!("SSO : {} ({}) connecté", user.username, user.email),
         _ => println!(
@@ -1100,7 +1293,9 @@ where
     if !state.auth.is_enabled() {
         return Ok(Sweep::default());
     }
-    let settings = match settings(state) {
+    // Le fournisseur **principal** doit être configuré ; les sessions de chaque
+    // fournisseur supplémentaire seront résolues une à une, plus bas.
+    let principal = match settings(state) {
         Ok(Some(settings)) => settings,
         // SSO éteint : rien à vérifier, et ce n'est pas une erreur.
         Ok(None) => return Ok(Sweep::default()),
@@ -1122,9 +1317,42 @@ where
     // La découverte peut échouer (fournisseur en panne) : on rend l'erreur
     // **sans rien toucher**. Fermer les sessions parce que le fournisseur ne
     // répond pas mettre tout le monde dehors au premier incident réseau.
-    let discovery = discover(&state.auth, &settings, &mut transport).await?;
+    // Vérifie d'abord que le **principal** répond : une panne se voit tout de
+    // suite, sans toucher aux sessions. Les découvertes des fournisseurs
+    // supplémentaires se font dans la boucle, une fois chacune (puis en cache).
+    discover(&state.auth, &principal, &mut transport).await?;
 
-    for (session_uuid, user_uuid, refresh) in sessions {
+    for (session_uuid, user_uuid, refresh, provider) in sessions {
+        // Chaque session appartient à **un** fournisseur : c'est le sien qui
+        // répond de l'accès. Présenter le jeton d'un autre annuaire ferait
+        // répondre `invalid_grant`, donc fermer un compte à tort.
+        let settings = match settings_for(state, &provider) {
+            Ok(Some(settings)) => settings,
+            Ok(None) => {
+                // Fournisseur retiré de la configuration : on ne sait plus à qui
+                // demander, et on ne ferme rien (fail-open, comme une panne).
+                sweep.unreachable += 1;
+                continue;
+            }
+            Err(manque) => {
+                sweep.unreachable += 1;
+                println!(
+                    "SSO (revalidation) : {} — session non vérifiée",
+                    describe(manque)
+                );
+                continue;
+            }
+        };
+        // La découverte du principal est déjà en cache ; celles des
+        // supplémentaires se font une fois puis restent en mémoire.
+        let discovery = match discover(&state.auth, &settings, &mut transport).await {
+            Ok(discovery) => discovery,
+            Err(e) => {
+                sweep.unreachable += 1;
+                println!("SSO (revalidation) : découverte impossible ({e})");
+                continue;
+            }
+        };
         let (status, body) = match transport(Request::Form {
             url: discovery.token_endpoint.clone(),
             body: refresh_form(&settings, &refresh),
@@ -1374,8 +1602,17 @@ pub struct Status {
     /// Nom lisible du fournisseur, pour le bouton de la page de connexion.
     ///
     /// On ne prend que son **hôte** : c'est ce qui distingue deux fournisseurs
-    /// (une adresse complète ne tiendrait pas sur un bouton), et le backend n'a
-    /// pas d'identité de marque à afficher dont il serait sûr.
+    /// (une adresse complète ne tiendrait pas sur un bouton), et le backend n'a pas d'identité de marque à afficher dont il serait sûr.
+    pub label: String,
+    /// Fournisseurs **supplémentaires** : un bouton de plus chacun.
+    #[serde(default)]
+    pub providers: Vec<ProviderRef>,
+}
+
+/// Désignation d'un fournisseur supplémentaire (bouton de connexion).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProviderRef {
+    pub id: String,
     pub label: String,
 }
 
@@ -1386,6 +1623,15 @@ pub fn status(state: &AppState) -> Option<Status> {
     }
     settings(state).ok().flatten().map(|settings| Status {
         label: issuer_label(&settings.issuer),
+        providers: state
+            .oidc
+            .providers
+            .iter()
+            .map(|extra| ProviderRef {
+                id: extra.id.clone(),
+                label: extra.label.clone(),
+            })
+            .collect(),
     })
 }
 
@@ -1467,6 +1713,7 @@ mod tests {
 
     fn reglages(mode: Provisioning) -> Settings {
         Settings {
+            provider: String::new(),
             issuer: "https://sso.exemple.fr".to_string(),
             client_id: "easy3d".to_string(),
             client_secret: "secret".to_string(),
@@ -1589,7 +1836,12 @@ mod tests {
     /// Démarre un flux et rend l'`state` à rejouer au retour.
     async fn demarrer(state: &AppState, headers: &HeaderMap, redirect: Option<&str>) -> String {
         let (faux, journal) = transport(vec![]);
-        let reponse = start_with(state, headers, redirect, faux).await;
+        let query = StartQuery {
+            redirect: redirect.map(str::to_string),
+            login_hint: None,
+            provider: None,
+        };
+        let reponse = start_with(state, headers, &query, faux).await;
         assert_eq!(reponse.status(), StatusCode::FOUND);
         assert!(
             journal.lock().unwrap().is_empty(),
@@ -1624,6 +1876,7 @@ mod tests {
             &decouverte(),
             "https://ex.fr/cb",
             "abc",
+            None,
         );
         assert!(url.starts_with("https://sso.exemple.fr/auth?"), "{url}");
         assert!(url.contains("response_type=code"), "{url}");
@@ -1634,6 +1887,30 @@ mod tests {
         );
         assert!(url.contains("scope=openid%20email"), "{url}");
         assert!(url.contains("state=abc"), "{url}");
+        // Sans `login_hint`, l'URL ne change pas d'un octet.
+        assert!(!url.contains("login_hint"), "{url}");
+    }
+
+    #[test]
+    fn l_url_d_autorisation_peut_pre_remplir_le_compte() {
+        // Le nom voyage encodé (une adresse e-mail contient `@` et `.`), et la
+        // page de développement s'en sert pour ne pas retaper l'identifiant.
+        let hint = login_hint(Some("  Imprimeuse@exemple.fr  ")).expect("hint conservé");
+        let url = authorize_url(
+            &reglages(Provisioning::Auto),
+            &decouverte(),
+            "https://ex.fr/cb",
+            "abc",
+            Some(&hint),
+        );
+        assert!(url.contains("login_hint=Imprimeuse%40exemple.fr"), "{url}");
+        // La casse n'est **pas** normalisée : certains fournisseurs distinguent
+        // « Alice » de « alice », et c'est à eux de décider. Le nettoyage, lui,
+        // ne garde que ce qui peut figurer dans un identifiant.
+        assert_eq!(login_hint(Some("a b\nc")).as_deref(), Some("abc"));
+        assert_eq!(login_hint(Some("///")), None, "vide après nettoyage");
+        assert_eq!(login_hint(None), None);
+        assert_eq!(login_hint(Some(&"x".repeat(400))).unwrap().len(), 255);
     }
 
     #[test]
@@ -1645,6 +1922,7 @@ mod tests {
             &decouverte,
             "https://ex.fr/cb",
             "abc",
+            None,
         );
         assert!(url.contains("?tenant=1&response_type=code"), "{url}");
         assert!(!url.contains("?tenant=1?response_type"), "{url}");
@@ -1779,7 +2057,11 @@ mod tests {
             &identite("neuf@exemple.fr"),
         )
         .unwrap();
-        assert_eq!(origine, Origin::Created, "premier login : le compte est créé");
+        assert_eq!(
+            origine,
+            Origin::Created,
+            "premier login : le compte est créé"
+        );
         assert_eq!(user.email, "neuf@exemple.fr");
         assert_eq!(user.username, "neuf");
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-neuf@exemple.fr"));
@@ -2235,7 +2517,7 @@ mod tests {
         headers.insert("x-forwarded-host", "catalogue.exemple.fr".parse().unwrap());
 
         let (faux, _) = transport(vec![]);
-        let reponse = start_with(&state, &headers, None, faux).await;
+        let reponse = start_with(&state, &headers, &StartQuery::default(), faux).await;
         let location = reponse
             .headers()
             .get(header::LOCATION)
@@ -2264,7 +2546,7 @@ mod tests {
         )
         .with_auth(auth);
         let (faux, journal) = transport(vec![]);
-        let reponse = start_with(&state, &entetes(), None, faux).await;
+        let reponse = start_with(&state, &entetes(), &StartQuery::default(), faux).await;
         assert_eq!(reponse.status(), StatusCode::BAD_REQUEST);
         assert!(journal.lock().unwrap().is_empty());
 
@@ -2394,7 +2676,7 @@ mod tests {
                 "userinfo_endpoint":"https://attaquant.exemple.fr/userinfo"}"#
                 .to_string(),
         ))]);
-        let reponse = start_with(&state, &entetes(), None, faux).await;
+        let reponse = start_with(&state, &entetes(), &StartQuery::default(), faux).await;
 
         // 500 : c'est une panne de configuration, pas un refus d'utilisateur, et
         // surtout **aucune redirection** vers l'adresse annoncée.
@@ -2440,10 +2722,11 @@ mod tests {
     /// fraîche n'interroge pas le fournisseur avant [`SSO_CHECK_SECONDS`], et un
     /// test ne peut pas attendre cinq minutes.
     fn session_sso(state: &AppState, email: &str, refresh: Option<&str>) -> (db::User, String) {
-        let (user, _) = provision(&state.auth, &reglages(Provisioning::Auto), &identite(email)).unwrap();
+        let (user, _) =
+            provision(&state.auth, &reglages(Provisioning::Auto), &identite(email)).unwrap();
         let jeton = state
             .auth
-            .start_sso_session(&user.uuid, &entetes(), refresh)
+            .start_sso_session(&user.uuid, &entetes(), refresh, "")
             .unwrap();
         state
             .auth
@@ -2724,5 +3007,192 @@ mod tests {
         assert_eq!(sweep, Sweep::default(), "aucune session à revérifier");
         assert!(journal.lock().unwrap().is_empty(), "aucun appel sortant");
         assert!(session_vivante(&state, &jeton));
+    }
+
+    // ── Plusieurs fournisseurs à la fois ────────────────────────────────
+
+    fn extra() -> ExtraProvider {
+        ExtraProvider {
+            id: "fake".to_string(),
+            label: "fake-oidc".to_string(),
+            issuer: "https://fake.exemple.fr".to_string(),
+            client_id: "easy3d-fake".to_string(),
+            client_secret: "secret-fake".to_string(),
+            scopes: None,
+            provisioning: None,
+        }
+    }
+
+    fn decouverte_extra() -> Discovery {
+        Discovery {
+            issuer: "https://fake.exemple.fr".to_string(),
+            authorization_endpoint: "https://fake.exemple.fr/auth".to_string(),
+            token_endpoint: "https://fake.exemple.fr/token".to_string(),
+            userinfo_endpoint: "https://fake.exemple.fr/userinfo".to_string(),
+        }
+    }
+
+    /// État dont l'environnement déclare **un** fournisseur supplémentaire.
+    fn etat_avec_extra(mode: Provisioning) -> AppState {
+        let mut state = etat(mode, true);
+        // `oidc` est un `Arc` (partagé avec les tâches) : on le remplace.
+        let base = (*state.oidc).clone();
+        state.oidc = std::sync::Arc::new(Env {
+            providers: vec![extra()],
+            ..base
+        });
+        state
+            .auth
+            .oidc
+            .remember_discovery(&extra().issuer, &decouverte_extra());
+        state
+    }
+
+    #[test]
+    fn les_fournisseurs_supplementaires_sont_valides() {
+        let lus = parse_providers(
+            r#"[{"id":" Fake ","issuer":" https://f.exemple.fr ","client_id":"c","client_secret":"s"}]"#,
+        )
+        .unwrap();
+        assert_eq!(lus.len(), 1);
+        assert_eq!(lus[0].id, "fake", "identifiant normalisé");
+        assert_eq!(lus[0].label, "fake", "libellé par défaut = identifiant");
+
+        // Ce qui doit **arrêter le serveur** plutôt que d'être ignoré en silence.
+        assert!(parse_providers("pas du json").is_err());
+        assert!(
+            parse_providers(r#"[{"id":"","issuer":"i","client_id":"c","client_secret":"s"}]"#)
+                .is_err()
+        );
+        assert!(
+            parse_providers(r#"[{"id":"a b","issuer":"i","client_id":"c","client_secret":"s"}]"#)
+                .is_err(),
+            "un identifiant finit dans une URL"
+        );
+        assert!(
+            parse_providers(
+                r#"[{"id":"x","issuer":"i","client_id":"c","client_secret":"s"},
+                    {"id":"x","issuer":"j","client_id":"c","client_secret":"s"}]"#
+            )
+            .is_err(),
+            "deux fournisseurs du même nom"
+        );
+        assert!(
+            parse_providers(r#"[{"id":"x","issuer":"","client_id":"c","client_secret":"s"}]"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn chaque_fournisseur_a_ses_propres_reglages() {
+        let state = etat_avec_extra(Provisioning::Auto);
+
+        let principal = settings_for(&state, "").unwrap().expect("principal");
+        assert_eq!(principal.provider, "", "le principal n'a pas d'identifiant");
+        assert_eq!(principal.issuer, "https://sso.exemple.fr");
+
+        let second = settings_for(&state, "fake")
+            .unwrap()
+            .expect("supplémentaire");
+        assert_eq!(second.provider, "fake");
+        assert_eq!(second.issuer, "https://fake.exemple.fr");
+        assert_eq!(second.client_id, "easy3d-fake");
+        // Portées et provisionnement viennent du principal quand ils manquent.
+        assert_eq!(second.scopes, principal.scopes);
+        assert_eq!(second.provisioning, principal.provisioning);
+
+        // Un identifiant inconnu n'est **pas** « le principal » : le départ du
+        // flux le refuse, sinon le bouton enverrait chez le mauvais annuaire.
+        assert!(settings_for(&state, "inconnu").unwrap().is_none());
+    }
+
+    #[test]
+    fn le_meme_sub_dans_deux_fournisseurs_donne_deux_comptes() {
+        let (_dir, auth) = base();
+        let identite = |email: &str| Identity {
+            // Le même identifiant, émis par deux annuaires différents : c'est
+            // exactement le cas qui prendrait un compte pour un autre sans la
+            // colonne `oidc_provider`.
+            subject: "sub-commun".to_string(),
+            email: email.to_string(),
+            username: email.split('@').next().unwrap().to_string(),
+        };
+
+        let principal = reglages(Provisioning::Auto);
+        let (premier, _) = provision(&auth, &principal, &identite("un@exemple.fr")).unwrap();
+
+        let mut second = reglages(Provisioning::Auto);
+        second.provider = "fake".to_string();
+        let (autre, _) = provision(&auth, &second, &identite("deux@exemple.fr")).unwrap();
+
+        assert_ne!(
+            premier.uuid, autre.uuid,
+            "deux comptes, pas un compte partagé"
+        );
+        let par_principal = auth
+            .db(|conn| db::find_by_subject(conn, "", "sub-commun"))
+            .unwrap();
+        assert_eq!(par_principal.map(|user| user.uuid), Some(premier.uuid));
+        let par_extra = auth
+            .db(|conn| db::find_by_subject(conn, "fake", "sub-commun"))
+            .unwrap();
+        assert_eq!(par_extra.map(|user| user.uuid), Some(autre.uuid));
+    }
+
+    #[tokio::test]
+    async fn le_depart_du_flux_suit_le_fournisseur_demande() {
+        let state = etat_avec_extra(Provisioning::Auto);
+        let headers = entetes();
+
+        // Inconnu : 400, et surtout pas un écran de connexion chez un autre.
+        let (faux, _) = transport(vec![]);
+        let query = StartQuery {
+            redirect: None,
+            login_hint: None,
+            provider: Some("inconnu".to_string()),
+        };
+        assert_eq!(
+            start_with(&state, &headers, &query, faux).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        // Supplémentaire : la redirection part vers **son** adresse.
+        let (faux, journal) = transport(vec![]);
+        let query = StartQuery {
+            redirect: None,
+            login_hint: None,
+            provider: Some("fake".to_string()),
+        };
+        let reponse = start_with(&state, &headers, &query, faux).await;
+        assert_eq!(reponse.status(), StatusCode::FOUND);
+        let location = reponse
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            location.starts_with("https://fake.exemple.fr/auth?"),
+            "{location}"
+        );
+        assert!(
+            journal.lock().unwrap().is_empty(),
+            "la découverte était en cache"
+        );
+    }
+
+    #[test]
+    fn le_statut_annonce_les_fournisseurs_supplementaires() {
+        let state = etat_avec_extra(Provisioning::Auto);
+        let statut = status(&state).expect("SSO allumé");
+        assert_eq!(statut.label, "sso.exemple.fr");
+        assert_eq!(
+            statut.providers,
+            vec![ProviderRef {
+                id: "fake".to_string(),
+                label: "fake-oidc".to_string()
+            }],
+            "un bouton de plus par fournisseur"
+        );
     }
 }

@@ -18,6 +18,17 @@ describe('oidcStartUrl', () => {
     // Vide = pas de paramètre : le backend retombe alors sur l'accueil.
     expect(oidcStartUrl('')).toBe('/api/auth/oidc/start')
   })
+
+  it('peut pré-remplir le compte chez le fournisseur', () => {
+    // `login_hint` vient de la page de développement (`/dev/login`) : c'est le
+    // fournisseur qui l'interprète, et le backend le nettoie avant de l'envoyer.
+    expect(oidcStartUrl(null, 'imprimeuse')).toBe('/api/auth/oidc/start?login_hint=imprimeuse')
+    expect(oidcStartUrl('/admin/audit', 'prenom.nom@exemple.fr')).toBe(
+      '/api/auth/oidc/start?redirect=%2Fadmin%2Faudit&login_hint=prenom.nom%40exemple.fr',
+    )
+    // Pas de compte choisi = pas de paramètre du tout.
+    expect(oidcStartUrl('/admin/audit', '')).toBe('/api/auth/oidc/start?redirect=%2Fadmin%2Faudit')
+  })
 })
 
 describe('redirectUri', () => {

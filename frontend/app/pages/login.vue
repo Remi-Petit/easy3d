@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { authErrorKey, oidcStartUrl, safeRedirect } from '~/utils/auth'
+import { DEV_SSO_LABEL, devLoginUrl, oidcStartUrl, safeRedirect, authErrorKey } from '~/utils/auth'
 
 /**
  * Page de connexion.
@@ -38,6 +38,17 @@ const error = computed(() => {
 
 /** Page demandée avant la connexion, à rejoindre dans les deux cas. */
 const target = computed(() => safeRedirect(route.query.redirect))
+
+/**
+ * Option de **développement** : quand `NUXT_PUBLIC_DEV_LOGIN=1`, le bouton ne
+ * saute pas directement chez le fournisseur — il passe par `/dev/login`, qui
+ * propose les comptes du royaume Keycloak (et repart ensuite en vrai flux SSO).
+ * Il s'appelle alors « keycloak-dev », le nom du fournisseur de dev, plutôt que
+ * l'hôte annoncé par le backend.
+ */
+const devLogin = useRuntimeConfig().public.devLogin
+const ssoUrl = computed(() => (devLogin ? devLoginUrl(target.value) : oidcStartUrl(target.value)))
+const ssoLabel = computed(() => (devLogin ? DEV_SSO_LABEL : (oidc.value?.label ?? '')))
 
 // Sans authentification activée, cette page n'a rien à proposer : la garde
 // laisse passer (elle ne s'applique qu'aux installations avec comptes), donc
@@ -110,14 +121,31 @@ async function submit() {
       <template v-if="oidc">
         <p class="login__sep"><span>{{ t('auth.or') }}</span></p>
         <UButton
-          :to="oidcStartUrl(target)"
+          :to="ssoUrl"
           external
           color="neutral"
           variant="soft"
           block
           icon="i-lucide-key-round"
         >
-          {{ t('auth.sso', { provider: oidc.label }) }}
+          {{ t('auth.sso', { provider: ssoLabel }) }}
+        </UButton>
+        <!--
+          Fournisseurs **supplémentaires** (`EASY3D_OIDC_PROVIDERS`) : un bouton
+          chacun, à côté du principal. C'est ce qui permet d'avoir en
+          développement un vrai Keycloak *et* le fournisseur fictif sans choisir.
+        -->
+        <UButton
+          v-for="extra in oidc.providers ?? []"
+          :key="extra.id"
+          :to="oidcStartUrl(target, null, extra.id)"
+          external
+          color="neutral"
+          variant="soft"
+          block
+          icon="i-lucide-key-round"
+        >
+          {{ t('auth.sso', { provider: extra.label }) }}
         </UButton>
       </template>
     </form>

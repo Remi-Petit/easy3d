@@ -19,6 +19,16 @@ export default defineEventHandler(async (event) => {
   if (typeof query.redirect === 'string' && query.redirect) {
     url.searchParams.set('redirect', query.redirect)
   }
+  // Compte à pré-remplir chez le fournisseur : la page de développement s'en
+  // sert (`/dev/login`). Le backend le nettoie avant de l'envoyer.
+  if (typeof query.login_hint === 'string' && query.login_hint) {
+    url.searchParams.set('login_hint', query.login_hint)
+  }
+  // Fournisseur choisi (`fake`, `keycloak`…) : sans ce relais, le bouton d'un
+  // fournisseur supplémentaire partirait silencieusement chez le principal.
+  if (typeof query.provider === 'string' && query.provider) {
+    url.searchParams.set('provider', query.provider)
+  }
 
   try {
     return await proxyRequest(event, url.toString(), {

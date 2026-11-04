@@ -64,6 +64,12 @@ export default defineNuxtConfig({
       // publie l'API ailleurs doit la poser, sans quoi l'adresse montrée serait
       // fausse.
       hpccatMcpBase: process.env.NUXT_PUBLIC_HPCCAT_MCP_BASE || '',
+      // Page de **développement** (`/dev/login`) : propose les comptes du
+      // royaume Keycloak et démarre un vrai flux SSO pour celui qu'on choisit
+      // (`login_hint`). Absent = la page et sa route répondent 404 ; le compose
+      // de développement la pose quand on bascule sur Keycloak (voir
+      // `docker/keycloak/README.md`).
+      devLogin: process.env.NUXT_PUBLIC_DEV_LOGIN === '1',
     },
   },
   // Le temps réel (catalogue `/ws`, notes `/collab/*`) est relayé par Nitro

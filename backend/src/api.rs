@@ -4429,7 +4429,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-            auth.db(|conn| auth::db::set_oidc_subject(conn, &user.uuid, "sub-sso"))
+            auth.db(|conn| auth::db::set_oidc_subject(conn, &user.uuid, "", "sub-sso"))
                 .unwrap();
             let token = auth.start_session(&user.uuid, &HeaderMap::new()).unwrap();
             *session.lock().unwrap() = auth
@@ -5507,7 +5507,7 @@ mod tests {
         )
         .unwrap();
         auth.db(|conn| {
-            auth::db::set_oidc_subject(conn, &user.uuid, &format!("sub-{username}"))?;
+            auth::db::set_oidc_subject(conn, &user.uuid, "", &format!("sub-{username}"))?;
             if admin {
                 auth::db::set_user_roles(conn, &user.uuid, &[auth::db::ADMIN_ROLE.to_string()])?;
             }

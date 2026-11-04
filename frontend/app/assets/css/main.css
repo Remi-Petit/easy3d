@@ -2286,6 +2286,89 @@ select.admin__input option {
   padding: 28px 26px 26px;
 }
 
+/* Page de choix des comptes de **développement** (`/dev/login`) : plus large que
+   la carte de connexion, puisqu'elle liste des comptes au lieu de deux champs. */
+.login__card--wide {
+  max-width: 520px;
+}
+
+.dev__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dev__account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.dev__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Prend la place restante et **cesse de pousser** : sans `flex: 1`, une
+     adresse longue colle le mot de passe contre elle (les deux blocs sont
+     côte à côte dans un `justify-content: space-between`). */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dev__who small {
+  color: var(--muted);
+  font-size: 12px;
+  /* Une adresse trop longue s'abrège au lieu de chevaucher le mot de passe. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dev__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Étiquette d'un rôle **Keycloak** : elle informe, elle n'accorde rien (les
+   droits de l'application sont locaux). */
+.dev__role {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.dev__role--none {
+  opacity: 0.6;
+}
+
+.dev__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.dev__password {
+  font-size: 12px;
+  color: var(--muted);
+  user-select: all;
+}
+
+.dev__back {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .login__title {
   margin: 0;
   font-size: 19px;

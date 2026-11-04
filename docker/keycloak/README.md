@@ -57,30 +57,63 @@ provisionnement automatique, avec le rôle livré `lecteur`.
 
 ## Démarrage
 
-Le service est derrière le profil Compose `keycloak` — `docker compose up` ne
-tire donc pas 500 Mo d'image pour qui n'en a pas besoin.
+Keycloak fait partie du `docker compose up` par défaut : c'est le fournisseur
+**principal** de l'application de développement. Le fournisseur fictif tourne en
+même temps et s'affiche à côté (`EASY3D_OIDC_PROVIDERS`) : la page de connexion
+propose donc **deux** boutons, et l'on choisit au moment de se connecter — pas au
+moment de démarrer la pile.
 
 ```bash
-docker compose --profile keycloak up -d keycloak      # 30-60 s la première fois
-docker compose --profile keycloak logs -f keycloak    # ouvre /admin dans un navigateur
+docker compose up --build                             # application + Keycloak + fake-oidc
+docker compose logs -f keycloak                       # le démarrage, puis le flux
 ```
 
 Le port publié est `8088` (`KEYCLOAK_PORT`), et l'adresse annoncée par défaut est
-`http://host.docker.internal:8088` (`KEYCLOAK_URL`).
+`http://localhost:8088` (`KEYCLOAK_URL`).
 
-### Brancher l'application du compose dessus
+### Brancher l'application dessus
 
-```bash
-EASY3D_OIDC_ISSUER=http://host.docker.internal:8088/realms/easy3d \
-EASY3D_OIDC_CLIENT_ID=easy3d \
-EASY3D_OIDC_CLIENT_SECRET=secret-keycloak \
-docker compose --profile keycloak up --build
-```
+C'est **déjà le cas** : le service `easy3d` annonce
+`EASY3D_OIDC_ISSUER=http://localhost:8088/realms/easy3d`, et la page de
+connexion propose « Continuer avec keycloak-dev ».
 
-Puis <http://localhost:3100> → « Continuer avec host.docker.internal » →
-`admin` / `motdepasse-admin` → on revient sur le catalogue, connecté en
-administrateur, et `/admin/audit` montre une **Connexion SSO** « compte
-préparé ».
+Puis <http://localhost:3100> → « Continuer avec keycloak-dev » → le compte
+voulu → `motdepasse-…` (affiché sur la page) → on revient sur le catalogue,
+connecté en tant que ce compte. `/admin/audit` montre une **Connexion SSO** dont
+le détail dit si le compte a été créé ou rattaché.
+
+⚠️ **Un compte déjà rattaché à un autre fournisseur ne peut pas l'être à
+Keycloak.** Si la base de développement a servi avec `fake-oidc`, les comptes
+`admin` et `user` y portent l'identité de l'ancien fournisseur : la connexion
+Keycloak échoue alors en `oidc_conflict` (« déjà rattaché à une autre
+identité »). Deux sorties : les détacher (*Administration → Comptes → Détacher
+du SSO*, avec le mot de passe local `adminadmin`), ou repartir d'une base neuve
+(`rm config/easy3d.db` puis redémarrer).
+
+### Choisir son compte depuis l'application (`/dev/login`)
+
+`NUXT_PUBLIC_DEV_LOGIN=1` (déjà posé par le compose) ouvre une **page de choix
+des comptes** (<http://localhost:3100/dev/login>) : l'option SSO de la page de
+connexion s'appelle alors « Continuer avec keycloak-dev » et mène à cette page, qui liste
+le royaume — identifiant, adresse, rôles **Keycloak** et mot de passe à saisir.
+
+Ce qu'elle fait, et ce qu'elle ne fait pas :
+
+- elle **ne connecte personne** : chaque ligne démarre un vrai flux OIDC
+  (`/api/auth/oidc/start?login_hint=…`), le fournisseur pré-remplit
+  l'identifiant, et le mot de passe se saisit **chez lui** ;
+- les rôles affichés sont ceux de Keycloak — ils **n'accordent rien** dans
+  easy3d (voir plus haut) ; les droits se règlent dans *Administration →
+  Comptes* ;
+- la liste vient du fichier `realm.json` monté dans le conteneur
+  (`./docker/keycloak:/dev/keycloak:ro`, lu via `NUXT_DEV_REALM`) : une seule
+  liste, la même que celle importée par Keycloak ;
+- sans le drapeau, la page **et** sa route répondent 404 (ce n'est pas un
+  panneau caché, c'est du code de développement).
+
+Côté développement « nu », sans Docker : `NUXT_PUBLIC_DEV_LOGIN=1` (ou la ligne
+dans `frontend/.env`) suffit — le royaume est alors lu dans le dépôt
+(`../docker/keycloak/realm.json`, relativement à `frontend/`).
 
 ### ⚠️ Une seule adresse : `KEYCLOAK_URL`
 
@@ -88,42 +121,47 @@ Keycloak annonce dans sa découverte **son** adresse (émetteur, autorisation,
 jeton, `userinfo`), et le backend easy3d **refuse** un document dont l'émetteur
 n'est pas exactement `EASY3D_OIDC_ISSUER` (garde-fou contre une redirection DNS
 qui enverrait le secret client ailleurs). Les deux réglages doivent donc désigner
-la même base, joignable **par le navigateur et par le backend** :
+la même base, joignable **par le navigateur et par le backend**.
 
-- dans un conteneur, `127.0.0.1` est le conteneur lui-même, pas l'hôte ;
-- sur l'hôte, `host.docker.internal` est fourni par Docker Desktop (Docker
-  l'écrit dans le fichier `hosts` de Windows/macOS, et le compose le déclare
-  pour Linux).
+D'où le défaut `http://localhost:8088` : c'est le seul nom que le **navigateur**
+résout toujours. Dans le conteneur, `localhost` désignerait le conteneur
+lui-même — le service `easy3d` le fait donc pointer sur l'hôte :
 
-D'où le défaut `http://host.docker.internal:8088`, qui marche des deux côtés.
+```yaml
+extra_hosts:
+  - "localhost:host-gateway"
+```
+
+(rien dans l'image n'utilise le nom `localhost` pour elle-même : les deux
+process se parlent en `127.0.0.1`, numérique).
+
+⚠️ **Ne pas revenir à `host.docker.internal`** : Docker Desktop l'écrit dans le
+fichier `hosts` de Windows au démarrage, mais ne le réécrit **pas** quand
+l'adresse de la machine change (constaté : entrée `192.168.0.15` alors que la
+machine était en `.14` — les conteneurs résolvaient, le navigateur non).
+
 Pour changer de port, changer **les deux** variables :
 
 ```bash
-KEYCLOAK_PORT=9090 KEYCLOAK_URL=http://host.docker.internal:9090 \
-EASY3D_OIDC_ISSUER=http://host.docker.internal:9090/realms/easy3d \
-docker compose --profile keycloak up -d
+KEYCLOAK_PORT=9090 KEYCLOAK_URL=http://localhost:9090 \
+EASY3D_OIDC_ISSUER=http://localhost:9090/realms/easy3d \
+docker compose up -d
 ```
 
 Vérification en une ligne, si le navigateur affiche une erreur de connexion :
 
 ```bash
 # doit afficher l'émetteur annoncé, tel qu'il est configuré côté easy3d
-curl -s http://host.docker.internal:8088/realms/easy3d/.well-known/openid-configuration
+curl -s http://localhost:8088/realms/easy3d/.well-known/openid-configuration
 ```
-
-Si le fichier `hosts` de Windows est **périmé** (l'adresse de la machine a changé
-depuis le démarrage de Docker Desktop — l'entrée pointe alors vers une IP qui
-n'est plus la sienne), le navigateur ne joint plus `host.docker.internal` alors
-que les conteneurs, eux, continuent de le résoudre correctement. Redémarrer
-Docker Desktop réécrit l'entrée.
 
 ## Rejouer le royaume depuis le fichier
 
 Le royaume n'est importé que sur une base **vide**.
 
 ```bash
-docker compose --profile keycloak down -v            # efface le royaume importé
-docker compose --profile keycloak up -d keycloak     # réimporte realm.json
+docker compose down -v            # efface le royaume importé
+docker compose up -d keycloak     # réimporte realm.json
 ```
 
 Une modification dans la console d'administration (`/admin`) est donc perdue au

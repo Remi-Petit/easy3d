@@ -294,7 +294,7 @@ impl Auth {
     /// Publique : le changement de mot de passe renouvelle la session de
     /// l'appelant (toutes les autres sont fermées au passage).
     pub fn start_session(&self, user_uuid: &str, headers: &HeaderMap) -> Result<String, String> {
-        self.open_session(user_uuid, headers, None)
+        self.open_session(user_uuid, headers, None, "")
     }
 
     /// Ouvre une session issue du fournisseur d'identité.
@@ -303,13 +303,18 @@ impl Auth {
     /// de revalider périodiquement l'accès auprès du fournisseur (voir
     /// `oidc::revalidate_sessions`), sans quoi une désactivation chez lui
     /// laisserait la session locale vivante jusqu'à son expiration.
+    ///
+    /// `provider` (`""` = principal) est enregistré avec la session : c'est
+    /// **à ce fournisseur-là** qu'on reposera la question, et présenter le jeton
+    /// d'un autre annuaire ferait répondre `invalid_grant` pour rien.
     pub fn start_sso_session(
         &self,
         user_uuid: &str,
         headers: &HeaderMap,
         refresh_token: Option<&str>,
+        provider: &str,
     ) -> Result<String, String> {
-        self.open_session(user_uuid, headers, refresh_token)
+        self.open_session(user_uuid, headers, refresh_token, provider)
     }
 
     /// Ouvre une session et renvoie son jeton **en clair** (jamais stocké tel
@@ -319,6 +324,7 @@ impl Auth {
         user_uuid: &str,
         headers: &HeaderMap,
         refresh_token: Option<&str>,
+        provider: &str,
     ) -> Result<String, String> {
         let token = new_token();
         let token_hash = hash_secret(&token);
@@ -340,6 +346,7 @@ impl Auth {
                     user_agent: &user_agent,
                     ip: &ip,
                     refresh_token,
+                    oidc_provider: (!provider.is_empty()).then_some(provider),
                 },
             )?;
             db::purge_expired_sessions(conn)?;

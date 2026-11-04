@@ -377,27 +377,37 @@ fournisseur. Le dépôt en livre donc un **fictif**, pour le développement :
 qui accepte **n'importe quelle** connexion sans mot de passe et décrit les
 comptes simulés déclarés en JSON (`ACCOUNTS`).
 
-Le `docker-compose.yml` de développement le démarre avec l'application, déjà
-branché (`EASY3D_OIDC_ISSUER: http://fake-oidc:8788`) : la page de connexion
-affiche alors **Continuer avec…**. Avec **deux** comptes déclarés, un clic ouvre
-la page de choix du fournisseur ; avec un seul, la session s'ouvre directement.
+Le `docker-compose.yml` de développement le lance **en même temps** que Keycloak
+et le déclare comme fournisseur **supplémentaire** (`EASY3D_OIDC_PROVIDERS`) :
+la page de connexion affiche donc **deux** boutons — *Continuer avec
+keycloak-dev* (comptes à choisir, mot de passe) et *Continuer avec fake-oidc*
+(un clic, sans mot de passe). Les deux jeux de comptes coexistent : le
+rattachement est propre à chaque fournisseur, et un compte n'appartient qu'à un
+seul.
 
-Le compose de développement en livre deux :
+Avec **deux** comptes déclarés côté fictif, un clic ouvre la page de choix du
+fournisseur ; avec un seul, la session s'ouvre directement.
+
+Le compose en livre deux :
 
 | Compte | Comment s'y connecter | Droits |
 | --- | --- | --- |
-| Administrateur | mot de passe `admin` / `adminadmin`, ou SSO « Administrateur » | tout (superutilisateur `admin`) |
-| Utilisateur | SSO « Utilisateur » (compte créé au premier login) | rôle par défaut (`lecteur`) |
+| `admin` | mot de passe `admin` / `adminadmin`, ou SSO Keycloak « admin » | tout (superutilisateur `admin`) |
+| `fictif-admin` | SSO **fake-oidc** « Administrateur (fictif) », sans mot de passe | créé au premier login, rôle par défaut |
+| `fictif-user` | SSO **fake-oidc** « Utilisateur (fictif) », sans mot de passe | rôle par défaut (`lecteur`) |
+| les comptes du royaume | SSO **keycloak-dev** → page de choix (`/dev/login`) | rôle par défaut, sauf réglage dans *Comptes* |
 
 Le mot de passe doit faire **8 caractères minimum** (règle du backend) : c'est
 pourquoi celui du compte de développement est `adminadmin` et non `admin`.
 
-Le compte « Administrateur » est un compte **local** (`EASY3D_ADMIN_*`) que le
-SSO **rattache** : c'est le même e-mail qui les relie, et la session ouverte
-porte donc les droits d'administrateur. Le compte « Utilisateur », lui, n'existe
-pas d'avance — le provisionnement automatique le crée. `EASY3D_ADMIN_*`
-n'agissant qu'à la **première** création, repartir de ces comptes demande de
-supprimer `config/easy3d.db`.
+Le compte `admin` est un compte **local** (`EASY3D_ADMIN_*`) que le SSO Keycloak
+**rattache** : c'est le même e-mail qui les relie, et la session ouverte porte
+donc les droits d'administrateur. Les comptes fictifs, eux, n'existent pas
+d'avance — le provisionnement automatique les crée avec les adresses
+`fictif.*@example.com`, **différentes** de celles du royaume (un compte
+n'appartient qu'à un fournisseur). `EASY3D_ADMIN_*` n'agissant qu'à la
+**première** création, repartir de ces comptes demande de supprimer
+`config/easy3d.db`.
 
 Pour éprouver ce dernier chemin (un accès fermé chez le fournisseur), le
 fournisseur fictif honore `REVOKED_EMAILS=adresse@exemple.fr` : l'échange et le
@@ -405,7 +415,7 @@ rafraîchissement répondent alors `invalid_grant`, comme le ferait un annuaire
 dont le compte est désactivé.
 
 ```bash
-docker compose logs -f fake-oidc        # le flux : autorisation, jeton, userinfo
+docker compose logs -f fake-oidc   # autorisation, jeton, userinfo
 
 # Vérifier le fournisseur lui-même — il démarre son instance si besoin :
 node docker/fake-oidc/selftest.mjs
@@ -428,10 +438,20 @@ compatibilité. Le dépôt livre donc aussi un **Keycloak** complet (profil Comp
 comptes de test — de quoi éprouver **plusieurs identités, plusieurs droits** :
 
 ```bash
-docker compose --profile keycloak up -d keycloak      # http://host.docker.internal:8088/admin
+docker compose up --build                             # application + Keycloak
 cd frontend && bun run test:e2e:sso                   # navigateur → Nuxt → backend → Keycloak
 node docker/keycloak/selftest.mjs                     # le royaume, sans navigateur
 ```
+
+Keycloak démarre **avec** l'application (`docker compose up`), et la page de
+connexion propose **Continuer avec keycloak-dev** : ce bouton ouvre une page qui
+**liste les comptes du royaume** (identifiant, adresse, rôles Keycloak, mot de
+passe) ; choisir un compte pré-remplit l'identifiant chez le fournisseur, qui
+demande le mot de passe — rien n'est contourné. C'est le moyen le plus court
+pour essayer « un administrateur », « un imprimeur » et « un lecteur » à la
+suite.
+
+Console Keycloak : <http://localhost:8088/admin> (`admin` / `admin`).
 
 La campagne `e2e-sso` rejoue le parcours réel : page de connexion de Keycloak,
 mot de passe erroné, rattachement d'un compte local existant, création d'un

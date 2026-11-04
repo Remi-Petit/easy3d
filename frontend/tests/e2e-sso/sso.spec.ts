@@ -3,6 +3,9 @@ import {
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  COMPTES_KEYCLOAK,
+  EXTRA_EMAIL,
+  EXTRA_USERNAME,
   KC_ADMIN_LOGIN,
   KC_ADMIN_PASSWORD,
   KC_IMPRIMEUSE,
@@ -40,10 +43,20 @@ async function saisirChezKeycloak(page: Page, identifiant: string, motDePasse: s
   await page.locator('button[type="submit"], input[type="submit"]').first().click()
 }
 
-/** Clique le bouton SSO de la page de connexion et vérifie qu'on est chez Keycloak. */
-async function ouvrirKeycloak(page: Page) {
+/** Ouvre la page de choix des comptes (option de connexion de développement). */
+async function ouvrirChoixComptes(page: Page) {
   await page.goto('/login')
-  await page.getByRole('link', { name: /Continuer avec/ }).click()
+  // Le libellé porte le nom du fournisseur **de dev** (voir `DEV_SSO_LABEL`) :
+  // c'est l'option demandée pour essayer plusieurs comptes sans retaper leur nom.
+  await page.getByRole('link', { name: /Continuer avec keycloak-dev/ }).click()
+  await expect(page).toHaveURL((url) => url.pathname === '/dev/login', { timeout: 30_000 })
+}
+
+/** Clique « Se connecter » sur le compte voulu, et vérifie qu'on est chez Keycloak. */
+async function choisirCompte(page: Page, login: string) {
+  const ligne = page.locator(`.dev__account[data-compte="${login}"]`)
+  await expect(ligne).toHaveCount(1)
+  await ligne.getByRole('link', { name: 'Se connecter' }).click()
   await expect(page).toHaveURL(/\/realms\/easy3d\/protocol\/openid-connect\/auth/, {
     timeout: 30_000,
   })
@@ -51,26 +64,40 @@ async function ouvrirKeycloak(page: Page) {
 
 /** Connexion complète par le fournisseur, jusqu'au retour dans l'application. */
 async function seConnecterParSso(page: Page, identifiant: string, motDePasse: string) {
-  await ouvrirKeycloak(page)
+  await ouvrirChoixComptes(page)
+  await choisirCompte(page, identifiant)
   await saisirChezKeycloak(page, identifiant, motDePasse)
+  await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
 }
 
-test('le bouton SSO mène à la page de connexion de Keycloak', async ({ page }) => {
+test('l’option « keycloak-dev » propose les comptes du royaume', async ({ page }) => {
   await page.goto('/login')
 
-  // Le libellé porte l'hôte du fournisseur, annoncé par `/auth/me`.
-  const bouton = page.getByRole('link', { name: /Continuer avec/ })
-  await expect(bouton).toContainText('127.0.0.1')
+  // Le libellé porte le nom du fournisseur de développement.
+  const bouton = page.getByRole('link', { name: /Continuer avec keycloak-dev/ })
+  await expect(bouton).toBeVisible()
   await bouton.click()
 
-  // On a **quitté** l'application : c'est Keycloak qui sert la page, et elle
-  // demande un mot de passe (ce que le fournisseur fictif ne fait jamais).
+  // Une page de choix, alimentée par `docker/keycloak/realm.json` : chaque
+  // compte du royaume y est, avec le rôle que **Keycloak** lui donne.
+  await expect(page).toHaveURL((url) => url.pathname === '/dev/login', { timeout: 30_000 })
+  await expect(page.locator('.dev__account')).toHaveCount(COMPTES_KEYCLOAK.length)
+  for (const compte of COMPTES_KEYCLOAK) {
+    await expect(page.locator(`.dev__account[data-compte="${compte.login}"]`)).toHaveCount(1)
+  }
+  const imprimeuse = page.locator(`.dev__account[data-compte="${KC_IMPRIMEUSE.login}"]`)
+  await expect(imprimeuse).toContainText(KC_IMPRIMEUSE.motDePasse)
+  await expect(imprimeuse).toContainText('imprimeur')
+
+  // Choisir un compte ne connecte personne : on **quitte** l'application, avec
+  // l'identifiant pré-rempli chez le fournisseur (`login_hint`), et le mot de
+  // passe reste à saisir là-bas.
+  await imprimeuse.getByRole('link', { name: 'Se connecter' }).click()
   await expect(page).toHaveURL(/\/realms\/easy3d\/protocol\/openid-connect\/auth/, {
     timeout: 30_000,
   })
-  await expect(page.locator('input[name="username"]')).toBeVisible()
-  await expect(page.locator('input[name="password"]')).toBeVisible()
-  await expect(page.locator('button[type="submit"], input[type="submit"]')).toHaveCount(1)
+  await expect(page.locator('input[name="username"]')).toHaveValue(KC_IMPRIMEUSE.login)
+  await expect(page.locator('input[name="password"]')).toHaveValue('')
 })
 
 test('un compte local est rattaché par son e-mail, sans doublon', async ({ page }) => {
@@ -124,7 +151,8 @@ test('un compte inconnu est créé d’office, avec le rôle livré', async ({ p
 })
 
 test('un mot de passe erroné chez le fournisseur ne crée aucune session', async ({ page }) => {
-  await ouvrirKeycloak(page)
+  await ouvrirChoixComptes(page)
+  await choisirCompte(page, KC_USER_LOGIN)
   await saisirChezKeycloak(page, KC_USER_LOGIN, 'ce-n-est-pas-le-bon')
 
   // Keycloak refuse **chez lui** : on reste sur sa page, avec son message (dans
@@ -153,7 +181,8 @@ test('après connexion, on revient sur la page demandée', async ({ page }) => {
   // l'état de la connexion : c'est ce que le fournisseur ne voit jamais.
   expect(new URL(page.url()).searchParams.get('redirect')).toBe('/admin/audit')
 
-  await page.getByRole('link', { name: /Continuer avec/ }).click()
+  await page.getByRole('link', { name: /Continuer avec keycloak-dev/ }).click()
+  await choisirCompte(page, KC_ADMIN_LOGIN)
   await saisirChezKeycloak(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
 
   await expect(page).toHaveURL((url) => url.pathname === '/admin/audit', { timeout: 30_000 })
@@ -368,4 +397,38 @@ test('un rôle porté chez Keycloak ne donne aucun droit dans easy3d', async ({ 
   expect((await page.request.get('/api/roles')).status()).toBe(403)
   await page.goto('/admin/accounts')
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
+})
+
+// ── Deux fournisseurs **en même temps** ──────────────────────────────────
+//
+// `EASY3D_OIDC_PROVIDERS` ajoute un fournisseur à côté du principal : la page de
+// connexion affiche alors un bouton de plus, et chacun mène à **son** annuaire.
+// (Placé en dernier : la connexion qu'il ouvre deviendrait sinon l'entrée la
+// plus récente du journal, que d'autres tests lisent.)
+
+test('le fournisseur supplémentaire ouvre une session à côté du principal', async ({ page }) => {
+  await page.goto('/login')
+
+  // Deux boutons : le principal (« keycloak-dev », qui mène à la page de choix)
+  // et le supplémentaire, qui part directement chez lui.
+  await expect(page.getByRole('link', { name: /Continuer avec keycloak-dev/ })).toHaveCount(1)
+  const second = page.getByRole('link', { name: /Continuer avec fake-oidc/ })
+  await expect(second).toHaveCount(1)
+  await second.click()
+
+  // Ce fournisseur n'a qu'un compte et ne demande pas de mot de passe : la
+  // session s'ouvre sans rien saisir, et le compte local est créé d'office.
+  await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
+  await expect(page.locator('.sidebar-user__who')).toHaveText(EXTRA_USERNAME)
+
+  const me = (await (await page.request.get('/api/auth/me')).json()) as {
+    user?: { email?: string; oidc?: boolean }
+  }
+  expect(me.user?.oidc).toBe(true)
+  expect(me.user?.email).toBe(EXTRA_EMAIL)
+
+  // Le rattachement est **étanche** : ce compte n'est pas celui que le même
+  // e-mail aurait créé chez Keycloak (ici les adresses diffèrent, mais la règle
+  // est la même) et il n'a que le rôle livré.
+  expect(await rolesDe(page)).toEqual(['lecteur'])
 })

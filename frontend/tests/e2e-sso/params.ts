@@ -152,3 +152,22 @@ export const KC_SUPERUSER = compteKeycloak('superuser')
 
 /** Projet Compose de la campagne : ses conteneurs ne touchent pas ceux du dev. */
 export const COMPOSE_PROJECT = 'easy3d-sso'
+
+/**
+ * Fournisseur **supplémentaire** de la campagne : `docker/fake-oidc`, lancé par
+ * Node (même script que le compose de développement), sur son propre port.
+ *
+ * Il vit à côté de Keycloak sans le remplacer : c'est ce que la page de
+ * connexion doit proposer, deux boutons. Ses comptes ont des adresses
+ * **distinctes** de celles du royaume — un compte n'appartient qu'à un
+ * fournisseur (`oidc_conflict` sinon).
+ */
+export const EXTRA_PORT = port('E2E_SSO_EXTRA_PORT', 18792)
+export const EXTRA_ORIGIN = `http://127.0.0.1:${EXTRA_PORT}`
+/** Identifiant d'URL du fournisseur (`?provider=…`). */
+export const EXTRA_ID = 'fake'
+export const EXTRA_LABEL = 'fake-oidc'
+export const EXTRA_CLIENT_SECRET = 'secret-e2e-fake'
+export const EXTRA_EMAIL = 'fictif@e2e.test'
+export const EXTRA_USERNAME = 'fictif-e2e'
+export const EXTRA_SUBJECT = 'fake-e2e-sub'
