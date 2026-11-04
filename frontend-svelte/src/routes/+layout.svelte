@@ -18,9 +18,29 @@ $effect(() => appliquerLangue($langue))
 /** Nom de dossier ou de fichier courant, pour le titre (dernier segment). */
 const titre = $derived.by(() => {
   const params = page.params as Record<string, string | undefined>
-  if (params.name) return nomDeBase(decodeURIComponent(params.name))
-  if (params.rel) return nomDeBase(decodeURIComponent(params.rel))
+  if (params.name) return nomDeBase(nomParametre(params.name))
+  if (params.rel) return nomDeBase(nomParametre(params.rel))
   return $t('catalog.title')
+})
+
+/**
+ * SvelteKit décode déjà les paramètres d'URL ; un second décodage planterait sur
+ * un nom contenant un `%` littéral, d'où le repli.
+ */
+function nomParametre(valeur: string): string {
+  try {
+    return decodeURIComponent(valeur)
+  } catch {
+    return valeur
+  }
+}
+
+/** Sur un dossier, le nombre de fichiers qu'il contient (comme l'app Nuxt). */
+const sousTitre = $derived.by(() => {
+  const params = page.params as Record<string, string | undefined>
+  if (!params.name) return ''
+  const dossier = data.catalogue?.folders[nomParametre(params.name)]
+  return dossier ? $t('folder.subtitle', { count: dossier.files.length }) : ''
 })
 
 const surAccueil = $derived(page.url.pathname === '/')
@@ -59,7 +79,7 @@ function choisirLangue(event: Event) {
            comportement que le sélecteur de l'app Nuxt, sans dépendance. -->
       <select
         class="lang"
-        aria-label={$t('common.language')}
+        aria-label={$t('language.label')}
         value={$langue}
         onchange={choisirLangue}
       >
@@ -79,14 +99,14 @@ function choisirLangue(event: Event) {
   </aside>
 
   <main class="panel">
-    <header class="topbar">
-      <h1 class="navbar__title">
-        {#if !surAccueil}<a class="back" href="/" aria-label={$t('common.back')}>‹</a>{/if}
-        {titre}
-        {#if !surAccueil}
-          <small class="navbar__subtitle">{data.catalogue?.count ?? 0} {$t('nav.models')}</small>
-        {/if}
-      </h1>
+    <header class="navbar">
+      {#if !surAccueil}
+        <a class="navbar__back" href="/" aria-label={$t('common.back')}>‹</a>
+      {/if}
+      <h1 class="navbar__title">{titre}</h1>
+      {#if sousTitre}
+        <small class="navbar__subtitle">{sousTitre}</small>
+      {/if}
     </header>
 
     <div class="page">

@@ -2865,3 +2865,102 @@ select.admin__input option {
   line-height: 1.55;
   overflow-x: auto;
 }
+
+/* --- Coquille, version SvelteKit -----------------------------------------
+   Dans l'app Nuxt, cette mise en page vient des composants « dashboard » de
+   Nuxt UI. Ici elle est écrite à la main, avec les mêmes tokens et les mêmes
+   cotes (sidebar 13rem, en-tête 56px) : le reste de la feuille de style est
+   identique, donc les cartes, la barre d'outils et les couleurs ne bougent
+   pas d'un pixel. */
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100dvh;
+  padding: 14px 12px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav__item {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.nav__item:hover,
+.nav__item--on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.lang {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* En-tête de page : même hauteur et même fond que la navbar Nuxt UI. */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 var(--gutter);
+  background: var(--bg);
+}
+
+.navbar__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.navbar__back {
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.navbar__back:hover {
+  color: var(--text);
+}

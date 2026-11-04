@@ -53,7 +53,10 @@ export async function chargerCatalogue(
 
 /** URL d'un aperçu, versionnée comme dans l'app Nuxt (cache qui se renouvelle). */
 export function urlApercu(image: string, version?: string): string {
-  const suffixe = version ? `?v=${encodeURIComponent(version)}` : ''
+  // `&` et non `?` : `path` est déjà dans la requête. Avec un second `?`, le
+  // backend recevait `path=.easy3d-thumbs/...?v=...` et répondait 404 pour
+  // **toutes** les vignettes (vérifié dans le navigateur).
+  const suffixe = version ? `&v=${encodeURIComponent(version)}` : ''
   return `/api/file?path=${encodeURIComponent(image)}${suffixe}`
 }
 

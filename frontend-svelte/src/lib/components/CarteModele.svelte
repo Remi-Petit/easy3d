@@ -52,7 +52,9 @@ function depuis(secondes: number | null, code: string): string {
         </div>
       {/if}
       {#if dossier}<span class="folder-count">{dossier.count}</span>{/if}
-      {#if note}<span class="note-badge" title={$t('folder.hasNote')}>📝</span>{/if}
+      {#if note}
+        <span class="note-badge" title={dossier ? $t('folder.hasNote') : $t('file.hasNote')}>📝</span>
+      {/if}
     </div>
     <div class="model-card__body">
       <span class="model-card__name" title={nom}>{nom}</span>
