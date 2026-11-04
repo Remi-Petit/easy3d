@@ -582,8 +582,37 @@ pub fn is_client_code(code: &str) -> bool {
 
 // ── Provisionnement ─────────────────────────────────────────────────────
 
+/// Ce que le provisionnement vient de faire.
+///
+/// Le détail d'une `sso_login` doit décrire **l'événement**, pas le réglage :
+/// écrire « création automatique » à chaque connexion d'un compte qui existait
+/// déjà serait un faux témoignage dans un journal d'audit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// Compte déjà rattaché à ce `sub` : rien n'a été fait.
+    Existing,
+    /// Compte retrouvé par son adresse (préparé par un administrateur) et
+    /// rattaché à l'instant.
+    Attached,
+    /// Compte créé à l'instant.
+    Created,
+}
+
+impl Origin {
+    /// Code de `detail` du journal (`""` = rien à dire).
+    pub fn detail(self, mode: Provisioning) -> &'static str {
+        match self {
+            Self::Existing => "",
+            // « compte préparé » : c'est exactement ce qui vient de se passer,
+            // et le mode n'y change rien (en `manual`, seul ce cas entre).
+            Self::Attached => "manual",
+            Self::Created => mode.id(),
+        }
+    }
+}
+
 /// Compte à qui cette identité donne accès, en le créant ou en le rattachant au
-/// besoin.
+/// besoin, **et ce que cela a demandé** (pour le journal).
 ///
 /// Fonction **pure au sens du réseau** : elle ne parle qu'à la base, donc elle
 /// se teste entièrement (c'est ici que se joue « qui a le droit d'entrer »).
@@ -591,14 +620,14 @@ pub fn provision(
     auth: &Auth,
     settings: &Settings,
     identity: &Identity,
-) -> Result<db::User, String> {
+) -> Result<(db::User, Origin), String> {
     // 1. Déjà rattaché : le cas normal, à partir du deuxième login. Le `sub` est
     //    la seule chose qui compte alors — l'e-mail peut avoir changé chez le
     //    fournisseur.
     if let Some(user) = auth.db(|conn| db::find_by_subject(conn, &identity.subject))? {
         return match user.disabled {
             true => Err("account_disabled".to_string()),
-            false => Ok(user),
+            false => Ok((user, Origin::Existing)),
         };
     }
 
@@ -632,9 +661,12 @@ pub fn provision(
             // rattachement tout juste posé (sinon l'appelant travaille sur une
             // version périmée, et le prochain login dépendrait d'un autre
             // `sub`).
-            false => auth
-                .db(|conn| db::find_by_uuid(conn, &user.uuid))?
-                .ok_or_else(|| "compte disparu".to_string()),
+            false => {
+                let relu = auth
+                    .db(|conn| db::find_by_uuid(conn, &user.uuid))?
+                    .ok_or_else(|| "compte disparu".to_string())?;
+                Ok((relu, Origin::Attached))
+            }
         };
     }
 
@@ -656,7 +688,7 @@ pub fn provision(
                 auth.db(|conn| db::set_disabled(conn, &user.uuid, true))?;
                 return Err("pending_approval".to_string());
             }
-            Ok(user)
+            Ok((user, Origin::Created))
         }
     }
 }
@@ -957,15 +989,9 @@ where
     // Le rattachement **ferme les sessions** du compte (sauf celles d'un
     // administrateur) : on note donc si le compte était déjà connu, pour couper
     // aussi ses WebSocket le cas échéant — la fermeture des sessions ne les
-    // atteint pas d'elle-même.
-    let deja_rattache = state
-        .auth
-        .db(|conn| db::find_by_subject(conn, &identite.subject))
-        .ok()
-        .flatten()
-        .is_some();
-    let user = match provision(&state.auth, &settings, &identite) {
-        Ok(user) => user,
+    // atteint pas d'elle-même. `provision` rend justement ce qu'il a fait.
+    let (user, origine) = match provision(&state.auth, &settings, &identite) {
+        Ok(acces) => acces,
         Err(code) => {
             // L'adresse **essayée** est notée : c'est ce qui permet de répondre
             // à « pourquoi cette personne n'arrive pas à entrer » sans qu'elle
@@ -976,7 +1002,7 @@ where
             return login_error(&code);
         }
     };
-    if !deja_rattache {
+    if origine != Origin::Existing {
         // Premier login (création ou rattachement) : les sessions antérieures du
         // compte ont pu être fermées par le rattachement.
         state.kick_user(&user.uuid);
@@ -989,19 +1015,19 @@ where
             Ok(token) => token,
             Err(e) => return auth::internal(&e),
         };
-    state.auth.log(
-        headers,
-        "sso_login",
-        Some(&user.uuid),
-        &user.email,
-        settings.provisioning.id(),
-    );
-    println!(
-        "SSO : {} ({}) connecté — provisionnement {}",
-        user.username,
-        user.email,
-        settings.provisioning.id()
-    );
+    // Le détail dit **ce qui vient de se passer**, pas le mode configuré : une
+    // reconnexion d'un compte déjà rattaché ne doit pas se lire « création
+    // automatique » dans le journal (c'est une trace d'audit, pas un rappel de
+    // réglage), ni un rattachement se lire comme une création.
+    let detail = origine.detail(settings.provisioning);
+    state.auth.log(headers, "sso_login", Some(&user.uuid), &user.email, detail);
+    match origine {
+        Origin::Existing => println!("SSO : {} ({}) connecté", user.username, user.email),
+        _ => println!(
+            "SSO : {} ({}) connecté — provisionnement {detail}",
+            user.username, user.email
+        ),
+    }
 
     (
         StatusCode::FOUND,
@@ -1747,12 +1773,13 @@ mod tests {
         auth.db(|conn| db::set_setting(conn, db::DEFAULT_ROLE, Some(db::READER_ROLE)))
             .unwrap();
 
-        let user = provision(
+        let (user, origine) = provision(
             &auth,
             &reglages(Provisioning::Auto),
             &identite("neuf@exemple.fr"),
         )
         .unwrap();
+        assert_eq!(origine, Origin::Created, "premier login : le compte est créé");
         assert_eq!(user.email, "neuf@exemple.fr");
         assert_eq!(user.username, "neuf");
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-neuf@exemple.fr"));
@@ -1770,7 +1797,8 @@ mod tests {
             email: "neuf@ailleurs.fr".to_string(),
             username: "neuf".to_string(),
         };
-        let relu = provision(&auth, &reglages(Provisioning::Auto), &autre).unwrap();
+        let (relu, origine) = provision(&auth, &reglages(Provisioning::Auto), &autre).unwrap();
+        assert_eq!(origine, Origin::Existing, "deuxième login : rien à créer");
         assert_eq!(relu.uuid, user.uuid);
         assert_eq!(
             auth.db(db::list_users).unwrap().len(),
@@ -1790,12 +1818,13 @@ mod tests {
         auth.db(|conn| db::insert_user(conn, &prepare)).unwrap();
 
         // Connu par son adresse : rattaché, et le `sub` est retenu.
-        let user = provision(
+        let (user, origine) = provision(
             &auth,
             &reglages(Provisioning::Manual),
             &identite("remi@exemple.fr"),
         )
         .unwrap();
+        assert_eq!(origine, Origin::Attached, "compte préparé, pas créé");
         assert_eq!(user.uuid, prepare.uuid);
         assert_eq!(user.oidc_subject.as_deref(), Some("sub-remi@exemple.fr"));
         // **Le rattachement ne détruit rien** : l'empreinte reste en base. Ce qui
@@ -1921,7 +1950,7 @@ mod tests {
     #[test]
     fn un_compte_desactive_ne_se_connecte_pas() {
         let (_dir, auth) = base();
-        let user = provision(
+        let (user, _) = provision(
             &auth,
             &reglages(Provisioning::Auto),
             &identite("remi@exemple.fr"),
@@ -1943,7 +1972,7 @@ mod tests {
     #[test]
     fn le_nom_d_utilisateur_est_rendu_unique() {
         let (_dir, auth) = base();
-        let premier = provision(
+        let (premier, _) = provision(
             &auth,
             &reglages(Provisioning::Auto),
             &identite("remi@exemple.fr"),
@@ -1952,7 +1981,7 @@ mod tests {
         assert_eq!(premier.username, "remi");
         // Même partie locale, autre adresse : la base refuserait le doublon,
         // donc on suffixe avant d'écrire.
-        let second = provision(
+        let (second, _) = provision(
             &auth,
             &reglages(Provisioning::Auto),
             &identite("remi@ailleurs.fr"),
@@ -2055,6 +2084,45 @@ mod tests {
         assert_eq!(events[0].subject, "remi@exemple.fr");
         assert_eq!(events[0].detail, "auto");
         assert!(events[0].actor_uuid.is_some());
+    }
+
+    /// Une **reconnexion** ne se lit pas comme une création dans le journal.
+    ///
+    /// Le journal est une trace d'audit : le détail d'une `sso_login` décrit ce
+    /// qui s'est passé **à cet instant** (compte créé, rattaché à une identité
+    /// existante…), et non le mode de provisionnement configuré, qui n'a plus
+    /// rien à faire dès le deuxième passage. Avant ce correctif, chaque
+    /// connexion d'un compte déjà rattaché s'affichait « création automatique ».
+    #[tokio::test]
+    async fn une_reconnexion_sso_ne_se_lit_pas_comme_une_creation() {
+        let state = etat(Provisioning::Auto, true);
+        let headers = entetes();
+
+        // Deux passages du même compte : le premier le crée, le second le
+        // retrouve par son `sub`.
+        for _ in 0..2 {
+            let etat_courant = demarrer(&state, &headers, None).await;
+            let (faux, _) = transport(reponses_du_retour("remi@exemple.fr"));
+            let query = CallbackQuery {
+                code: Some("code-1".to_string()),
+                state: Some(etat_courant),
+                error: None,
+            };
+            let reponse = callback_with(&state, &headers, &query, faux).await;
+            assert_eq!(reponse.status(), StatusCode::FOUND);
+        }
+
+        let events = state.auth.db(|conn| db::list_events(conn, 5)).unwrap();
+        assert_eq!(events.len(), 2, "{events:?}");
+        // L'ordre de deux événements de la même seconde n'est pas garanti : on
+        // compare le contenu, pas la position.
+        let mut details: Vec<&str> = events.iter().map(|event| event.detail.as_str()).collect();
+        details.sort_unstable();
+        assert_eq!(
+            details,
+            vec!["", "auto"],
+            "une création (auto) **et** une reconnexion (sans détail) : {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -2372,7 +2440,7 @@ mod tests {
     /// fraîche n'interroge pas le fournisseur avant [`SSO_CHECK_SECONDS`], et un
     /// test ne peut pas attendre cinq minutes.
     fn session_sso(state: &AppState, email: &str, refresh: Option<&str>) -> (db::User, String) {
-        let user = provision(&state.auth, &reglages(Provisioning::Auto), &identite(email)).unwrap();
+        let (user, _) = provision(&state.auth, &reglages(Provisioning::Auto), &identite(email)).unwrap();
         let jeton = state
             .auth
             .start_sso_session(&user.uuid, &entetes(), refresh)
@@ -2633,7 +2701,7 @@ mod tests {
     #[tokio::test]
     async fn une_session_locale_n_est_jamais_reverifiee_auprès_du_fournisseur() {
         let state = etat(Provisioning::Auto, false);
-        let user = provision(
+        let (user, _) = provision(
             &state.auth,
             &reglages(Provisioning::Auto),
             &identite("remi@exemple.fr"),

@@ -420,6 +420,33 @@ l'authentification (`frontend/tests/e2e-auth/`, lancée par
 `bun run test:e2e:auth` depuis `frontend/`) : garde d'accès, connexion par mot de
 passe, refus, SSO complet et provisionnement automatique du compte.
 
+#### Éprouver le SSO contre un vrai fournisseur : Keycloak
+
+Le fournisseur fictif accepte tout : il prouve le **câblage**, pas la
+compatibilité. Le dépôt livre donc aussi un **Keycloak** complet (profil Compose
+`keycloak`), avec son royaume importé (`docker/keycloak/realm.json`) et cinq
+comptes de test — de quoi éprouver **plusieurs identités, plusieurs droits** :
+
+```bash
+docker compose --profile keycloak up -d keycloak      # http://host.docker.internal:8088/admin
+cd frontend && bun run test:e2e:sso                   # navigateur → Nuxt → backend → Keycloak
+node docker/keycloak/selftest.mjs                     # le royaume, sans navigateur
+```
+
+La campagne `e2e-sso` rejoue le parcours réel : page de connexion de Keycloak,
+mot de passe erroné, rattachement d'un compte local existant, création d'un
+compte inconnu, retour sur la page demandée, contenu du journal et propriétés du
+cookie de session. Elle montre aussi **d'où viennent les droits** : deux comptes
+entrés par Keycloak restent en lecture seule, puis l'administrateur pose un rôle
+local sur l'un d'eux — et cette session, **sans se reconnecter**, se met à
+pouvoir envoyer des fichiers. Enfin, un compte qui porte le rôle `admin` **chez
+Keycloak** n'obtient rien de plus ici : le fournisseur dit qui vous êtes, easy3d
+dit ce que vous pouvez faire. Mode d'emploi, contraintes d'adresse et pannes
+typiques : `docker/keycloak/README.md`.
+
+⚠️ Développement uniquement, comme le fournisseur fictif : HTTP, secret écrit
+dans le dépôt, et un royaume qui accepte n'importe quelle adresse de retour.
+
 ### Journal d'audit
 
 **Administration → Journal** garde trace des actions sensibles : connexions

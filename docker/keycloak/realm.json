@@ -1,0 +1,151 @@
+{
+  "realm": "easy3d",
+  "displayName": "easy3d (développement)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "clients": [
+    {
+      "clientId": "easy3d",
+      "name": "easy3d (développement)",
+      "description": "Client confidentiel utilisé par le backend easy3d (code + secret).",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "secret-keycloak",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "rootUrl": "http://localhost:3100",
+      "baseUrl": "/",
+      "redirectUris": [
+        "http://localhost:3100/api/auth/oidc/callback",
+        "http://localhost:3202/api/auth/oidc/callback",
+        "http://localhost:13202/api/auth/oidc/callback",
+        "*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Rôle d'administration **chez le fournisseur**. easy3d ne le lit pas : les droits restent locaux (voir README)."
+      },
+      {
+        "name": "imprimeur",
+        "description": "Rôle métier **chez le fournisseur**, là encore ignoré par easy3d — il sert à montrer qu'un rôle Keycloak ne donne rien ici."
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@example.com",
+      "emailVerified": true,
+      "firstName": "Administrateur",
+      "lastName": "Keycloak",
+      "realmRoles": ["admin"],
+      "attributes": {
+        "locale": ["fr"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "motdepasse-admin",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "user",
+      "enabled": true,
+      "email": "user@example.com",
+      "emailVerified": true,
+      "firstName": "Utilisateur",
+      "lastName": "Keycloak",
+      "attributes": {
+        "locale": ["fr"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "motdepasse-user",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "imprimeuse",
+      "enabled": true,
+      "email": "imprimeuse@example.com",
+      "emailVerified": true,
+      "firstName": "Imprimeuse",
+      "lastName": "Keycloak",
+      "realmRoles": ["imprimeur"],
+      "attributes": {
+        "locale": ["fr"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "motdepasse-imprimeuse",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "observatrice",
+      "enabled": true,
+      "email": "observatrice@example.com",
+      "emailVerified": true,
+      "firstName": "Observatrice",
+      "lastName": "Keycloak",
+      "attributes": {
+        "locale": ["fr"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "motdepasse-observatrice",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "superuser",
+      "enabled": true,
+      "email": "superuser@example.com",
+      "emailVerified": true,
+      "firstName": "Super",
+      "lastName": "Keycloak",
+      "realmRoles": ["admin"],
+      "attributes": {
+        "locale": ["fr"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "motdepasse-superuser",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

@@ -47,6 +47,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       scripts: ${{ steps.filter.outputs.scripts }}
       docker: ${{ steps.filter.outputs.docker }}
+      sso: ${{ steps.filter.outputs.sso }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,6 +69,13 @@ jobs:
               - 'docker/**'
               - 'docker-compose.yml'
               - 'Dockerfile'
+              - '.github/workflows/**'
+            # Le royaume Keycloak est vérifié à part : tirer l'image (~500 Mo)
+            # à chaque changement de `docker/` (scripts k6, fournisseur fictif)
+            # coûterait cher pour rien.
+            sso:
+              - 'docker/keycloak/**'
+              - 'backend/src/auth/oidc.rs'
               - '.github/workflows/**'
 
   build_and_test:
@@ -333,3 +341,29 @@ jobs:
         with:
           node-version: '22'
       - run: node docker/fake-oidc/selftest.mjs
+
+  # Le fournisseur d'identité **réel** (Keycloak), et son royaume.
+  #
+  # Ce que ce job vérifie n'est pas « Keycloak fonctionne » mais **notre**
+  # `realm.json` : importé, il annonce le bon émetteur, les comptes de test
+  # s'authentifient, `userinfo` porte les trois champs que lit
+  # `auth::oidc::parse_identity`, un mot de passe erroné donne `invalid_grant`,
+  # et un jeton révoqué donne bien un code que `refresh_refusal` reconnaît (sans
+  # quoi easy3d ne verrait jamais une révocation). L'auto-test démarre lui-même
+  # le conteneur : d'où Docker, et d'où le filtre `sso` (l'image pèse ~500 Mo).
+  keycloak:
+    name: Keycloak (royaume)
+    needs: changes
+    if: needs.changes.outputs.sso == 'true'
+    runs-on: ubuntu-latest
+    # Le crate vit dans `backend/` : ce job, lui, travaille à la racine
+    # (`docker/keycloak/selftest.mjs`, chemins du dépôt).
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node docker/keycloak/selftest.mjs

@@ -15,7 +15,8 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:auth": "playwright test --config playwright.auth.config.ts"
+    "test:e2e:auth": "playwright test --config playwright.auth.config.ts",
+    "test:e2e:sso": "playwright test --config playwright.sso.config.ts"
   },
   "dependencies": {
     "@nuxt/ui": "^4.11.1",

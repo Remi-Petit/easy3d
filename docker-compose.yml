@@ -39,6 +39,11 @@ services:
     ports:
       - "3100:3000" # interface web : catalogue, aperçu 3D, notes
       - "3101:8090" # API HTTP + WebSocket temps réel + serveur MCP (/mcp)
+    # `host.docker.internal` est fourni par Docker Desktop ; sous Linux il faut le
+    # demander. C'est par ce nom que le conteneur joint un fournisseur d'identité
+    # publié sur l'hôte (voir le profil `keycloak` plus bas).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Tes modèles : lus, et écrits (aperçus + notes).
       #
@@ -109,10 +114,21 @@ services:
       #
       # Ces quatre lignes remplacées par celles d'un vrai fournisseur
       # suffisent à l'utiliser.
+      #
+      # Elles sont **réglables par l'environnement** (`docker compose` lit le
+      # shell et `./.env`) pour basculer sur le Keycloak du profil `keycloak`
+      # sans éditer ce fichier — voir `docker/keycloak/README.md` :
+      #
+      #   EASY3D_OIDC_ISSUER=http://host.docker.internal:8088/realms/easy3d \
+      #   EASY3D_OIDC_CLIENT_ID=easy3d \
+      #   EASY3D_OIDC_CLIENT_SECRET=secret-keycloak \
+      #   docker compose --profile keycloak up --build
+      #
+      # Sans ces variables, on reste sur le fournisseur fictif.
       EASY3D_PUBLIC_URL: http://localhost:3100
-      EASY3D_OIDC_ISSUER: http://fake-oidc:8788
-      EASY3D_OIDC_CLIENT_ID: easy3d
-      EASY3D_OIDC_CLIENT_SECRET: secret-idp
+      EASY3D_OIDC_ISSUER: ${EASY3D_OIDC_ISSUER:-http://fake-oidc:8788}
+      EASY3D_OIDC_CLIENT_ID: ${EASY3D_OIDC_CLIENT_ID:-easy3d}
+      EASY3D_OIDC_CLIENT_SECRET: ${EASY3D_OIDC_CLIENT_SECRET:-secret-idp}
       # Premier login inconnu → compte créé d'office (« auto »), sans rôle.
       # Autres modes : « manual » (rattachement seulement) ou « approval ».
       EASY3D_OIDC_PROVISIONING: auto
@@ -228,6 +244,83 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  # ── Fournisseur d'identité **réel** : Keycloak (profil `keycloak`) ───────
+  #
+  # Le même rôle que `fake-oidc`, mais avec un vrai fournisseur OIDC : page de
+  # connexion, mots de passe, jetons signés, révocation. Sert à vérifier le SSO
+  # « en cas concret » sans louer un compte chez un fournisseur.
+  #
+  # Raison d'être un **profil** : `docker compose up` ne doit pas tirer 500 Mo
+  # d'image pour qui n'en a pas besoin, et deux fournisseurs d'identité ne
+  # doivent jamais écouter en même temps sur la même application.
+  #
+  #   docker compose --profile keycloak up -d keycloak
+  #   docker compose --profile keycloak up --build          # avec l'application
+  #
+  # Le royaume `easy3d` (client, secret, comptes de test) est **importé** au
+  # premier démarrage depuis `docker/keycloak/realm.json`. Le royaume n'est
+  # réimporté que si le volume de Keycloak est vide (start-dev garde le sien) :
+  #
+  #   docker compose --profile keycloak down -v            # repartir du fichier
+  #
+  # ⚠️ **Une seule adresse pour tout le monde.** Keycloak annonce ses adresses
+  # (`issuer`, autorisation, jeton) telles que `KC_HOSTNAME` les fixe, et le
+  # backend **refuse** une découverte dont l'émetteur ne correspond pas à
+  # `EASY3D_OIDC_ISSUER` (garde-fou contre une redirection DNS). Le navigateur
+  # de l'hôte et le conteneur `easy3d` doivent donc joindre la **même** base :
+  # `host.docker.internal:<port>` (Docker Desktop l'ajoute au fichier `hosts`
+  # de Windows/macOS, et le compose le déclare pour Linux). Changer
+  # `KEYCLOAK_URL` change cette base partout — pensez à `EASY3D_OIDC_ISSUER`.
+  #
+  # Administration : http://host.docker.internal:8088/admin (admin / admin).
+  # Comptes de test : `admin` / motdepasse-admin (admin@example.com) et
+  # `user` / motdepasse-user (user@example.com) — voir `realm.json`.
+  keycloak:
+    # Version épinglée : la prochaine majeure peut changer le format du royaume
+    # importé ou le thème de connexion, donc casser les tests pour une raison
+    # qui n'a rien à voir avec easy3d.
+    image: quay.io/keycloak/keycloak:26.4
+    # Pas de `container_name` : la campagne e2e en démarre un **second** (projet
+    # Compose `easy3d-sso`, autre port), et un nom fixe les ferait s'écraser.
+    profiles: ["keycloak"]
+    # `start-dev` : HTTP sans TLS, base en mémoire (H2), rechargement du royaume
+    # à chaque démarrage. Développement uniquement.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Compte d'administration de la console Keycloak (pas un compte easy3d).
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # L'adresse que Keycloak annonce dans sa découverte **et** qui construit
+      # le `redirect_uri` attendu. Elle doit être joignable par le navigateur
+      # **et** par le conteneur easy3d.
+      KC_HOSTNAME: ${KEYCLOAK_URL:-http://host.docker.internal:8088}
+      KC_HTTP_ENABLED: "true"
+      # Sonde de disponibilité sur le port de gestion (9000, non publié).
+      KC_HEALTH_ENABLED: "true"
+      KC_LOG_LEVEL: info
+    ports:
+      # Le port publié doit correspondre à celui de `KEYCLOAK_URL`.
+      - "${KEYCLOAK_PORT:-8088}:8080"
+    volumes:
+      # Le royaume est un **fichier** du dépôt, pas un volume : on peut le relire,
+      # le modifier et repartir de zéro (`down -v`). Monté en lecture seule.
+      - ./docker/keycloak/realm.json:/opt/keycloak/data/import/easy3d-realm.json:ro
+    healthcheck:
+      # Keycloak n'a ni curl ni wget dans son image : `/dev/tcp` de bash fait le
+      # travail. `bash` explicitement, car `CMD-SHELL` s'exécute avec `sh`, qui
+      # ne connaît pas `/dev/tcp`.
+      test:
+        [
+          "CMD",
+          "bash",
+          "-c",
+          "{ printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3; } 3<>/dev/tcp/127.0.0.1/9000",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
   # ── Banc de charge k6 (profil `loadtest`, jamais lancé par défaut) ────────
   #
