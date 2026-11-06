@@ -69,7 +69,7 @@ jobs:
           Compress-Archive -Path target/release/easy3d.exe `
             -DestinationPath "../easy3d-${{ needs.verify.outputs.version }}-windows-x86_64.zip" -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: easy3d-${{ runner.os }}
           path: easy3d-${{ needs.verify.outputs.version }}-*
