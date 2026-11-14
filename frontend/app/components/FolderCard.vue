@@ -110,7 +110,7 @@ function onMenuSelect(key: string) {
 </script>
 
 <template>
-  <article class="model-card model-card--file" @contextmenu.prevent="openMenu">
+  <article class="model-card model-card--file" @contextmenu.prevent.stop="openMenu">
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">
         <img

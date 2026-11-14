@@ -346,6 +346,14 @@
     "done": "«{name}» a fost redenumit.",
     "failed": "Redenumirea nu a reușit."
   },
+  "newFolder": {
+    "title": "Folder nou",
+    "field": "Numele folderului",
+    "cancel": "Anulează",
+    "confirm": "Creează",
+    "done": "«{name}» a fost creat.",
+    "failed": "Folderul nu a putut fi creat."
+  },
   "delete": {
     "title": "Șterge",
     "cancel": "Anulează",

@@ -312,6 +312,13 @@ pub fn routes(state: AppState) -> Router {
         &state,
         auth::permissions::MODEL_UPLOAD,
     );
+    // Créer un dossier est un **ajout** au catalogue : c'est le même droit que
+    // l'envoi de fichiers, pas le renommage (rien n'est déplacé, on range).
+    let folders = gated(
+        Router::new().route("/folder", post(post_create_folder)),
+        &state,
+        auth::permissions::MODEL_UPLOAD,
+    );
     let renames = gated(
         Router::new().route("/rename", post(post_rename)),
         &state,
@@ -428,6 +435,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(catalogue)
         .merge(notes)
         .merge(uploads)
+        .merge(folders)
         .merge(renames)
         .merge(deletes)
         .merge(settings_read)
@@ -1651,6 +1659,91 @@ async fn post_delete(
     .await;
 
     Ok(Json(DeleteResponse { rel: request.path }))
+}
+
+/// Corps de `POST /folder`.
+#[derive(Deserialize)]
+struct FolderRequest {
+    /// Dossier d'accueil : chemin relatif (`Maison`, `Maison/Toit`), vide ou
+    /// absent pour la racine du catalogue.
+    #[serde(default)]
+    parent: String,
+    /// Nom du nouveau dossier : le **dernier** segment du chemin, sans `/`.
+    name: String,
+}
+
+/// Réponse d'une création réussie : le chemin relatif du dossier créé.
+#[derive(Serialize)]
+struct FolderResponse {
+    rel: String,
+}
+
+/// Crée un dossier (`POST /folder {parent, name}`).
+///
+/// Le pendant du « Nouveau dossier » d'un explorateur : un dossier vide est un
+/// rangement légitime, et le scan le montre dès qu'il existe. Un dossier
+/// **existant** est refusé (409) plutôt que silencieusement réutilisé — c'est ce
+/// qu'attend quelqu'un qui croit créer autre chose.
+///
+/// Comme l'envoi, le renommage et la suppression, la liste est rediffusée ici :
+/// sous Docker Desktop, le watcher ne voit rien de ce qui se passe dans un
+/// sous-dossier du montage.
+async fn post_create_folder(
+    State(state): State<AppState>,
+    Json(request): Json<FolderRequest>,
+) -> Result<Json<FolderResponse>, (StatusCode, String)> {
+    let root = state.root();
+    let parent = request.parent.trim_matches('/');
+
+    // La racine est un cas à part : un chemin vide n'est pas un chemin relatif
+    // (`valid_rel` le refuse), et c'est justement là qu'on crée le plus souvent.
+    let (parent_dir, prefix) = if parent.is_empty() {
+        (root.clone(), String::new())
+    } else {
+        let Some(dir) = safe_join(&root, parent) else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("chemin invalide : « {parent} »"),
+            ));
+        };
+        if !valid_rel(parent) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("chemin réservé : « {parent} »"),
+            ));
+        }
+        if !dir.is_dir() {
+            return Err((StatusCode::NOT_FOUND, format!("introuvable : « {parent} »")));
+        }
+        (dir, format!("{parent}/"))
+    };
+
+    // Un nom de dossier suit les mêmes règles qu'un nom de fichier : le binaire
+    // tourne aussi sous Windows, où certains caractères sont impossibles.
+    if !valid_name(&request.name) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("nom invalide : « {} »", request.name),
+        ));
+    }
+
+    let path = parent_dir.join(&request.name);
+    if path.exists() {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("« {} » existe déjà", request.name),
+        ));
+    }
+
+    tokio::fs::create_dir(&path).await.map_err(internal_error)?;
+
+    // Scan complet hors du réacteur, comme les autres écritures.
+    let state = state.clone();
+    let _ = tokio::task::spawn_blocking(move || broadcast_snapshot(&state)).await;
+
+    Ok(Json(FolderResponse {
+        rel: format!("{prefix}{}", request.name),
+    }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -3342,6 +3435,112 @@ mod tests {
         assert!(dir.path().join(thumbnail::THUMB_DIR).is_dir());
     }
 
+    /// Création d'un dossier : à la racine comme dans un sous-dossier, et la
+    /// liste est rediffusée — le watcher ne verrait rien sous Docker Desktop.
+    #[tokio::test]
+    async fn create_folder_cree_et_rediffuse() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let mut updates = state.ws.subscribe();
+        let app = routes(state);
+
+        for (parent, name, attendu) in [
+            ("", "Boitier", "Boitier"),
+            // Une barre finale sur le parent ne doit pas gêner : le client la
+            // tolère, l'API la rogne.
+            ("Maison/", "Toit", "Maison/Toit"),
+        ] {
+            let body = serde_json::json!({ "parent": parent, "name": name }).to_string();
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/folder")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "« {parent} » / « {name} »");
+
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(v["rel"], attendu);
+        }
+
+        assert!(dir.path().join("Boitier").is_dir());
+        assert!(dir.path().join("Maison/Toit").is_dir());
+
+        // Diffusion immédiate : le dossier vide apparaît dans la liste, sans
+        // rechargement (chaque création en diffuse une).
+        let payload = updates
+            .try_recv()
+            .expect("aucune rediffusion après la création");
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert!(v["folders"]["Boitier"].is_object());
+        assert_eq!(v["folders"]["Boitier"]["count"], 0);
+    }
+
+    /// Garde-fous de la création de dossier : ce que l'API doit refuser.
+    #[tokio::test]
+    async fn create_folder_refuse_les_cas_invalides() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Maison")).unwrap();
+        std::fs::write(dir.path().join("plan.stl"), STL).unwrap();
+
+        let (ws_tx, _) = broadcast::channel::<String>(16);
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            ws_tx,
+            crate::config::Config::default(),
+        );
+        let app = routes(state);
+
+        for (parent, name, attendu) in [
+            // Un nom est un nom : pas de séparateur, pas de remontée.
+            ("", "sous/dossier", StatusCode::BAD_REQUEST),
+            ("", "..", StatusCode::BAD_REQUEST),
+            ("", "", StatusCode::BAD_REQUEST),
+            // Ni nom caché (réservé au backend), ni caractère refusé sous Windows.
+            ("", ".cache", StatusCode::BAD_REQUEST),
+            ("", "toit?", StatusCode::BAD_REQUEST),
+            // Parent hors de la racine, ou inexistant.
+            ("../ailleurs", "x", StatusCode::BAD_REQUEST),
+            ("Absent", "x", StatusCode::NOT_FOUND),
+            // Un dossier déjà là, ou un fichier qui porte le nom.
+            ("", "Maison", StatusCode::CONFLICT),
+            ("", "plan.stl", StatusCode::CONFLICT),
+        ] {
+            let body = serde_json::json!({ "parent": parent, "name": name }).to_string();
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/folder")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), attendu, "« {parent} » / « {name} »");
+        }
+
+        // Rien n'a été créé au passage.
+        assert!(dir.path().join("plan.stl").is_file());
+        assert!(!dir.path().join("sous").exists());
+    }
+
     /// Intégration WebSocket : connexion réelle → snapshot initial, puis
     /// réception d'une MAJ diffusée sur le canal broadcast.
     #[tokio::test]
@@ -3966,6 +4165,11 @@ mod tests {
                 serde_json::json!({ "path": "a.txt", "name": "b.txt" }),
             ),
             ("POST", "/upload?path=b.txt", serde_json::json!({})),
+            (
+                "POST",
+                "/folder",
+                serde_json::json!({ "parent": "", "name": "neuf" }),
+            ),
             (
                 "PUT",
                 "/config",

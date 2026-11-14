@@ -346,6 +346,14 @@
     "done": "«{name}»의 이름을 바꿨습니다.",
     "failed": "이름을 바꿀 수 없습니다."
   },
+  "newFolder": {
+    "title": "새 폴더",
+    "field": "폴더 이름",
+    "cancel": "취소",
+    "confirm": "만들기",
+    "done": "«{name}» 폴더를 만들었습니다.",
+    "failed": "폴더를 만들 수 없습니다."
+  },
   "delete": {
     "title": "삭제",
     "cancel": "취소",

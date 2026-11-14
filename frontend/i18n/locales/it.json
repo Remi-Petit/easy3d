@@ -346,6 +346,14 @@
     "done": "«{name}» rinominato.",
     "failed": "Rinomina impossibile."
   },
+  "newFolder": {
+    "title": "Nuova cartella",
+    "field": "Nome della cartella",
+    "cancel": "Annulla",
+    "confirm": "Crea",
+    "done": "«{name}» creata.",
+    "failed": "Impossibile creare la cartella."
+  },
   "delete": {
     "title": "Elimina",
     "cancel": "Annulla",

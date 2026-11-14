@@ -346,6 +346,14 @@
     "done": "«{name}» premenované.",
     "failed": "Premenovanie zlyhalo."
   },
+  "newFolder": {
+    "title": "Nový priečinok",
+    "field": "Názov priečinka",
+    "cancel": "Zrušiť",
+    "confirm": "Vytvoriť",
+    "done": "«{name}» vytvorené.",
+    "failed": "Priečinok sa nepodarilo vytvoriť."
+  },
   "delete": {
     "title": "Odstrániť",
     "cancel": "Zrušiť",

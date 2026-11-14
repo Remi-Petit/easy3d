@@ -346,6 +346,14 @@
     "done": "«{name}» preimenovano.",
     "failed": "Preimenovanje nije uspjelo."
   },
+  "newFolder": {
+    "title": "Nova mapa",
+    "field": "Naziv mape",
+    "cancel": "Odustani",
+    "confirm": "Stvori",
+    "done": "«{name}» stvoreno.",
+    "failed": "Mapu nije moguće stvoriti."
+  },
   "delete": {
     "title": "Izbriši",
     "cancel": "Odustani",

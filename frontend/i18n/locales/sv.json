@@ -346,6 +346,14 @@
     "done": "«{name}» har bytt namn.",
     "failed": "Kunde inte byta namn."
   },
+  "newFolder": {
+    "title": "Ny mapp",
+    "field": "Mappnamn",
+    "cancel": "Avbryt",
+    "confirm": "Skapa",
+    "done": "«{name}» skapad.",
+    "failed": "Kunde inte skapa mappen."
+  },
   "delete": {
     "title": "Ta bort",
     "cancel": "Avbryt",

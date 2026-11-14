@@ -346,6 +346,14 @@
     "done": "«{name}» renombrat.",
     "failed": "No s’ha pogut canviar el nom."
   },
+  "newFolder": {
+    "title": "Carpeta nova",
+    "field": "Nom de la carpeta",
+    "cancel": "Cancel·la",
+    "confirm": "Crea",
+    "done": "«{name}» creada.",
+    "failed": "No s’ha pogut crear la carpeta."
+  },
   "delete": {
     "title": "Suprimeix",
     "cancel": "Cancel·la",

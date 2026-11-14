@@ -346,6 +346,14 @@
     "done": "«{name}» nimettiin uudelleen.",
     "failed": "Uudelleennimeäminen ei onnistu."
   },
+  "newFolder": {
+    "title": "Uusi kansio",
+    "field": "Kansion nimi",
+    "cancel": "Peruuta",
+    "confirm": "Luo",
+    "done": "«{name}» luotu.",
+    "failed": "Kansion luonti ei onnistu."
+  },
   "delete": {
     "title": "Poista",
     "cancel": "Peruuta",

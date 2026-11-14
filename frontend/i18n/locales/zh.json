@@ -346,6 +346,14 @@
     "done": "「{name}」已重命名。",
     "failed": "无法重命名。"
   },
+  "newFolder": {
+    "title": "新建文件夹",
+    "field": "文件夹名称",
+    "cancel": "取消",
+    "confirm": "创建",
+    "done": "「{name}」已创建。",
+    "failed": "无法创建文件夹。"
+  },
   "delete": {
     "title": "删除",
     "cancel": "取消",

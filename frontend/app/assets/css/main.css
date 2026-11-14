@@ -1706,8 +1706,11 @@ select.admin__input option {
   color: var(--muted);
 }
 
-/* ── Renommage ────────────────────────────────────────────────────────────── */
-.rename__input {
+/* ── Renommage / nouveau dossier ──────────────────────────────────────────── */
+/* Les deux fenêtres sont le même formulaire : un champ, puis Annuler/Valider.
+   Elles partagent donc ces règles sous deux préfixes explicites. */
+.rename__input,
+.folder__input {
   width: 100%;
   padding: 9px 12px;
   background: var(--surface-2);
@@ -1719,12 +1722,14 @@ select.admin__input option {
   outline: none;
 }
 
-.rename__input:focus {
+.rename__input:focus,
+.folder__input:focus {
   border-color: var(--accent);
 }
 
 /* Un refus du backend reste affiché sous le champ : on corrige et on réessaie. */
 .rename__error,
+.folder__error,
 .confirm__error {
   margin: 9px 0 0;
   color: var(--err);
@@ -1739,6 +1744,7 @@ select.admin__input option {
 }
 
 .rename__actions,
+.folder__actions,
 .confirm__actions {
   display: flex;
   justify-content: flex-end;
@@ -1747,6 +1753,8 @@ select.admin__input option {
 
 .rename__cancel,
 .rename__confirm,
+.folder__cancel,
+.folder__confirm,
 .confirm__cancel,
 .confirm__confirm {
   padding: 7px 14px;
@@ -1760,6 +1768,7 @@ select.admin__input option {
 }
 
 .rename__confirm,
+.folder__confirm,
 .confirm__confirm {
   background: var(--accent);
   border-color: var(--accent);
@@ -1773,6 +1782,8 @@ select.admin__input option {
 
 .rename__cancel:disabled,
 .rename__confirm:disabled,
+.folder__cancel:disabled,
+.folder__confirm:disabled,
 .confirm__cancel:disabled,
 .confirm__confirm:disabled {
   opacity: 0.55;

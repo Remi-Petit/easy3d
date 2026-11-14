@@ -346,6 +346,14 @@
     "done": "«{name}» átnevezve.",
     "failed": "Az átnevezés nem sikerült."
   },
+  "newFolder": {
+    "title": "Új mappa",
+    "field": "Mappa neve",
+    "cancel": "Mégse",
+    "confirm": "Létrehozás",
+    "done": "«{name}» létrehozva.",
+    "failed": "A mappa létrehozása nem sikerült."
+  },
   "delete": {
     "title": "Törlés",
     "cancel": "Mégse",

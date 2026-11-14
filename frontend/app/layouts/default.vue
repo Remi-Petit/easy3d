@@ -132,6 +132,50 @@ const uploadFolder = computed(() =>
   route.params.name ? decodeURIComponent(String(route.params.name)) : null,
 )
 
+// ── Clic droit sur le fond de la page : créer un dossier ────────────────────
+//
+// Le menu est celui des cartes (`CardMenu`) : un clic droit dans le vide doit
+// proposer la même chose qu'ailleurs — ici, le seul geste qui n'a pas de bouton,
+// créer un dossier **vide**. Le dossier d'accueil est celui de la page (un
+// sous-dossier se crée là où l'on est).
+//
+// Les cartes, la note et les champs ont leurs propres menus (ou celui du
+// navigateur) : on ne prend la main que sur le fond.
+const { start: startNewFolder } = useNewFolder()
+
+const pageMenu = reactive({ open: false, x: 0, y: 0 })
+
+/** Entrées du menu de fond, limitées à ce que le compte peut faire. */
+const pageMenuItems = computed(() => {
+  if (!showFilter.value || !can(PERM.modelUpload)) return []
+  return [{ key: 'new-folder', label: t('newFolder.title'), icon: 'i-lucide-folder-plus' }]
+})
+
+function onPageContextMenu(event: MouseEvent) {
+  if (!pageMenuItems.value.length) return
+  const target = event.target as HTMLElement | null
+  // `header` = barre de titre, `.topbar` = recherche/filtres, `.ai` = résultats
+  // de la recherche assistée : pas des zones de rangement.
+  if (
+    target?.closest(
+      '.model-card, .note, header, .topbar, .ai, a, button, input, textarea, select, [contenteditable="true"]',
+    )
+  ) {
+    return
+  }
+  // Seulement quand le menu s'ouvre : ailleurs, le menu du navigateur reste le
+  // sien (copier un chemin, etc.).
+  event.preventDefault()
+  pageMenu.open = true
+  pageMenu.x = event.clientX
+  pageMenu.y = event.clientY
+}
+
+function onPageMenuSelect(key: string) {
+  pageMenu.open = false
+  if (key === 'new-folder') startNewFolder({ parent: uploadFolder.value ?? '' })
+}
+
 /**
  * Dépôt de fichiers sur le catalogue.
  *
@@ -371,6 +415,7 @@ const navUi = {
       id="catalog"
       class="drop"
       :ui="{ body: 'p-0 sm:p-0 gap-0' }"
+      @contextmenu="onPageContextMenu"
       @dragenter="onDragEnter"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
@@ -522,4 +567,20 @@ const navUi = {
 
   <!-- Suppression : même principe, avec confirmation (voir `useDelete`). -->
   <DeleteDialog />
+
+  <!-- Menu contextuel du **fond** de page (clic droit dans le vide) : il crée un
+       dossier dans la page courante. Téléporté dans le `body`, comme ceux des
+       cartes. -->
+  <CardMenu
+    :open="pageMenu.open"
+    :x="pageMenu.x"
+    :y="pageMenu.y"
+    :items="pageMenuItems"
+    :label="$t('newFolder.title')"
+    @select="onPageMenuSelect"
+    @close="pageMenu.open = false"
+  />
+
+  <!-- Nouveau dossier : la fenêtre ouverte par ce menu (voir `useNewFolder`). -->
+  <NewFolderDialog />
 </template>

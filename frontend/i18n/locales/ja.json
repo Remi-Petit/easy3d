@@ -346,6 +346,14 @@
     "done": "「{name}」の名前を変更しました。",
     "failed": "名前を変更できません。"
   },
+  "newFolder": {
+    "title": "新しいフォルダー",
+    "field": "フォルダー名",
+    "cancel": "キャンセル",
+    "confirm": "作成",
+    "done": "「{name}」を作成しました。",
+    "failed": "フォルダーを作成できません。"
+  },
   "delete": {
     "title": "削除",
     "cancel": "キャンセル",

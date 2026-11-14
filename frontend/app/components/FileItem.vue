@@ -87,7 +87,7 @@ function onMenuSelect(key: string) {
   <article
     class="model-card"
     :class="{ 'model-card--file': viewer === 'none' }"
-    @contextmenu.prevent="openMenu"
+    @contextmenu.prevent.stop="openMenu"
   >
     <NuxtLink :to="href" class="model-card__link">
       <div class="model-card__preview">

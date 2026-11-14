@@ -346,6 +346,14 @@
     "done": "«{name}» er omdøbt.",
     "failed": "Kunne ikke omdøbe."
   },
+  "newFolder": {
+    "title": "Ny mappe",
+    "field": "Mappenavn",
+    "cancel": "Annuller",
+    "confirm": "Opret",
+    "done": "«{name}» oprettet.",
+    "failed": "Kunne ikke oprette mappen."
+  },
   "delete": {
     "title": "Slet",
     "cancel": "Annuller",

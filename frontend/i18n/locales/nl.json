@@ -346,6 +346,14 @@
     "done": "«{name}» van naam veranderd.",
     "failed": "Naam wijzigen mislukt."
   },
+  "newFolder": {
+    "title": "Nieuwe map",
+    "field": "Naam van de map",
+    "cancel": "Annuleren",
+    "confirm": "Aanmaken",
+    "done": "«{name}» aangemaakt.",
+    "failed": "Map aanmaken mislukt."
+  },
   "delete": {
     "title": "Verwijderen",
     "cancel": "Annuleren",

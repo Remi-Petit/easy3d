@@ -346,6 +346,14 @@
     "done": "«{name}» yeniden adlandırıldı.",
     "failed": "Yeniden adlandırılamadı."
   },
+  "newFolder": {
+    "title": "Yeni klasör",
+    "field": "Klasör adı",
+    "cancel": "Vazgeç",
+    "confirm": "Oluştur",
+    "done": "«{name}» oluşturuldu.",
+    "failed": "Klasör oluşturulamadı."
+  },
   "delete": {
     "title": "Sil",
     "cancel": "Vazgeç",

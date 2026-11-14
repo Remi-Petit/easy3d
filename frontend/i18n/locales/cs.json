@@ -346,6 +346,14 @@
     "done": "«{name}» přejmenováno.",
     "failed": "Přejmenování se nezdařilo."
   },
+  "newFolder": {
+    "title": "Nová složka",
+    "field": "Název složky",
+    "cancel": "Zrušit",
+    "confirm": "Vytvořit",
+    "done": "«{name}» vytvořeno.",
+    "failed": "Složku se nepodařilo vytvořit."
+  },
   "delete": {
     "title": "Smazat",
     "cancel": "Zrušit",

@@ -346,6 +346,14 @@
     "done": "«{name}» telah diganti namanya.",
     "failed": "Tidak dapat mengganti nama."
   },
+  "newFolder": {
+    "title": "Folder baru",
+    "field": "Nama folder",
+    "cancel": "Batal",
+    "confirm": "Buat",
+    "done": "«{name}» telah dibuat.",
+    "failed": "Tidak dapat membuat folder."
+  },
   "delete": {
     "title": "Hapus",
     "cancel": "Batal",

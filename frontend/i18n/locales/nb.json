@@ -346,6 +346,14 @@
     "done": "«{name}» har fått nytt navn.",
     "failed": "Kunne ikke gi nytt navn."
   },
+  "newFolder": {
+    "title": "Ny mappe",
+    "field": "Mappenavn",
+    "cancel": "Avbryt",
+    "confirm": "Opprett",
+    "done": "«{name}» opprettet.",
+    "failed": "Kunne ikke opprette mappen."
+  },
   "delete": {
     "title": "Slett",
     "cancel": "Avbryt",

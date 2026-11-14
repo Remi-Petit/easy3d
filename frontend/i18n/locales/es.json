@@ -346,6 +346,14 @@
     "done": "«{name}» renombrado.",
     "failed": "No se pudo renombrar."
   },
+  "newFolder": {
+    "title": "Nueva carpeta",
+    "field": "Nombre de la carpeta",
+    "cancel": "Cancelar",
+    "confirm": "Crear",
+    "done": "«{name}» creada.",
+    "failed": "No se pudo crear la carpeta."
+  },
   "delete": {
     "title": "Eliminar",
     "cancel": "Cancelar",

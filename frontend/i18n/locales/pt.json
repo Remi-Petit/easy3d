@@ -346,6 +346,14 @@
     "done": "«{name}» renomeado.",
     "failed": "Não foi possível renomear."
   },
+  "newFolder": {
+    "title": "Nova pasta",
+    "field": "Nome da pasta",
+    "cancel": "Cancelar",
+    "confirm": "Criar",
+    "done": "«{name}» criada.",
+    "failed": "Não foi possível criar a pasta."
+  },
   "delete": {
     "title": "Eliminar",
     "cancel": "Cancelar",

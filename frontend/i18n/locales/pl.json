@@ -346,6 +346,14 @@
     "done": "«{name}» — zmieniono nazwę.",
     "failed": "Nie udało się zmienić nazwy."
   },
+  "newFolder": {
+    "title": "Nowy folder",
+    "field": "Nazwa folderu",
+    "cancel": "Anuluj",
+    "confirm": "Utwórz",
+    "done": "«{name}» — utworzono.",
+    "failed": "Nie udało się utworzyć folderu."
+  },
   "delete": {
     "title": "Usuń",
     "cancel": "Anuluj",

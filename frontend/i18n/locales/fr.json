@@ -346,6 +346,14 @@
     "done": "« {name} » renommé.",
     "failed": "Renommage impossible."
   },
+  "newFolder": {
+    "title": "Nouveau dossier",
+    "field": "Nom du dossier",
+    "cancel": "Annuler",
+    "confirm": "Créer",
+    "done": "« {name} » créé.",
+    "failed": "Création impossible."
+  },
   "delete": {
     "title": "Supprimer",
     "cancel": "Annuler",

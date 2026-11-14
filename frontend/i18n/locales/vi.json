@@ -346,6 +346,14 @@
     "done": "Đã đổi tên «{name}».",
     "failed": "Không thể đổi tên."
   },
+  "newFolder": {
+    "title": "Thư mục mới",
+    "field": "Tên thư mục",
+    "cancel": "Hủy",
+    "confirm": "Tạo",
+    "done": "Đã tạo «{name}».",
+    "failed": "Không thể tạo thư mục."
+  },
   "delete": {
     "title": "Xóa",
     "cancel": "Hủy",

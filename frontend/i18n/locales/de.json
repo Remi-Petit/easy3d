@@ -346,6 +346,14 @@
     "done": "„{name}“ umbenannt.",
     "failed": "Umbenennen fehlgeschlagen."
   },
+  "newFolder": {
+    "title": "Neuer Ordner",
+    "field": "Ordnername",
+    "cancel": "Abbrechen",
+    "confirm": "Erstellen",
+    "done": "„{name}“ erstellt.",
+    "failed": "Ordner konnte nicht erstellt werden."
+  },
   "delete": {
     "title": "Löschen",
     "cancel": "Abbrechen",

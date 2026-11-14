@@ -346,6 +346,14 @@
     "done": "“{name}” renamed.",
     "failed": "Rename failed."
   },
+  "newFolder": {
+    "title": "New folder",
+    "field": "Folder name",
+    "cancel": "Cancel",
+    "confirm": "Create",
+    "done": "“{name}” created.",
+    "failed": "Could not create the folder."
+  },
   "delete": {
     "title": "Delete",
     "cancel": "Cancel",
