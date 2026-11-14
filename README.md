@@ -9,6 +9,8 @@
 
 Une solution pour gérer ses modèles 3D de manière **auto-hébergé**.
 
+![Catalogue easy3d : dossiers, aperçus générés par le serveur et recherche](docs/screenshots/catalogue.jpg)
+
 ## Contexte
 
 Il existe déjà plusieurs projets open source permettant de gérer les modèles 3D. 
@@ -33,6 +35,10 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   CPU, vignette embarquée extraite des G-code — et ramenée au style de la maison
   (matière claire sur fond sombre), comme les rendus de maillage. La grille reste
   légère même avec des centaines de fichiers.
+- **Rangement sans quitter l'interface** : un clic droit dans le fond du
+  catalogue crée un dossier — à la racine ou dans le dossier affiché — et les
+  cartes se renomment ou se suppriment du même geste. Rien n'est indispensable :
+  le dossier `models/` reste la seule source de vérité.
 - **Notes collaboratives** (CRDT Yjs) : Les utilisateurs peuvent ajouter des notes sur des dossiers / fichiers. Tout est stocké en markdown, pas de base de donnée. Ça a été conçu pour pouvoir fonctionner en temps réel. Via le serveur MCP, l'IA peut lire / ajouter / modifier des notes.
 - **Un serveur MCP intégré** : un agent liste les modèles, cherche dans les notes
   et les métadonnées des G-codes, lit et écrit les notes, consulte et modifie la
@@ -55,6 +61,29 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
 <!-- langues:start -->
 **28 langues** : Français, English, Deutsch, Español, Português, Italiano, Nederlands, Svenska, Dansk, Norsk bokmål, Русский, Українська, Polski, Čeština, Slovenčina, Hrvatski, Română, 中文, 日本語, 한국어, Bahasa Indonesia, Tiếng Việt, Türkçe, Ελληνικά, Suomi, Magyar, Català, Български — 522 clés, traduites à 100 %.
 <!-- langues:end -->
+
+## Aperçu
+
+Les vignettes de la grille sont calculées par le serveur, sans GPU. Dans la fiche
+d'un fichier, l'aperçu s'ouvre en 3D — et pour un G-code, les métadonnées
+annoncées par le slicer (matière, durée, hauteur de couche, imprimante…) sont
+affichées à côté.
+
+| Aperçu 3D d'un G-code | Note d'un dossier |
+|---|---|
+| ![Fiche d'un G-code : toolpath 3D et métadonnées annoncées par le slicer](docs/screenshots/fichier.jpg) | ![Note Markdown d'un dossier, éditable en temps réel](docs/screenshots/dossier-notes.jpg) |
+
+| Créer un dossier au clic droit | Administration — Réglages |
+|---|---|
+| ![Fenêtre « Nouveau dossier », ouverte par un clic droit sur le fond du catalogue](docs/screenshots/nouveau-dossier.jpg) | ![Réglages : mode d'affichage des modèles et re-scan périodique](docs/screenshots/admin-reglages.jpg) |
+
+| Administration — Recherche assistée (IA) | Administration — Fournisseur d'identité (SSO) |
+|---|---|
+| ![Recherche assistée : fournisseur, adresse de l'API (raccourcis connus), clé et modèle](docs/screenshots/admin-ia.jpg) | ![Fournisseur d'identité : les champs imposés par l'environnement sont grisés](docs/screenshots/admin-sso.jpg) |
+
+| Administration — Notes | Journal d'audit |
+|---|---|
+| ![Notes : la liste des notes du catalogue et l'éditeur Markdown](docs/screenshots/admin-notes.jpg) | ![Journal : connexions, refus, jetons et changements de droits](docs/screenshots/journal.jpg) |
 
 ## Démarrage
 
