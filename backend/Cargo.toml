@@ -30,7 +30,9 @@ schemars = "1.2.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 argon2 = "0.6.0"
 uuid = { version = "1.26.1", features = ["v4", "v7"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+# 0.42 exige `libsqlite3-sys` 0.40 : les versions précédentes embarquent SQLite
+# 3.4x, visé par RUSTSEC-2026-0459 (CVE-2026-119375, corrigé en 0.39.0).
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 # Empreinte des jetons d'API : un hachage **rapide** suffit (le jeton est un
 # secret de 32 octets tiré au hasard, il n'y a pas de dictionnaire à craindre),
 # et blake2 est déjà compilé comme dépendance d'argon2.
