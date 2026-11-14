@@ -238,6 +238,8 @@ plus être écrasé en redémarrant le conteneur (il se change dans l'interface)
 | `EASY3D_OIDC_CLIENT_SECRET_FILE` | — | le même secret, lu dans un **fichier** |
 | `EASY3D_OIDC_SCOPES` | `openid email profile` | portées demandées |
 | `EASY3D_OIDC_PROVISIONING` | `auto` | `auto`, `manual` ou `approval` |
+| `EASY3D_OIDC_PROVIDERS` | — | fournisseurs **supplémentaires** (JSON) : un bouton de plus chacun |
+| `EASY3D_OIDC_DEV_LOGIN` | *(éteint)* | connexion **en un clic** de la page de développement (`/dev/login`) |
 
 Les deux réglages qui portent un secret (`EASY3D_ADMIN_PASSWORD`,
 `EASY3D_OIDC_CLIENT_SECRET`) acceptent aussi une variante `_FILE`
@@ -380,7 +382,7 @@ comptes simulés déclarés en JSON (`ACCOUNTS`).
 Le `docker-compose.yml` de développement le lance **en même temps** que Keycloak
 et le déclare comme fournisseur **supplémentaire** (`EASY3D_OIDC_PROVIDERS`) :
 la page de connexion affiche donc **deux** boutons — *Continuer avec
-keycloak-dev* (comptes à choisir, mot de passe) et *Continuer avec fake-oidc*
+keycloak-dev* (comptes du royaume, un clic) et *Continuer avec fake-oidc*
 (un clic, sans mot de passe). Les deux jeux de comptes coexistent : le
 rattachement est propre à chaque fournisseur, et un compte n'appartient qu'à un
 seul.
@@ -395,7 +397,7 @@ Le compose en livre deux :
 | `admin` | mot de passe `admin` / `adminadmin`, ou SSO Keycloak « admin » | tout (superutilisateur `admin`) |
 | `fictif-admin` | SSO **fake-oidc** « Administrateur (fictif) », sans mot de passe | créé au premier login, rôle par défaut |
 | `fictif-user` | SSO **fake-oidc** « Utilisateur (fictif) », sans mot de passe | rôle par défaut (`lecteur`) |
-| les comptes du royaume | SSO **keycloak-dev** → page de choix (`/dev/login`) | rôle par défaut, sauf réglage dans *Comptes* |
+| les comptes du royaume | SSO **keycloak-dev** → page de choix (`/dev/login`), **un clic** | rôle par défaut, sauf réglage dans *Comptes* |
 
 Le mot de passe doit faire **8 caractères minimum** (règle du backend) : c'est
 pourquoi celui du compte de développement est `adminadmin` et non `admin`.
@@ -446,10 +448,13 @@ node docker/keycloak/selftest.mjs                     # le royaume, sans navigat
 Keycloak démarre **avec** l'application (`docker compose up`), et la page de
 connexion propose **Continuer avec keycloak-dev** : ce bouton ouvre une page qui
 **liste les comptes du royaume** (identifiant, adresse, rôles Keycloak, mot de
-passe) ; choisir un compte pré-remplit l'identifiant chez le fournisseur, qui
-demande le mot de passe — rien n'est contourné. C'est le moyen le plus court
-pour essayer « un administrateur », « un imprimeur » et « un lecteur » à la
-suite.
+passe), et **un clic ouvre la session**. Le mot de passe du royaume est présenté
+au point d'échange de jetons de Keycloak (`EASY3D_OIDC_DEV_LOGIN=1`), puis la
+suite est le chemin d'un retour de flux — `userinfo`, provisionnement,
+rattachement, session : c'est le moyen le plus court pour essayer « un
+administrateur », « un imprimeur » et « un lecteur » à la suite. Le lien
+« chez Keycloak » de chaque ligne fait le trajet dans le navigateur, avec la page
+et le mot de passe du fournisseur, si l'on veut la voir.
 
 Console Keycloak : <http://localhost:8088/admin> (`admin` / `admin`).
 

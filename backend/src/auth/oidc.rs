@@ -108,6 +108,13 @@ pub struct Env {
     /// Fournisseurs **supplémentaires** (`EASY3D_OIDC_PROVIDERS`, JSON), en plus
     /// du principal.
     pub providers: Vec<ExtraProvider>,
+    /// Connexion **d'un clic** pour la page de développement
+    /// (`EASY3D_OIDC_DEV_LOGIN`), voir [`dev_login_with`].
+    ///
+    /// Fermée par défaut : elle présente le mot de passe au point d'échange de
+    /// jetons au lieu de laisser le fournisseur poser sa page. En production,
+    /// c'est le fournisseur qui doit demander — pas notre API.
+    pub dev_login: bool,
 }
 
 /// Fournisseur d'identité **supplémentaire**, déclaré par l'environnement.
@@ -229,6 +236,13 @@ impl Env {
             provisioning,
             public_url: non_empty("EASY3D_PUBLIC_URL"),
             providers: extra_providers()?,
+            // Une faute de frappe est une **erreur** (comme partout ailleurs) :
+            // `EASY3D_OIDC_DEV_LOGIN=ture` ouvrirait sinon une porte qu'on
+            // croit fermée, ou la fermerait sans le dire.
+            dev_login: auth::parse_bool(
+                std::env::var("EASY3D_OIDC_DEV_LOGIN").ok().as_deref(),
+                "EASY3D_OIDC_DEV_LOGIN",
+            )?,
         })
     }
 
@@ -610,6 +624,41 @@ pub fn token_form(settings: &Settings, redirect_uri: &str, code: &str) -> String
         ("client_id", &settings.client_id),
         ("client_secret", &settings.client_secret),
     ])
+}
+
+/// Corps du `POST` de connexion **directe** (mot de passe).
+///
+/// Réservé à la page de développement (voir [`dev_login_with`]) : le client de
+/// démonstration autorise ce mode, une installation réelle n'a aucune raison de
+/// l'ouvrir. Les portées sont celles du flux normal, `openid` compris — sans
+/// elles, `userinfo` refuse le jeton.
+pub fn password_form(settings: &Settings, login: &str, password: &str) -> String {
+    form(&[
+        ("grant_type", "password"),
+        ("username", login),
+        ("password", password),
+        ("scope", &settings.scopes.join(" ")),
+        ("client_id", &settings.client_id),
+        ("client_secret", &settings.client_secret),
+    ])
+}
+
+/// `true` si la réponse du fournisseur dit « mauvais identifiants ».
+///
+/// La distinction compte : `invalid_grant` est un **refus de la personne**
+/// (401, message traduit), tandis qu'un `unauthorized_client` (mode mot de passe
+/// non autorisé chez lui) est une **configuration** à corriger — la présenter
+/// comme un mot de passe erroné enverrait chercher au mauvais endroit.
+pub fn wrong_credentials(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .is_some_and(|code| code == "invalid_grant")
 }
 
 /// Corps du `POST` de rafraîchissement (voir [`revalidate_sessions`]).
@@ -1173,43 +1222,77 @@ where
         }
     };
 
-    // Provisionnement puis session : à partir d'ici, tout échec est un refus
-    // (code) ou une panne (500), jamais une session à moitié ouverte.
-    //
-    // Le rattachement **ferme les sessions** du compte (sauf celles d'un
-    // administrateur) : on note donc si le compte était déjà connu, pour couper
-    // aussi ses WebSocket le cas échéant — la fermeture des sessions ne les
-    // atteint pas d'elle-même. `provision` rend justement ce qu'il a fait.
-    let (user, origine) = match provision(&state.auth, &settings, &identite) {
-        Ok(acces) => acces,
-        Err(code) => {
-            // L'adresse **essayée** est notée : c'est ce qui permet de répondre
-            // à « pourquoi cette personne n'arrive pas à entrer » sans qu'elle
-            // ait à raconter son parcours.
-            state
-                .auth
-                .log(headers, "sso_refused", None, &identite.email, &code);
-            return login_error(&code);
-        }
+    let token = match entrer(
+        state,
+        headers,
+        &settings,
+        &identite,
+        tokens.refresh_token.as_deref(),
+    ) {
+        Ok(token) => token,
+        Err(Refus::Compte(code)) => return login_error(&code),
+        Err(Refus::Panne(e)) => return auth::internal(&e),
     };
+
+    (
+        StatusCode::FOUND,
+        [
+            (header::LOCATION, pending.return_to.clone()),
+            (
+                header::SET_COOKIE,
+                state.auth.session_cookie(&token, headers),
+            ),
+        ],
+    )
+        .into_response()
+}
+
+/// Raison pour laquelle une identité **n'a pas** obtenu de session.
+enum Refus {
+    /// Refus **expliqué au visiteur**, traduit par l'interface (`oidc_conflict`…).
+    Compte(String),
+    /// Panne de notre côté (base illisible) : une erreur serveur, rien d'autre.
+    Panne(String),
+}
+
+/// Provisionne l'identité, ouvre la session et journalise : le chemin commun du
+/// retour de flux et de la connexion directe.
+///
+/// Le rattachement **ferme les sessions** du compte (sauf celles d'un
+/// administrateur) : on note donc si le compte était déjà connu, pour couper
+/// aussi ses WebSocket le cas échéant — la fermeture des sessions ne les atteint
+/// pas d'elle-même. `provision` rend justement ce qu'il a fait.
+///
+/// Le détail de la `sso_login` dit **ce qui vient de se passer**, pas le mode
+/// configuré : une reconnexion d'un compte déjà rattaché ne doit pas se lire
+/// « création automatique » dans le journal (c'est une trace d'audit, pas un
+/// rappel de réglage), ni un rattachement se lire comme une création.
+fn entrer(
+    state: &AppState,
+    headers: &HeaderMap,
+    settings: &Settings,
+    identite: &Identity,
+    refresh_token: Option<&str>,
+) -> Result<String, Refus> {
+    let (user, origine) = provision(&state.auth, settings, identite).map_err(|code| {
+        // L'adresse **essayée** est notée : c'est ce qui permet de répondre à
+        // « pourquoi cette personne n'arrive pas à entrer » sans qu'elle ait à
+        // raconter son parcours.
+        state
+            .auth
+            .log(headers, "sso_refused", None, &identite.email, &code);
+        Refus::Compte(code)
+    })?;
     if origine != Origin::Existing {
         // Premier login (création ou rattachement) : les sessions antérieures du
         // compte ont pu être fermées par le rattachement.
         state.kick_user(&user.uuid);
     }
-    let token = match state.auth.start_sso_session(
-        &user.uuid,
-        headers,
-        tokens.refresh_token.as_deref(),
-        &settings.provider,
-    ) {
-        Ok(token) => token,
-        Err(e) => return auth::internal(&e),
-    };
-    // Le détail dit **ce qui vient de se passer**, pas le mode configuré : une
-    // reconnexion d'un compte déjà rattaché ne doit pas se lire « création
-    // automatique » dans le journal (c'est une trace d'audit, pas un rappel de
-    // réglage), ni un rattachement se lire comme une création.
+    let token = state
+        .auth
+        .start_sso_session(&user.uuid, headers, refresh_token, &settings.provider)
+        .map_err(Refus::Panne)?;
+
     let detail = origine.detail(settings.provisioning);
     state
         .auth
@@ -1221,16 +1304,171 @@ where
             user.username, user.email
         ),
     }
+    Ok(token)
+}
+
+/// Corps de `POST /auth/oidc/dev-login`.
+#[derive(Debug, Deserialize)]
+pub struct DevLoginRequest {
+    /// Identifiant **chez le fournisseur** (nom ou adresse).
+    pub login: String,
+    pub password: String,
+    /// Page à rejoindre ensuite (facultatif, chemin interne).
+    pub redirect: Option<String>,
+}
+
+/// Réponse de `POST /auth/oidc/dev-login` : où aller maintenant.
+#[derive(Debug, Serialize)]
+pub struct DevLoginResponse {
+    pub redirect: String,
+}
+
+/// `POST /auth/oidc/dev-login` — connexion **d'un clic**, pour le développement.
+///
+/// La page `/dev/login` propose les comptes de `docker/keycloak/realm.json` ;
+/// ce point d'entrée évite d'avoir à retaper un mot de passe que ce fichier
+/// publie de toute façon, et rend le changement de compte instantané.
+///
+/// Ce n'est **pas** un contournement de l'authentification : le mot de passe est
+/// présenté au fournisseur (`grant_type=password`, que le client de
+/// démonstration autorise), et la suite est le chemin commun (`userinfo`,
+/// `entrer`) — donc le même code décide qui entre, avec le même rattachement
+/// (`oidc_provider`), la même session SSO et la même trace au journal.
+///
+/// ⚠️ **Fermée par défaut** (`EASY3D_OIDC_DEV_LOGIN=1` pour l'ouvrir), et
+/// volontairement aveugle au fournisseur : elle vise le **principal**, celui des
+/// comptes listés par la page. Un fournisseur supplémentaire n'a pas de mot de
+/// passe à présenter.
+pub async fn dev_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DevLoginRequest>,
+) -> Response {
+    let Ok(client) = client() else {
+        return auth::internal("client HTTP indisponible");
+    };
+    let transport = move |appel: Request| -> Answer {
+        let client = client.clone();
+        Box::pin(async move { send(&client, appel).await })
+    };
+    dev_login_with(&state, &headers, &request, transport).await
+}
+
+/// Version testable de [`dev_login`].
+pub async fn dev_login_with<F>(
+    state: &AppState,
+    headers: &HeaderMap,
+    request: &DevLoginRequest,
+    mut transport: F,
+) -> Response
+where
+    F: FnMut(Request) -> Answer,
+{
+    if !state.auth.is_enabled() {
+        return auth::error(StatusCode::BAD_REQUEST, "auth_disabled");
+    }
+    // Fermée : le dire (403 + code) plutôt que de faire semblant de ne pas
+    // exister — la page de développement est justement là pour diagnostiquer.
+    if !state.oidc.dev_login {
+        return auth::error(StatusCode::FORBIDDEN, "dev_login_disabled");
+    }
+    let settings = match settings(state) {
+        Ok(Some(settings)) => settings,
+        Ok(None) => return auth::error(StatusCode::BAD_REQUEST, "oidc_disabled"),
+        Err(manque) => return auth::internal(&describe(manque)),
+    };
+
+    let login = request.login.trim().to_lowercase();
+    if login.is_empty() || request.password.is_empty() {
+        return auth::error(StatusCode::UNAUTHORIZED, "invalid_credentials");
+    }
+    // Même verrou que la connexion par mot de passe : le fournisseur a sa
+    // propre protection, mais rien ne justifie d'en faire une machine à essayer
+    // des mots de passe par notre intermédiaire.
+    let ip = auth::client_ip(headers);
+    if state.auth.is_locked(&login) || state.auth.is_ip_locked(&ip) {
+        state
+            .auth
+            .log(headers, "login_blocked", None, &login, "rate_limited");
+        return auth::error(StatusCode::TOO_MANY_REQUESTS, "rate_limited");
+    }
+
+    let discovery = match discover(&state.auth, &settings, &mut transport).await {
+        Ok(discovery) => discovery,
+        Err(e) => return auth::internal(&e),
+    };
+    let (status, body) = match transport(Request::Form {
+        url: discovery.token_endpoint.clone(),
+        body: password_form(&settings, &login, &request.password),
+    })
+    .await
+    {
+        Ok(reponse) => reponse,
+        Err(e) => return auth::internal(&e),
+    };
+    if status >= 400 {
+        // `invalid_grant` = la personne s'est trompée ; le reste (mode mot de
+        // passe non autorisé chez lui, secret client faux) est une
+        // **configuration**, et se présente comme telle.
+        if status == 401 || wrong_credentials(&body) {
+            state.auth.record_failure(&login, &ip);
+            state
+                .auth
+                .log(headers, "login_failed", None, &login, "invalid_credentials");
+            return auth::error(StatusCode::UNAUTHORIZED, "invalid_credentials");
+        }
+        return auth::error(
+            StatusCode::BAD_GATEWAY,
+            &format!("connexion directe refusée ({status}) : {body}"),
+        );
+    }
+    let tokens = match parse_token_response(&body) {
+        Ok(tokens) => tokens,
+        Err(e) => return auth::internal(&e),
+    };
+
+    let (status, body) = match transport(Request::Get {
+        url: discovery.userinfo_endpoint.clone(),
+        bearer: Some(tokens.access_token),
+    })
+    .await
+    {
+        Ok(reponse) => reponse,
+        Err(e) => return auth::internal(&e),
+    };
+    if status >= 400 {
+        return auth::internal(&format!("userinfo refusé ({status}) : {body}"));
+    }
+    let identite = match parse_identity(&body) {
+        Ok(identite) => identite,
+        Err(code) => {
+            state.auth.log(headers, "sso_refused", None, "", &code);
+            return auth::error(StatusCode::FORBIDDEN, &code);
+        }
+    };
+
+    let token = match entrer(
+        state,
+        headers,
+        &settings,
+        &identite,
+        tokens.refresh_token.as_deref(),
+    ) {
+        Ok(token) => token,
+        Err(Refus::Compte(code)) => return auth::error(StatusCode::FORBIDDEN, &code),
+        Err(Refus::Panne(e)) => return auth::internal(&e),
+    };
+    state.auth.clear_failures(&login);
 
     (
-        StatusCode::FOUND,
-        [
-            (header::LOCATION, pending.return_to.clone()),
-            (
-                header::SET_COOKIE,
-                state.auth.session_cookie(&token, headers),
-            ),
-        ],
+        StatusCode::OK,
+        [(
+            header::SET_COOKIE,
+            state.auth.session_cookie(&token, headers),
+        )],
+        Json(DevLoginResponse {
+            redirect: return_to(request.redirect.as_deref()),
+        }),
     )
         .into_response()
 }
@@ -3194,5 +3432,218 @@ mod tests {
             }],
             "un bouton de plus par fournisseur"
         );
+    }
+
+    // ── Connexion d'un clic (page de développement) ─────────────────────
+
+    /// État dont la connexion directe est **ouverte** (`EASY3D_OIDC_DEV_LOGIN`).
+    fn etat_dev(mode: Provisioning) -> AppState {
+        let mut state = etat(mode, true);
+        // `oidc` est un `Arc` (partagé avec les tâches) : on le remplace.
+        let base = (*state.oidc).clone();
+        state.oidc = std::sync::Arc::new(Env {
+            dev_login: true,
+            ..base
+        });
+        state
+    }
+
+    fn demande(login: &str, password: &str) -> DevLoginRequest {
+        DevLoginRequest {
+            login: login.to_string(),
+            password: password.to_string(),
+            redirect: None,
+        }
+    }
+
+    /// Jeton porté par le `Set-Cookie` d'ouverture de session, s'il y en a un.
+    fn jeton_de_session(reponse: &Response) -> Option<String> {
+        let cookie = reponse.headers().get(header::SET_COOKIE)?.to_str().ok()?;
+        Some(
+            cookie
+                .split("easy3d_session=")
+                .nth(1)?
+                .split(';')
+                .next()?
+                .to_string(),
+        )
+    }
+
+    async fn corps_texte(reponse: Response) -> String {
+        use http_body_util::BodyExt;
+        let octets = reponse.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(octets.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn le_corps_de_la_connexion_directe_porte_le_mot_de_passe() {
+        let corps = password_form(
+            &reglages(Provisioning::Auto),
+            "Imprimeuse@exemple.fr",
+            "mot de passe&=",
+        );
+        assert!(corps.contains("grant_type=password"), "{corps}");
+        assert!(
+            corps.contains(&format!("username={}", encode("Imprimeuse@exemple.fr"))),
+            "{corps}"
+        );
+        // Le mot de passe voyage **encodé** (`&` et `=` y sont fréquents), et
+        // les portées sont celles du flux normal : sans `openid`, `userinfo`
+        // refuserait le jeton.
+        assert!(
+            corps.contains(&format!("password={}", encode("mot de passe&="))),
+            "{corps}"
+        );
+        assert!(
+            corps.contains(&format!("scope={}", encode("openid email"))),
+            "{corps}"
+        );
+        assert!(corps.contains("client_secret=secret"), "{corps}");
+    }
+
+    #[tokio::test]
+    async fn la_connexion_directe_est_fermee_par_defaut() {
+        let state = etat(Provisioning::Auto, true);
+        assert!(!state.oidc.dev_login, "le drapeau est fermé par défaut");
+
+        let (faux, journal) = transport(vec![]);
+        let reponse = dev_login_with(
+            &state,
+            &entetes(),
+            &demande("remi@exemple.fr", "secret"),
+            faux,
+        )
+        .await;
+
+        // Elle se **dit** fermée (403 + code) : un bouton mort serait plus
+        // difficile à diagnostiquer qu'un refus explicite.
+        assert_eq!(reponse.status(), StatusCode::FORBIDDEN);
+        assert_eq!(corps_texte(reponse).await, "dev_login_disabled");
+        assert!(
+            journal.lock().unwrap().is_empty(),
+            "aucun mot de passe ne doit partir chez le fournisseur"
+        );
+        assert!(
+            state
+                .auth
+                .db(|conn| db::list_events(conn, 5))
+                .unwrap()
+                .is_empty(),
+            "rien à dire au journal : ce n'est pas une tentative de connexion"
+        );
+    }
+
+    #[tokio::test]
+    async fn la_connexion_directe_ouvre_la_session_du_compte_choisi() {
+        let state = etat_dev(Provisioning::Auto);
+        let headers = entetes();
+        let mut requete = demande("Remi@Exemple.fr", "motdepasse");
+        requete.redirect = Some("/admin/audit".to_string());
+
+        let (faux, journal) = transport(reponses_du_retour("remi@exemple.fr"));
+        let reponse = dev_login_with(&state, &headers, &requete, faux).await;
+        assert_eq!(reponse.status(), StatusCode::OK);
+        // Le jeton se lit **avant** le corps : le lire consomme la réponse.
+        let jeton = jeton_de_session(&reponse).expect("jeton de session");
+        // La page de développement reçoit **où aller** : le même assainissement
+        // que le retour de flux (`return_to`), un chemin interne.
+        let corps = corps_texte(reponse).await;
+        assert!(corps.contains("\"redirect\":\"/admin/audit\""), "{corps}");
+
+        // Le mot de passe est présenté **au fournisseur** (POST de formulaire),
+        // puis l'identité est lue par `userinfo` : le chemin d'un retour de flux,
+        // sans la page du fournisseur.
+        let appels = journal.lock().unwrap().clone();
+        assert_eq!(appels.len(), 2, "{appels:?}");
+        match &appels[0] {
+            Request::Form { url, body } => {
+                assert_eq!(url, "https://sso.exemple.fr/token");
+                assert!(body.contains("grant_type=password"), "{body}");
+                // L'identifiant est normalisé comme ailleurs (minuscules).
+                assert!(body.contains("username=remi%40exemple.fr"), "{body}");
+            }
+            autre => panic!("attendu : un POST de formulaire, obtenu {autre:?}"),
+        }
+        match &appels[1] {
+            Request::Get { url, bearer } => {
+                assert_eq!(url, "https://sso.exemple.fr/userinfo");
+                assert_eq!(bearer.as_deref(), Some("jeton"));
+            }
+            autre => panic!("attendu : un GET userinfo, obtenu {autre:?}"),
+        }
+
+        // La session ouverte est une session **SSO** du compte provisionné :
+        // même rattachement, même rôle livré, même trace qu'un retour de flux.
+        let mut entetes_session = HeaderMap::new();
+        entetes_session.insert(
+            header::COOKIE,
+            format!("easy3d_session={jeton}").parse().unwrap(),
+        );
+        let connecte = state
+            .auth
+            .resolve(&entetes_session)
+            .expect("session résolue");
+        assert_eq!(connecte.email, "remi@exemple.fr");
+
+        let events = state.auth.db(|conn| db::list_events(conn, 5)).unwrap();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, "sso_login");
+        assert_eq!(events[0].subject, "remi@exemple.fr");
+        assert_eq!(
+            events[0].detail, "auto",
+            "le détail décrit l'événement (compte créé), comme au retour de flux"
+        );
+    }
+
+    #[tokio::test]
+    async fn un_mot_de_passe_refuse_n_ouvre_aucune_session() {
+        let state = etat_dev(Provisioning::Auto);
+        let (faux, _) = transport(vec![Ok((
+            401,
+            r#"{"error":"invalid_grant","error_description":"Invalid user credentials"}"#
+                .to_string(),
+        ))]);
+        let reponse = dev_login_with(
+            &state,
+            &entetes(),
+            &demande("remi@exemple.fr", "ce-n-est-pas-le-bon"),
+            faux,
+        )
+        .await;
+
+        assert_eq!(reponse.status(), StatusCode::UNAUTHORIZED);
+        assert!(jeton_de_session(&reponse).is_none());
+
+        // Le refus est au journal, comme pour la connexion par mot de passe :
+        // l'identifiant **essayé** y est.
+        let events = state.auth.db(|conn| db::list_events(conn, 5)).unwrap();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, "login_failed");
+        assert_eq!(events[0].subject, "remi@exemple.fr");
+    }
+
+    #[tokio::test]
+    async fn un_mode_mot_de_passe_non_autorise_est_une_panne_de_configuration() {
+        // `unauthorized_client` ne dit pas « mot de passe faux » : c'est le
+        // client qui n'autorise pas ce mode (`directAccessGrantsEnabled`). Le
+        // présenter comme un mot de passe erroné enverrait chercher au mauvais
+        // endroit — c'est le rôle de `wrong_credentials` de les distinguer.
+        let state = etat_dev(Provisioning::Auto);
+        let (faux, _) = transport(vec![Ok((
+            400,
+            r#"{"error":"unauthorized_client"}"#.to_string(),
+        ))]);
+        let reponse = dev_login_with(
+            &state,
+            &entetes(),
+            &demande("remi@exemple.fr", "motdepasse"),
+            faux,
+        )
+        .await;
+
+        assert_eq!(reponse.status(), StatusCode::BAD_GATEWAY);
+        assert!(jeton_de_session(&reponse).is_none());
+        assert!(!wrong_credentials(r#"{"error":"unauthorized_client"}"#));
+        assert!(wrong_credentials(r#"{"error":"invalid_grant"}"#));
     }
 }

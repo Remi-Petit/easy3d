@@ -265,7 +265,11 @@ pub fn routes(state: AppState) -> Router {
         // SSO : le navigateur part d'ici et revient sur `…/callback`. Les deux
         // doivent être publiques par nature — on n'est pas encore authentifié.
         .route("/auth/oidc/start", get(auth::oidc::start))
-        .route("/auth/oidc/callback", get(auth::oidc::callback));
+        .route("/auth/oidc/callback", get(auth::oidc::callback))
+        // Connexion d'un clic de la page de développement : publique comme les
+        // deux précédentes (on n'est pas encore authentifié), et **fermée**
+        // tant que `EASY3D_OIDC_DEV_LOGIN` n'est pas posé.
+        .route("/auth/oidc/dev-login", post(auth::oidc::dev_login));
 
     // Les routes protégées sont groupées **par droit exigé** : un groupe, un
     // droit, une ligne ([`gated`]). La table des routes se lit donc comme la

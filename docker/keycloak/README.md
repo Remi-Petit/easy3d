@@ -78,9 +78,11 @@ C'est **déjà le cas** : le service `easy3d` annonce
 connexion propose « Continuer avec keycloak-dev ».
 
 Puis <http://localhost:3100> → « Continuer avec keycloak-dev » → le compte
-voulu → `motdepasse-…` (affiché sur la page) → on revient sur le catalogue,
-connecté en tant que ce compte. `/admin/audit` montre une **Connexion SSO** dont
-le détail dit si le compte a été créé ou rattaché.
+voulu : la session s'ouvre **en un clic**. `/admin/audit` montre une **Connexion
+SSO** dont le détail dit si le compte a été créé ou rattaché. Pour voir la page
+de connexion du fournisseur et saisir le mot de passe chez lui
+(`motdepasse-…`, affiché sur la page), c'est le lien « chez Keycloak » de la
+même ligne.
 
 ⚠️ **Un compte déjà rattaché à un autre fournisseur ne peut pas l'être à
 Keycloak.** Si la base de développement a servi avec `fake-oidc`, les comptes
@@ -95,25 +97,36 @@ du SSO*, avec le mot de passe local `adminadmin`), ou repartir d'une base neuve
 `NUXT_PUBLIC_DEV_LOGIN=1` (déjà posé par le compose) ouvre une **page de choix
 des comptes** (<http://localhost:3100/dev/login>) : l'option SSO de la page de
 connexion s'appelle alors « Continuer avec keycloak-dev » et mène à cette page, qui liste
-le royaume — identifiant, adresse, rôles **Keycloak** et mot de passe à saisir.
+le royaume — identifiant, adresse, rôles **Keycloak** et mot de passe.
 
 Ce qu'elle fait, et ce qu'elle ne fait pas :
 
-- elle **ne connecte personne** : chaque ligne démarre un vrai flux OIDC
-  (`/api/auth/oidc/start?login_hint=…`), le fournisseur pré-remplit
-  l'identifiant, et le mot de passe se saisit **chez lui** ;
+- **un clic ouvre la session** : `POST /api/dev/login` présente le mot de passe
+  du royaume au point d'échange de jetons de Keycloak (`grant_type=password`),
+  puis le backend suit le chemin d'un retour de flux — `userinfo`,
+  provisionnement, rattachement, session. C'est ce que fait un fournisseur
+  fictif sans rien demander, mais avec le **vrai** annuaire ;
+- le lien « **chez Keycloak** » de chaque ligne fait l'inverse : il démarre le
+  vrai flux dans le navigateur (`/api/auth/oidc/start?login_hint=…`), le
+  fournisseur pré-remplit l'identifiant, et le mot de passe se saisit **chez
+  lui**. C'est là qu'on voit sa page, ce qu'un simple clic ne montre pas ;
 - les rôles affichés sont ceux de Keycloak — ils **n'accordent rien** dans
   easy3d (voir plus haut) ; les droits se règlent dans *Administration →
   Comptes* ;
 - la liste vient du fichier `realm.json` monté dans le conteneur
   (`./docker/keycloak:/dev/keycloak:ro`, lu via `NUXT_DEV_REALM`) : une seule
   liste, la même que celle importée par Keycloak ;
+- le clic est refusé (`403 dev_login_disabled`) tant que le **backend** n'a pas
+  `EASY3D_OIDC_DEV_LOGIN=1` — c'est lui qui autorise un mot de passe à passer par
+  notre API au lieu de la page du fournisseur. Le compose le pose ; le
+  `docker-compose.yml` livré, lui, ne le pose pas ;
 - sans le drapeau, la page **et** sa route répondent 404 (ce n'est pas un
   panneau caché, c'est du code de développement).
 
-Côté développement « nu », sans Docker : `NUXT_PUBLIC_DEV_LOGIN=1` (ou la ligne
-dans `frontend/.env`) suffit — le royaume est alors lu dans le dépôt
-(`../docker/keycloak/realm.json`, relativement à `frontend/`).
+Côté développement « nu », sans Docker : `NUXT_PUBLIC_DEV_LOGIN=1` **et**
+`EASY3D_OIDC_DEV_LOGIN=1` (ou les lignes dans `frontend/.env`) — le royaume est
+alors lu dans le dépôt (`../docker/keycloak/realm.json`, relativement à
+`frontend/`).
 
 ### ⚠️ Une seule adresse : `KEYCLOAK_URL`
 

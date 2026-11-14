@@ -160,14 +160,20 @@ services:
       #
       # Posée à `1` (le défaut), l'option SSO de la page de connexion s'appelle
       # « Continuer avec keycloak-dev » et mène à `/dev/login`, qui propose les
-      # comptes du royaume Keycloak (on choisit un compte, puis un vrai flux
-      # SSO). Pour revenir au fournisseur fictif, la vider (`NUXT_PUBLIC_DEV_LOGIN=`) :
+      # comptes du royaume Keycloak : un clic ouvre la session, et le lien
+      # « chez Keycloak » de chaque ligne montre la vraie page du fournisseur.
+      # Pour revenir au fournisseur fictif, la vider (`NUXT_PUBLIC_DEV_LOGIN=`) :
       # la page et sa route répondent alors 404.
       #
       # `NUXT_DEV_REALM` désigne le royaume monté juste au-dessus ; la valeur par
       # défaut ne sert qu'au serveur de développement lancé depuis le dépôt.
       NUXT_PUBLIC_DEV_LOGIN: ${NUXT_PUBLIC_DEV_LOGIN:-1}
       NUXT_DEV_REALM: ${NUXT_DEV_REALM:-/dev/keycloak/realm.json}
+      # L'autre moitié du même interrupteur, côté backend : sans elle, le clic
+      # est refusé (`403 dev_login_disabled`). Elle est ce qui empêche une
+      # installation ordinaire d'accepter un mot de passe sur son API — le
+      # `docker-compose.yml` livré, lui, ne la pose pas.
+      EASY3D_OIDC_DEV_LOGIN: ${EASY3D_OIDC_DEV_LOGIN:-1}
 
     # ── Catalogue des variables (non actif) ────────────────────────────────
     #

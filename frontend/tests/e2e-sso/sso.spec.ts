@@ -52,21 +52,57 @@ async function ouvrirChoixComptes(page: Page) {
   await expect(page).toHaveURL((url) => url.pathname === '/dev/login', { timeout: 30_000 })
 }
 
-/** Clique « Se connecter » sur le compte voulu, et vérifie qu'on est chez Keycloak. */
+/**
+ * Attend que l'application soit **hydratée** avant de cliquer.
+ *
+ * Un bouton rendu par le serveur répond au clic **seulement** une fois Vue
+ * monté. En développement (Vite compile les modules à la demande), cela prend
+ * parfois plus d'une seconde : un clic parti trop tôt est perdu sans erreur —
+ * la page reste où elle est, et le test échoue trente secondes plus tard sur une
+ * assertion d'URL qui ne dit rien de la cause. Les liens, eux, n'ont pas besoin
+ * de JavaScript : c'est ce qui distingue les deux parcours ci-dessous.
+ */
+async function attendreHydratation(page: Page) {
+  await page.waitForFunction(
+    () => Boolean((document.getElementById('__nuxt') as { __vue_app__?: unknown })?.__vue_app__),
+    undefined,
+    { timeout: 30_000 },
+  )
+}
+
+/** Clique « Se connecter » sur le compte voulu : la session s'ouvre en un clic. */
 async function choisirCompte(page: Page, login: string) {
   const ligne = page.locator(`.dev__account[data-compte="${login}"]`)
   await expect(ligne).toHaveCount(1)
-  await ligne.getByRole('link', { name: 'Se connecter' }).click()
+  await attendreHydratation(page)
+  await ligne.getByRole('button', { name: 'Se connecter' }).click()
+  // Le mot de passe part directement au point d'échange de jetons : on ne
+  // quitte pas l'application, il n'y a pas de page de fournisseur à traverser.
+  await expect(page).toHaveURL((url) => url.pathname !== '/dev/login', { timeout: 30_000 })
+}
+
+/** Le lien « chez Keycloak » de la ligne : le vrai flux, page du fournisseur comprise. */
+async function choisirCompteChezKeycloak(page: Page, login: string) {
+  const ligne = page.locator(`.dev__account[data-compte="${login}"]`)
+  await expect(ligne).toHaveCount(1)
+  await ligne.getByRole('link', { name: 'chez Keycloak' }).click()
   await expect(page).toHaveURL(/\/realms\/easy3d\/protocol\/openid-connect\/auth/, {
     timeout: 30_000,
   })
 }
 
-/** Connexion complète par le fournisseur, jusqu'au retour dans l'application. */
-async function seConnecterParSso(page: Page, identifiant: string, motDePasse: string) {
+/** Connexion complète **en un clic**, jusqu'au retour dans l'application. */
+async function seConnecterParSso(page: Page, login: string) {
   await ouvrirChoixComptes(page)
-  await choisirCompte(page, identifiant)
-  await saisirChezKeycloak(page, identifiant, motDePasse)
+  await choisirCompte(page, login)
+  await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
+}
+
+/** Connexion complète par la **page du fournisseur** (mot de passe saisi chez lui). */
+async function seConnecterChezKeycloak(page: Page, login: string, motDePasse: string) {
+  await ouvrirChoixComptes(page)
+  await choisirCompteChezKeycloak(page, login)
+  await saisirChezKeycloak(page, login, motDePasse)
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
 }
 
@@ -89,10 +125,10 @@ test('l’option « keycloak-dev » propose les comptes du royaume', async ({ pa
   await expect(imprimeuse).toContainText(KC_IMPRIMEUSE.motDePasse)
   await expect(imprimeuse).toContainText('imprimeur')
 
-  // Choisir un compte ne connecte personne : on **quitte** l'application, avec
-  // l'identifiant pré-rempli chez le fournisseur (`login_hint`), et le mot de
-  // passe reste à saisir là-bas.
-  await imprimeuse.getByRole('link', { name: 'Se connecter' }).click()
+  // Le lien « chez Keycloak » de la ligne, lui, fait le vrai trajet : on
+  // **quitte** l'application, avec l'identifiant pré-rempli chez le fournisseur
+  // (`login_hint`), et le mot de passe reste à saisir là-bas.
+  await imprimeuse.getByRole('link', { name: 'chez Keycloak' }).click()
   await expect(page).toHaveURL(/\/realms\/easy3d\/protocol\/openid-connect\/auth/, {
     timeout: 30_000,
   })
@@ -101,7 +137,7 @@ test('l’option « keycloak-dev » propose les comptes du royaume', async ({ pa
 })
 
 test('un compte local est rattaché par son e-mail, sans doublon', async ({ page }) => {
-  await seConnecterParSso(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
+  await seConnecterParSso(page, KC_ADMIN_LOGIN)
 
   // Le retour du fournisseur rouvre la page demandée (`/`) avec une **session
   // locale** : le compte est celui créé au démarrage, pas un second compte.
@@ -129,7 +165,7 @@ test('un compte local est rattaché par son e-mail, sans doublon', async ({ page
 })
 
 test('un compte inconnu est créé d’office, avec le rôle livré', async ({ page }) => {
-  await seConnecterParSso(page, KC_USER_LOGIN, KC_USER_PASSWORD)
+  await seConnecterParSso(page, KC_USER_LOGIN)
 
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
   // Le nom vient de `preferred_username` chez Keycloak.
@@ -150,9 +186,40 @@ test('un compte inconnu est créé d’office, avec le rôle livré', async ({ p
   for (const champ of await champs.all()) await expect(champ).toBeDisabled()
 })
 
+test('la connexion d’un clic fait valider le mot de passe par le fournisseur', async ({
+  page,
+}) => {
+  // Le point d'entrée de développement n'ouvre pas de session « sur parole » :
+  // c'est le fournisseur qui vérifie le mot de passe. Un mot de passe erroné
+  // répond `invalid_credentials`, sans cookie de session.
+  await ouvrirChoixComptes(page)
+  const essai = (motDePasse: string) =>
+    page.evaluate(
+      async ([login, password]) => {
+        const res = await fetch('/api/dev/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ login, password }),
+        })
+        return res.status
+      },
+      [KC_USER_LOGIN, motDePasse] as const,
+    )
+
+  expect(await essai('ce-n-est-pas-le-bon')).toBe(401)
+  // Le mot de passe du royaume, lui, passe : celui de `realm.json`, donc celui
+  // que la page affiche sur la ligne du compte.
+  expect(await essai(KC_USER_PASSWORD)).toBe(200)
+
+  // La session est bien ouverte (le cookie est arrivé par le relais) : la page
+  // demandée s'ouvre sans repasser par la connexion.
+  await page.goto('/')
+  await expect(page.locator('.sidebar-user__who')).toHaveText(KC_USERNAME)
+})
+
 test('un mot de passe erroné chez le fournisseur ne crée aucune session', async ({ page }) => {
   await ouvrirChoixComptes(page)
-  await choisirCompte(page, KC_USER_LOGIN)
+  await choisirCompteChezKeycloak(page, KC_USER_LOGIN)
   await saisirChezKeycloak(page, KC_USER_LOGIN, 'ce-n-est-pas-le-bon')
 
   // Keycloak refuse **chez lui** : on reste sur sa page, avec son message (dans
@@ -182,7 +249,7 @@ test('après connexion, on revient sur la page demandée', async ({ page }) => {
   expect(new URL(page.url()).searchParams.get('redirect')).toBe('/admin/audit')
 
   await page.getByRole('link', { name: /Continuer avec keycloak-dev/ }).click()
-  await choisirCompte(page, KC_ADMIN_LOGIN)
+  await choisirCompteChezKeycloak(page, KC_ADMIN_LOGIN)
   await saisirChezKeycloak(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
 
   await expect(page).toHaveURL((url) => url.pathname === '/admin/audit', { timeout: 30_000 })
@@ -194,7 +261,7 @@ test('une reconnexion SSO ne se lit pas comme une création', async ({ page }) =
   // connexion, et non recopier le mode de provisionnement configuré. C'est un
   // vrai défaut trouvé par cette campagne — chaque connexion s'affichait
   // « création automatique », y compris quand rien n'avait été créé.
-  await seConnecterParSso(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
+  await seConnecterParSso(page, KC_ADMIN_LOGIN)
 
   await page.goto('/admin/audit')
   await expect(page.locator('h1')).toHaveText('Journal', { timeout: 30_000 })
@@ -207,7 +274,11 @@ test('la session reste locale : un cookie HttpOnly, pas un jeton du fournisseur'
   page,
   context,
 }) => {
-  await seConnecterParSso(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
+  // Une session SSO **sans que le navigateur ait jamais vu le fournisseur** :
+  // c'est pourtant la même session, et les cookies de Keycloak ne sont pas dans
+  // le navigateur. On la refait donc par la page du fournisseur, qui est le cas
+  // où les deux origines coexistent.
+  await seConnecterChezKeycloak(page, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
 
   const cookies = await context.cookies()
@@ -249,7 +320,7 @@ test('le mot de passe local reste valable après un rattachement SSO (porte de s
 test('le compte SSO n’ouvre pas les jetons d’API d’un autre compte', async ({ page }) => {
   // Le compte `user` est propre au fournisseur : aucune session locale ne
   // traîne, et son onglet « API » ne montre que ses propres jetons.
-  await seConnecterParSso(page, KC_USER_LOGIN, KC_USER_PASSWORD)
+  await seConnecterParSso(page, KC_USER_LOGIN)
   await expect(page).toHaveURL((url) => url.pathname === '/', { timeout: 30_000 })
 
   await page.goto('/account/api')
@@ -302,10 +373,10 @@ test('des droits différents selon le compte, appliqués sans reconnexion', asyn
   //    livré `lecteur` — donc **les mêmes droits** au départ.
   const sessionImpr = await browser.newContext()
   const pageImpr = await sessionImpr.newPage()
-  await seConnecterParSso(pageImpr, KC_IMPRIMEUSE.login, KC_IMPRIMEUSE.motDePasse)
+  await seConnecterParSso(pageImpr, KC_IMPRIMEUSE.login)
   const sessionObs = await browser.newContext()
   const pageObs = await sessionObs.newPage()
-  await seConnecterParSso(pageObs, KC_OBSERVATRICE.login, KC_OBSERVATRICE.motDePasse)
+  await seConnecterParSso(pageObs, KC_OBSERVATRICE.login)
 
   expect(await rolesDe(pageImpr)).toEqual(['lecteur'])
   expect(await rolesDe(pageObs)).toEqual(['lecteur'])
@@ -317,7 +388,7 @@ test('des droits différents selon le compte, appliqués sans reconnexion', asyn
   //    connaître.)
   const sessionAdmin = await browser.newContext()
   const pageAdmin = await sessionAdmin.newPage()
-  await seConnecterParSso(pageAdmin, KC_ADMIN_LOGIN, KC_ADMIN_PASSWORD)
+  await seConnecterParSso(pageAdmin, KC_ADMIN_LOGIN)
 
   const creation = await pageAdmin.request.post('/api/roles', {
     data: {
@@ -367,7 +438,7 @@ test('des droits différents selon le compte, appliqués sans reconnexion', asyn
 
 test('un compte au rôle livré ne peut que consulter', async ({ page }) => {
   // *observatrice* est restée au rôle par défaut : catalogue, et rien d'autre.
-  await seConnecterParSso(page, KC_OBSERVATRICE.login, KC_OBSERVATRICE.motDePasse)
+  await seConnecterParSso(page, KC_OBSERVATRICE.login)
   await expect(page.locator('h1')).toContainText('Models')
 
   expect(await deposer(page, 'e2e-refus-lecteur.txt')).toBe(403)
@@ -388,7 +459,7 @@ test('un rôle porté chez Keycloak ne donne aucun droit dans easy3d', async ({ 
   // dit, et easy3d ne le lit pas. La connexion réussit (l'identité est bonne),
   // mais le compte local naît avec le rôle livré — aucune remontée de
   // privilège par le fournisseur, même quand celui-ci s'appelle Keycloak.
-  await seConnecterParSso(page, KC_SUPERUSER.login, KC_SUPERUSER.motDePasse)
+  await seConnecterParSso(page, KC_SUPERUSER.login)
   await expect(page.locator('.sidebar-user__who')).toHaveText(KC_SUPERUSER.login)
 
   expect(KC_SUPERUSER.rolesKeycloak).toContain('admin')

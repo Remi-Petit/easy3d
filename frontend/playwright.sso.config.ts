@@ -94,6 +94,11 @@ export default defineConfig({
         // `auto` : une première connexion SSO inconnue crée le compte et lui
         // donne le rôle livré `lecteur`.
         EASY3D_OIDC_PROVISIONING: 'auto',
+        // Connexion **d'un clic** de la page `/dev/login` : le mot de passe du
+        // royaume est présenté au point d'échange de jetons, au lieu de faire
+        // taper celui-ci sur la page du fournisseur. Fermé par défaut partout
+        // ailleurs — c'est ce drapeau qu'on éprouve ici.
+        EASY3D_OIDC_DEV_LOGIN: '1',
         // Second fournisseur, à côté du principal : la page de connexion doit
         // afficher **deux** boutons, et les deux doivent mener quelque part.
         EASY3D_OIDC_PROVIDERS: JSON.stringify([
