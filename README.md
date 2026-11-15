@@ -59,7 +59,7 @@ Seule exception : les partages de fichiers virtualisés (Docker Desktop sous Win
   refuse le moindre avertissement du compilateur.
 
 <!-- langues:start -->
-**28 langues** : Français, English, Deutsch, Español, Português, Italiano, Nederlands, Svenska, Dansk, Norsk bokmål, Русский, Українська, Polski, Čeština, Slovenčina, Hrvatski, Română, 中文, 日本語, 한국어, Bahasa Indonesia, Tiếng Việt, Türkçe, Ελληνικά, Suomi, Magyar, Català, Български — 522 clés, traduites à 100 %.
+**28 langues** : Français, English, Deutsch, Español, Português, Italiano, Nederlands, Svenska, Dansk, Norsk bokmål, Русский, Українська, Polski, Čeština, Slovenčina, Hrvatski, Română, 中文, 日本語, 한국어, Bahasa Indonesia, Tiếng Việt, Türkçe, Ελληνικά, Suomi, Magyar, Català, Български — 523 clés, traduites à 100 %.
 <!-- langues:end -->
 
 ## Aperçu
