@@ -20,6 +20,10 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { class: 'dark' },
+      // Icône de l'onglet (voir `public/favicon.svg`) : le logo de la sidebar,
+      // en SVG — net à 16 px comme à 512, et un seul fichier à livrer. Sans
+      // elle, le navigateur affichait sa page blanche générique.
+      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     },
   },
   // Internationalisation. La langue vit dans un cookie, pas dans l'URL

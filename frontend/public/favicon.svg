@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Icône de l'onglet : reprise exacte du logo de la sidebar
+  (`frontend/app/assets/css/main.css`, règle `.logo`) — carré arrondi, dégradé
+  indigo → cyan, « 3D » en blanc. Un SVG plutôt qu'un PNG : net à toutes les
+  tailles (16 px de l'onglet comme 512 px d'un raccourci), et un seul fichier à
+  livrer.
+
+  `rx="18"` pour 64 : même rayon proportionnel que le logo (11 sur 40), et le
+  texte reprend le poids 800. La police est prise dans la pile système du
+  navigateur — un SVG ne peut pas embarquer une webfont sans l'inliner, et le
+  « 3D » reste lisible avec n'importe laquelle de ces familles.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="easy3d">
+  <defs>
+    <linearGradient id="easy3d-logo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#easy3d-logo)"/>
+  <text
+    x="32"
+    y="42"
+    text-anchor="middle"
+    font-family="'Segoe UI', Inter, system-ui, -apple-system, sans-serif"
+    font-size="29"
+    font-weight="800"
+    letter-spacing="-0.5"
+    fill="#ffffff"
+  >3D</text>
+</svg>
