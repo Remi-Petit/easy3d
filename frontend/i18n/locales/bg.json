@@ -11,7 +11,8 @@
     "admin": "Администрация",
     "accounts": "Профили",
     "journal": "Дневник",
-    "account": "Моят профил"
+    "account": "Моят профил",
+    "updateAvailable": "Налична е нова версия: v{version}"
   },
   "status": {
     "live": "в реално време",

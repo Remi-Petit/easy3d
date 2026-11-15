@@ -11,7 +11,8 @@
     "admin": "관리",
     "accounts": "계정",
     "journal": "기록",
-    "account": "내 계정"
+    "account": "내 계정",
+    "updateAvailable": "새 버전이 있습니다: v{version}"
   },
   "status": {
     "live": "실시간",

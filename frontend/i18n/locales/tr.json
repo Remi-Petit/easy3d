@@ -11,7 +11,8 @@
     "admin": "Yönetim",
     "accounts": "Hesaplar",
     "journal": "Günlük",
-    "account": "Hesabım"
+    "account": "Hesabım",
+    "updateAvailable": "Yeni sürüm mevcut: v{version}"
   },
   "status": {
     "live": "gerçek zamanlı",

@@ -11,7 +11,8 @@
     "admin": "Amministrazione",
     "accounts": "Account",
     "journal": "Registro",
-    "account": "Il mio account"
+    "account": "Il mio account",
+    "updateAvailable": "Nuova versione disponibile: v{version}"
   },
   "status": {
     "live": "tempo reale",

@@ -11,7 +11,8 @@
     "admin": "Administration",
     "accounts": "Konton",
     "journal": "Logg",
-    "account": "Mitt konto"
+    "account": "Mitt konto",
+    "updateAvailable": "Ny version tillgänglig: v{version}"
   },
   "status": {
     "live": "realtid",

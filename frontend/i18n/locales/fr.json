@@ -11,7 +11,8 @@
     "admin": "Administration",
     "accounts": "Comptes",
     "journal": "Journal",
-    "account": "Mon compte"
+    "account": "Mon compte",
+    "updateAvailable": "Nouvelle version disponible : v{version}"
   },
   "status": {
     "live": "temps réel",

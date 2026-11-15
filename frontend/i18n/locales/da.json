@@ -11,7 +11,8 @@
     "admin": "Administration",
     "accounts": "Konti",
     "journal": "Log",
-    "account": "Min konto"
+    "account": "Min konto",
+    "updateAvailable": "Ny version tilgængelig: v{version}"
   },
   "status": {
     "live": "realtid",

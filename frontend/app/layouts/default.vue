@@ -61,6 +61,25 @@ onMounted(() => {
 // d'afficher la page — inutile de redemander.
 const { user: authUser, status: authStatus, signOut, can } = useAuth()
 
+// Nouvelle version publiée : mettre à jour l'installation est un acte
+// d'administration, c'est donc à elle qu'on s'adresse (`config.read`). Sans
+// comptes, `can()` répond `true` partout — la pastille suit le reste de
+// l'administration.
+//
+// La vérification est demandée **une fois** par chargement de l'application, et
+// l'endpoint la met en cache six heures (voir `useUpdate` et
+// `server/api/update.get.ts`) : aucun sondage répété côté navigateur.
+const {
+  latest: updateLatest,
+  available: updateAvailable,
+  url: updateUrl,
+  refresh: refreshUpdate,
+} = useUpdate()
+const showUpdate = computed(() => updateAvailable.value && can(PERM.configRead))
+onMounted(() => {
+  if (can(PERM.configRead)) void refreshUpdate()
+})
+
 /** `true` sur la page des comptes (`/admin/accounts`). */
 const isAccounts = computed(() => route.path.startsWith('/admin/accounts'))
 
@@ -398,6 +417,25 @@ const navUi = {
               <UIcon name="i-lucide-log-out" />
             </button>
           </div>
+
+          <!-- Nouvelle version publiée (`GET /api/update`, cache serveur de six
+               heures) : un lien vers la page de la release, sur sa **propre
+               ligne** — l'état du backend, la version et l'icône du dépôt
+               saturent déjà la dernière. Absente quand tout est à jour, quand
+               la vérification a échoué (hors ligne, miroir sans API) et pour
+               qui n'a pas le droit d'entrer dans les réglages. -->
+          <a
+            v-if="showUpdate"
+            :href="updateUrl"
+            class="update"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="$t('nav.updateAvailable', { version: updateLatest })"
+            :aria-label="$t('nav.updateAvailable', { version: updateLatest })"
+          >
+            <UIcon name="i-lucide-arrow-up-right" />
+            <span>v{{ updateLatest }}</span>
+          </a>
 
           <!-- État du backend et version du projet sur la **même ligne**, sous le
                compte : la version ferme la ligne, à droite de la colonne. Absent

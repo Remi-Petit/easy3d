@@ -11,7 +11,8 @@
     "admin": "Administration",
     "accounts": "Konten",
     "journal": "Audit-Log",
-    "account": "Mein Konto"
+    "account": "Mein Konto",
+    "updateAvailable": "Neue Version verfügbar: v{version}"
   },
   "status": {
     "live": "live",

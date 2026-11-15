@@ -11,7 +11,8 @@
     "admin": "Adminisztráció",
     "accounts": "Fiókok",
     "journal": "Napló",
-    "account": "Fiókom"
+    "account": "Fiókom",
+    "updateAvailable": "Új verzió érhető el: v{version}"
   },
   "status": {
     "live": "valós idő",

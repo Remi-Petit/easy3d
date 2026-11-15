@@ -11,7 +11,8 @@
     "admin": "管理",
     "accounts": "アカウント",
     "journal": "ジャーナル",
-    "account": "マイアカウント"
+    "account": "マイアカウント",
+    "updateAvailable": "新しいバージョンがあります: v{version}"
   },
   "status": {
     "live": "リアルタイム",

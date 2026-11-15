@@ -11,7 +11,8 @@
     "admin": "Administracija",
     "accounts": "Računi",
     "journal": "Dnevnik",
-    "account": "Moj račun"
+    "account": "Moj račun",
+    "updateAvailable": "Dostupna je nova verzija: v{version}"
   },
   "status": {
     "live": "u stvarnom vremenu",

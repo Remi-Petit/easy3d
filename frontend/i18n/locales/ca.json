@@ -11,7 +11,8 @@
     "admin": "Administració",
     "accounts": "Comptes",
     "journal": "Registre",
-    "account": "El meu compte"
+    "account": "El meu compte",
+    "updateAvailable": "Hi ha una versió nova: v{version}"
   },
   "status": {
     "live": "temps real",

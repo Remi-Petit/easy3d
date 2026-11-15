@@ -419,6 +419,44 @@ body {
   outline-offset: 2px;
 }
 
+/* Pastille « nouvelle version » (`GET /api/update`, voir `useUpdate`) : un lien
+   vers la release, sur sa **propre ligne** du pied — l'état du backend, la
+   version et l'icône du dépôt saturent déjà la dernière. `align-self` la garde
+   à sa largeur : étirée, le fond ferait un bandeau sur toute la colonne. */
+.update {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  /* Même teinte que l'accent, très diluée (comme le halo de `.dot`) : la
+     pastille se remarque sans crier à côté des libellés gris du pied. */
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.update svg {
+  /* L'icône suit la taille du texte au lieu du `size-5` par défaut de `UIcon`,
+     qui déborderait de la pastille. */
+  width: 14px;
+  height: 14px;
+}
+
+.update:hover {
+  background: rgba(99, 102, 241, 0.26);
+}
+
+.update:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .dot {
   width: 8px;
   height: 8px;

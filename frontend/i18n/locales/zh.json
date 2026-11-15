@@ -11,7 +11,8 @@
     "admin": "管理",
     "accounts": "账号",
     "journal": "日志",
-    "account": "我的账号"
+    "account": "我的账号",
+    "updateAvailable": "有新版本可用：v{version}"
   },
   "status": {
     "live": "实时",

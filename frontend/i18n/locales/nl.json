@@ -11,7 +11,8 @@
     "admin": "Beheer",
     "accounts": "Accounts",
     "journal": "Logboek",
-    "account": "Mijn account"
+    "account": "Mijn account",
+    "updateAvailable": "Nieuwe versie beschikbaar: v{version}"
   },
   "status": {
     "live": "realtime",

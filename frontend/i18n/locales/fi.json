@@ -11,7 +11,8 @@
     "admin": "Ylläpito",
     "accounts": "Tilit",
     "journal": "Loki",
-    "account": "Oma tili"
+    "account": "Oma tili",
+    "updateAvailable": "Uusi versio saatavilla: v{version}"
   },
   "status": {
     "live": "reaaliaikainen",

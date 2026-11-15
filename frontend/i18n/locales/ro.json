@@ -11,7 +11,8 @@
     "admin": "Administrare",
     "accounts": "Conturi",
     "journal": "Jurnal",
-    "account": "Contul meu"
+    "account": "Contul meu",
+    "updateAvailable": "Versiune nouă disponibilă: v{version}"
   },
   "status": {
     "live": "timp real",

@@ -11,7 +11,8 @@
     "admin": "Administrasjon",
     "accounts": "Kontoer",
     "journal": "Logg",
-    "account": "Min konto"
+    "account": "Min konto",
+    "updateAvailable": "Ny versjon tilgjengelig: v{version}"
   },
   "status": {
     "live": "sanntid",

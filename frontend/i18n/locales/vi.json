@@ -11,7 +11,8 @@
     "admin": "Quản trị",
     "accounts": "Tài khoản",
     "journal": "Nhật ký",
-    "account": "Tài khoản của tôi"
+    "account": "Tài khoản của tôi",
+    "updateAvailable": "Đã có phiên bản mới: v{version}"
   },
   "status": {
     "live": "thời gian thực",

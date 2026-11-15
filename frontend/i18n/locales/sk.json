@@ -11,7 +11,8 @@
     "admin": "Správa",
     "accounts": "Účty",
     "journal": "Denník",
-    "account": "Môj účet"
+    "account": "Môj účet",
+    "updateAvailable": "K dispozícii je nová verzia: v{version}"
   },
   "status": {
     "live": "v reálnom čase",

@@ -11,7 +11,8 @@
     "admin": "Администрирование",
     "accounts": "Аккаунты",
     "journal": "Журнал",
-    "account": "Мой аккаунт"
+    "account": "Мой аккаунт",
+    "updateAvailable": "Доступна новая версия: v{version}"
   },
   "status": {
     "live": "реальное время",

@@ -11,7 +11,8 @@
     "admin": "Administrasi",
     "accounts": "Akun",
     "journal": "Log",
-    "account": "Akun saya"
+    "account": "Akun saya",
+    "updateAvailable": "Versi baru tersedia: v{version}"
   },
   "status": {
     "live": "waktu nyata",
