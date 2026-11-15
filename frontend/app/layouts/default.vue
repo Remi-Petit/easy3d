@@ -21,6 +21,13 @@ const { t } = useI18n()
  */
 const version = useRuntimeConfig().public.version
 
+/**
+ * Dépôt du projet, cible de l'icône GitHub posée à côté de la version : on
+ * cherche le code au même endroit que le numéro de build, quand on doute de ce
+ * qui tourne.
+ */
+const repoUrl = useRuntimeConfig().public.repoUrl
+
 // Barre de filtre globale (recherche, types, tri), partagée avec les pages.
 const { query, sortMode, types, availableTypes, hasTypeFilter, sortLabel, sortIcon, cycleSort, toggle, clearTypes } =
   useFilter()
@@ -400,7 +407,22 @@ const navUi = {
             <span class="status">
               <span class="dot" :class="backendState" /> {{ statusLabel }}
             </span>
-            <span class="version">v{{ version }}</span>
+            <!-- Version et son lien vers le dépôt, dans le même bloc : l'icône
+                 se range **après** le numéro, donc la ligne ferme toujours à
+                 droite de la colonne. -->
+            <span class="version">
+              <span>v{{ version }}</span>
+              <a
+                :href="repoUrl"
+                class="version__repo"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="GitHub"
+                aria-label="GitHub"
+              >
+                <UIcon name="i-lucide-github" />
+              </a>
+            </span>
           </div>
         </div>
       </template>

@@ -52,6 +52,10 @@ export default defineNuxtConfig({
     public: {
       // Version du projet, telle quelle dans l'interface (pied de sidebar).
       version: pkg.version,
+      // Dépôt du projet : cible de l'icône GitHub posée à côté de la version
+      // (voir `layouts/default.vue`). Surchargeable pour un fork ou un miroir
+      // hébergé ailleurs, l'interface ne doit pas renvoyer vers l'amont.
+      repoUrl: process.env.NUXT_PUBLIC_REPO_URL || 'https://github.com/Remi-Petit/easy3d',
       // Base WebSocket vue par le navigateur. Vide par défaut : les connexions
       // visent l'origine qui sert l'interface, Nitro relayant `/ws` et
       // `/collab/*` vers le backend (voir `server/routes/`). À poser seulement
